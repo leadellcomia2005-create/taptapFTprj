@@ -41,7 +41,8 @@
       "$orderId": {
         ".read": "auth != null",
         "$messageId": {
-          ".write": "auth != null && newData.child('senderId').val() == auth.uid"
+          ".write": "auth != null && newData.child('senderId').val() == auth.uid",
+          ".validate": "newData.hasChildren(['text', 'senderId', 'senderName', 'senderRole', 'createdAt'])"
         }
       }
     },

@@ -68,6 +68,12 @@ role claims.
 Only customers can access the storefront after login. Employee roles are
 redirected directly to their authorized operational workspace.
 
+Customer chatbot messages are also saved to the Staff Chat Support inbox.
+Staff can select the customer's conversation and reply; the reply appears
+inside that customer's chatbot. The walk-in POS supports increasing,
+decreasing, removing, and clearing line items before payment, with totals
+recalculated immediately.
+
 ## Local setup
 
 1. Install Node.js 22 or newer.

@@ -125,13 +125,25 @@ button { font: inherit; }
 .reconciliation-list dt { color: var(--muted); font-size: 10px; font-weight: 600; }
 .reconciliation-list dd { margin: 0; font-size: 11px; font-weight: 800; }
 .support-chat { min-height: 630px; display: flex; flex-direction: column; }
-.support-message-list { min-height: 430px; max-height: 55vh; overflow-y: auto; padding: 20px; background: var(--paper); border-radius: 12px; }
+.support-layout { min-height: 500px; display: grid; grid-template-columns: 290px minmax(0,1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; }
+.support-conversations { overflow-y: auto; padding: 15px; background: var(--paper); border-right: 1px solid var(--line); }
+.support-conversations > strong { display: block; margin: 4px 5px 12px; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.support-conversations > button { width: 100%; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 9px; margin-bottom: 6px; padding: 10px; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 10px; }
+.support-conversations > button:hover,.support-conversations > button.active { border-color: var(--line); background: white; }
+.support-conversations > button > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--red); border-radius: 50%; font-size: 10px; font-weight: 900; }
+.support-conversations button strong,.support-conversations button small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-conversations button strong { font-size: 9px; }.support-conversations button small { margin-top: 3px; color: var(--muted); font-size: 8px; }.support-conversations button time { color: var(--muted); font-size: 7px; }
+.support-thread { min-width: 0; display: flex; flex-direction: column; background: white; }
+.support-thread > header { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.support-thread > header strong,.support-thread > header small { display: block; }.support-thread > header strong { font-size: 11px; }.support-thread > header small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.support-message-list { min-height: 385px; max-height: 55vh; flex: 1; overflow-y: auto; padding: 20px; background: var(--paper); }
 .support-message-list > div:not(.empty-chat) { width: min(70%,540px); margin-bottom: 12px; padding: 12px 14px; background: white; border-radius: 13px; }
 .support-message-list .message-own { margin-left: auto; color: white; background: var(--red) !important; }
 .support-message-list strong,.support-message-list small,.support-message-list time { display: block; }
 .support-message-list strong { font-size: 10px; }.support-message-list small { opacity: .65; font-size: 7px; text-transform: uppercase; }.support-message-list p { margin: 6px 0; font-size: 11px; }.support-message-list time { opacity: .6; font-size: 7px; }
 .empty-chat { padding: 35px; color: var(--muted); text-align: center; font-size: 10px; }
 .support-compose { display: flex; gap: 8px; margin-top: 12px; }
+.support-thread .support-compose { margin: 0; padding: 12px; border-top: 1px solid var(--line); }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .setting-row span,.setting-row strong,.setting-row small { display: block; }
 .setting-row strong { font-size: 10px; }.setting-row small { margin-top: 3px; color: var(--muted); font-size: 8px; }
@@ -141,6 +153,13 @@ button { font: inherit; }
 .assigned-list > button span:first-child,.assigned-list > button strong,.assigned-list > button small { display: block; }
 .assigned-list > button small { max-width: 220px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .rider-map .delivery-map { height: 360px; border-radius: 12px; }
+.pos-cart-item { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pos-cart-item > div:first-child strong,.pos-cart-item > div:first-child small { display: block; }
+.pos-cart-item > div:first-child strong { font-size: 10px; }.pos-cart-item > div:first-child small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.pos-quantity { display: grid; grid-template-columns: 28px 30px 28px; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.pos-quantity button { height: 28px; color: var(--ink); border: 0; background: var(--paper); font-weight: 900; }
+.pos-quantity button:disabled { color: #bbb; }.pos-quantity span { text-align: center; font-size: 9px; font-weight: 800; }
+.pos-remove { grid-column: 1 / -1; justify-self: start; padding: 0; color: var(--red); border: 0; background: transparent; font-size: 8px; font-weight: 800; }
 
 .assistant-launcher { position: fixed; z-index: 999; right: 24px; bottom: 24px; width: 54px; height: 54px; color: white; border: 0; background: var(--red); border-radius: 50% 50% 8px 50%; box-shadow: 0 12px 28px rgba(180,40,23,.32); font-weight: 900; }
 .floating-checkout + .assistant-launcher { bottom: 90px; }
@@ -155,6 +174,7 @@ button { font: inherit; }
   .app-header { flex-wrap: wrap; gap: 12px; }.app-header .role-navigation { order: 3; width: 100%; max-width: none; margin: 0; padding-top: 4px; }.header-actions { margin-left: auto; }.user-chip div { display: none; }
   .section-title,.dashboard-heading { align-items: flex-start; flex-direction: column; }
   .module-heading { flex-direction: column; }
+  .support-layout { grid-template-columns: 1fr; }.support-conversations { max-height: 210px; border-right: 0; border-bottom: 1px solid var(--line); }
   .service-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 560px) {

@@ -402,21 +402,68 @@ function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
 
 function SupportChat({ messages, user, notify }) {
   const [text, setText] = useState("");
+  const conversations = useMemo(() => {
+    const grouped = new Map();
+    for (const message of messages) {
+      if (!message.customerId) continue;
+      const current = grouped.get(message.customerId) || {
+        customerId: message.customerId,
+        customerName: message.customerName || "Customer",
+        messages: []
+      };
+      current.messages.push(message);
+      if (message.customerName) current.customerName = message.customerName;
+      grouped.set(message.customerId, current);
+    }
+    return [...grouped.values()].sort((a, b) => {
+      const aTime = a.messages.at(-1)?.createdAt || 0;
+      const bTime = b.messages.at(-1)?.createdAt || 0;
+      return bTime - aTime;
+    });
+  }, [messages]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const selectedConversation = conversations.find((conversation) => conversation.customerId === selectedCustomerId) || conversations[0];
+  const visibleMessages = selectedConversation?.messages || [];
+
+  useEffect(() => {
+    if (!selectedCustomerId && conversations[0]) setSelectedCustomerId(conversations[0].customerId);
+    if (selectedCustomerId && !conversations.some((conversation) => conversation.customerId === selectedCustomerId)) {
+      setSelectedCustomerId(conversations[0]?.customerId || "");
+    }
+  }, [conversations, selectedCustomerId]);
+
   const send = async (event) => {
     event.preventDefault();
-    if (!text.trim()) return;
-    await sendSupportMessage(text.trim(), user);
+    if (!text.trim() || !selectedConversation) return;
+    await sendSupportMessage(text.trim(), user, {
+      customerId: selectedConversation.customerId,
+      customerName: selectedConversation.customerName,
+      conversationId: selectedConversation.customerId
+    });
     setText("");
-    notify("Support message sent.");
+    notify(`Reply sent to ${selectedConversation.customerName}.`);
   };
   return (
     <div className="dashboard-card support-chat">
       <div className="module-heading"><div><p className="eyebrow text-danger">Firebase message history</p><h3>Customer and internal support</h3></div><span className="module-note">Use this channel for order questions and admin coordination.</span></div>
-      <div className="support-message-list">
-        {messages.length === 0 && <div className="empty-chat">No support messages yet.</div>}
-        {messages.map((message) => <div className={message.senderId === user.uid ? "message-own" : "message-other"} key={message.id}><strong>{message.senderName} <small>{message.senderRole}</small></strong><p>{message.text}</p><time>{new Date(message.createdAt).toLocaleString("en-PH")}</time></div>)}
+      <div className="support-layout">
+        <aside className="support-conversations">
+          <strong>Customer conversations</strong>
+          {conversations.length === 0 && <div className="empty-chat">No customer chats yet.</div>}
+          {conversations.map((conversation) => {
+            const latest = conversation.messages.at(-1);
+            return <button className={selectedConversation?.customerId === conversation.customerId ? "active" : ""} key={conversation.customerId} onClick={() => setSelectedCustomerId(conversation.customerId)}><span>{conversation.customerName.slice(0, 1).toUpperCase()}</span><div><strong>{conversation.customerName}</strong><small>{latest?.text}</small></div><time>{latest ? new Date(latest.createdAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }) : ""}</time></button>;
+          })}
+        </aside>
+        <div className="support-thread">
+          <header><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer chatbot conversation" : "Messages will appear here"}</small></header>
+          <div className="support-message-list">
+            {visibleMessages.length === 0 && <div className="empty-chat">No support messages yet.</div>}
+            {visibleMessages.map((message) => <div className={message.senderId === user.uid ? "message-own" : "message-other"} key={message.id}><strong>{message.senderName} <small>{message.senderRole}</small></strong><p>{message.text}</p><time>{new Date(message.createdAt).toLocaleString("en-PH")}</time></div>)}
+          </div>
+          <form className="support-compose" onSubmit={send}><input className="form-control" disabled={!selectedConversation} value={text} onChange={(event) => setText(event.target.value)} placeholder={selectedConversation ? `Reply to ${selectedConversation.customerName}...` : "Select a customer conversation"} /><button className="btn btn-danger" disabled={!selectedConversation}>Send</button></form>
+        </div>
       </div>
-      <form className="support-compose" onSubmit={send}><input className="form-control" value={text} onChange={(event) => setText(event.target.value)} placeholder="Type a support response..." /><button className="btn btn-danger">Send</button></form>
     </div>
   );
 }
@@ -553,8 +600,16 @@ function StaffWorkspace({ section, user, orders, inventory, shiftLogs, messages,
   const posTotal = posCart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const add = (product) => setPosCart((current) => {
     const found = current.find((item) => item.id === product.id);
+    if (found?.qty >= product.stock) {
+      notify(`Only ${product.stock} ${product.name} item(s) are available.`);
+      return current;
+    }
     return found ? current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1 } : item) : [...current, { ...product, qty: 1 }];
   });
+  const decrease = (productId) => setPosCart((current) => current
+    .map((item) => item.id === productId ? { ...item, qty: item.qty - 1 } : item)
+    .filter((item) => item.qty > 0));
+  const remove = (productId) => setPosCart((current) => current.filter((item) => item.id !== productId));
   const complete = async () => {
     const orderId = await createOrder({
       customerId: "walk-in",
@@ -574,7 +629,7 @@ function StaffWorkspace({ section, user, orders, inventory, shiftLogs, messages,
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Fast counter entry</p><h2>Walk-in POS</h2></div></div>
       <div className="row g-3">
         <div className="col-xl-8"><div className="row g-3">{inventory.map((product) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><div className="menu-photo" style={{ backgroundPosition: product.imagePosition }} /><strong>{product.name}</strong><span>{currency(product.price)} · {product.stock} available</span></button></div>)}</div></div>
-        <div className="col-xl-4"><div className="dashboard-card sticky-pos"><h3>Current walk-in order</h3>{posCart.map((item) => <div className="d-flex justify-content-between py-2 border-bottom" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.qty * item.price)}</strong></div>)}<div className="checkout-total"><span>Total</span><strong>{currency(posTotal)}</strong></div><button className="btn btn-danger w-100" disabled={!posCart.length} onClick={complete}>Accept payment and print receipt</button></div></div>
+        <div className="col-xl-4"><div className="dashboard-card sticky-pos"><div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>{posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}{posCart.map((item) => <div className="pos-cart-item" key={item.id}><div><strong>{item.name}</strong><small>{currency(item.price)} each</small></div><div className="pos-quantity"><button onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>−</button><span>{item.qty}</span><button disabled={item.qty >= item.stock} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button></div><strong>{currency(item.qty * item.price)}</strong><button className="pos-remove" onClick={() => remove(item.id)}>Remove</button></div>)}<div className="checkout-total"><span>Total ({posCart.reduce((sum, item) => sum + item.qty, 0)} items)</span><strong>{currency(posTotal)}</strong></div><button className="btn btn-danger w-100" disabled={!posCart.length} onClick={complete}>Accept payment and print receipt</button></div></div>
       </div>
     </main>
   );
@@ -724,12 +779,35 @@ function Assistant({ user, menu }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([{ from: "bot", text: "Hi! Ask about menu items, allergens, store details or your order." }]);
+  const receivedSupportReplies = useRef(new Set());
+
+  useEffect(() => subscribeSupportMessages((supportMessages) => {
+    const newReplies = supportMessages.filter((message) =>
+      message.senderRole === "staff" && !receivedSupportReplies.current.has(message.id)
+    );
+    if (newReplies.length === 0) return;
+    newReplies.forEach((message) => receivedSupportReplies.current.add(message.id));
+    setMessages((current) => [
+      ...current,
+      ...newReplies.map((message) => ({
+        from: "bot",
+        text: message.text,
+        source: `Staff support · ${message.senderName}`
+      }))
+    ]);
+  }, user.uid), [user.uid]);
+
   const send = async (event) => {
     event.preventDefault();
     if (!input.trim()) return;
     const message = input.trim();
     setInput("");
     setMessages((current) => [...current, { from: "user", text: message }]);
+    await sendSupportMessage(message, user, {
+      customerId: user.uid,
+      customerName: user.name,
+      conversationId: user.uid
+    });
     try {
       const response = await api.assistant(message, user.uid, { menu: menu.map(({ name, description, allergens, stock }) => ({ name, description, allergens, stock })) });
       setMessages((current) => [...current, { from: "bot", text: response.text, source: response.source }]);
@@ -741,7 +819,7 @@ function Assistant({ user, menu }) {
   return (
     <>
       <button className="assistant-launcher" onClick={() => setOpen(!open)}>AI</button>
-      {open && <aside className="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>Dialogflow + OpenAI</small></div><button onClick={() => setOpen(false)}>×</button></header><div className="assistant-messages">{messages.map((message, index) => <div key={index} className={message.from}><span>{message.text}</span>{message.source && <small>{message.source}</small>}</div>)}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask anything..." /><button>Send</button></form></aside>}
+      {open && <aside className="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>AI answers + live staff support</small></div><button onClick={() => setOpen(false)}>×</button></header><div className="assistant-messages">{messages.map((message, index) => <div key={index} className={message.from}><span>{message.text}</span>{message.source && <small>{message.source}</small>}</div>)}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask AI or contact staff..." /><button>Send</button></form></aside>}
     </>
   );
 }

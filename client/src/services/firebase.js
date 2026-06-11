@@ -302,25 +302,36 @@ export function subscribeAuditLogs(callback) {
   return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
-export function subscribeSupportMessages(callback) {
-  const normalize = (value = {}) => callback(
-    Object.entries(value)
+export function subscribeSupportMessages(callback, customerId = null) {
+  const normalize = (value = {}) => {
+    const messages = Object.entries(value)
       .map(([id, message]) => ({ id, ...message }))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
-  );
+      .filter((message) => !customerId || message.customerId === customerId)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    callback(messages);
+  };
   if (firebaseEnabled) return onValue(ref(db, "messages/support"), (snapshot) => normalize(snapshot.val()));
   const emit = () => normalize(readDemoData().messages.support);
   emit();
   window.addEventListener("taptap-demo-data", emit);
-  return () => window.removeEventListener("taptap-demo-data", emit);
+  window.addEventListener("storage", emit);
+  return () => {
+    window.removeEventListener("taptap-demo-data", emit);
+    window.removeEventListener("storage", emit);
+  };
 }
 
-export async function sendSupportMessage(text, actor) {
+export async function sendSupportMessage(text, actor, conversation = {}) {
+  const customerId = conversation.customerId || (actor.role === "customer" ? actor.uid : null);
   const message = {
     text,
     senderId: actor.uid,
     senderName: actor.name,
     senderRole: actor.role,
+    customerId,
+    customerName: conversation.customerName || (actor.role === "customer" ? actor.name : null),
+    conversationId: conversation.conversationId || customerId,
+    channel: "support",
     createdAt: Date.now()
   };
   if (firebaseEnabled) return push(ref(db, "messages/support"), message);

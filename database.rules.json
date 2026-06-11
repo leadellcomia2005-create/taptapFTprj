@@ -1,0 +1,53 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "public": {
+      "menu": {
+        ".read": true,
+        ".write": "auth != null && auth.token.role == 'owner'"
+      },
+      "store": {
+        ".read": true,
+        ".write": "auth != null && auth.token.role == 'owner'"
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+        ".write": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
+        "role": {
+          ".write": "auth != null && auth.token.role == 'owner'"
+        }
+      }
+    },
+    "orders": {
+      "$orderId": {
+        ".read": "auth != null && (data.child('customerId').val() == auth.uid || data.child('riderId').val() == auth.uid || auth.token.role == 'owner' || auth.token.role == 'staff')",
+        ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || auth.token.role == 'rider' || (!data.exists() && newData.child('customerId').val() == auth.uid))"
+      }
+    },
+    "inventory": {
+      ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')"
+    },
+    "riderLocations": {
+      "$riderId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid == $riderId || auth.token.role == 'owner' || auth.token.role == 'staff')"
+      }
+    },
+    "messages": {
+      "$orderId": {
+        ".read": "auth != null",
+        "$messageId": {
+          ".write": "auth != null && newData.child('senderId').val() == auth.uid"
+        }
+      }
+    },
+    "auditLogs": {
+      ".read": "auth != null && auth.token.role == 'owner'",
+      ".write": "auth != null"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "taptap-foodtrip-integrated",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install:all": "npm install --prefix client && npm install --prefix server && npm install --prefix functions",
+    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
+    "build": "npm run build --prefix client",
+    "start": "npm run start --prefix server",
+    "emulators": "firebase emulators:start",
+    "deploy": "npm run build && firebase deploy",
+    "test": "npm run lint --prefix client && npm run test --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "firebase-tools": "^14.16.0"
+  }
+}

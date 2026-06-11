@@ -1,14 +1,19 @@
 import "dotenv/config";
-import admin from "firebase-admin";
+import { applicationDefault, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getDatabase } from "firebase-admin/database";
 
 if (!process.env.FIREBASE_DATABASE_URL) {
   throw new Error("Set FIREBASE_DATABASE_URL before running the seed command.");
 }
 
-admin.initializeApp({
-  credential: admin.credential.applicationDefault(),
+initializeApp({
+  credential: applicationDefault(),
   databaseURL: process.env.FIREBASE_DATABASE_URL
 });
+
+const auth = getAuth();
+const database = getDatabase();
 
 const menu = {
   sisig: { id: "sisig", name: "Sizzling Pork Sisig", category: "Rice Meals", price: 189, imagePosition: "0% 0%", description: "Crispy pork, onions, chili, calamansi and creamy egg.", allergens: ["egg", "soy"], stock: 18, featured: true },
@@ -29,17 +34,17 @@ const accounts = [
 for (const account of accounts) {
   let user;
   try {
-    user = await admin.auth().getUserByEmail(account.email);
+    user = await auth.getUserByEmail(account.email);
   } catch {
-    user = await admin.auth().createUser({
+    user = await auth.createUser({
       email: account.email,
       password: account.password,
       displayName: account.name,
       emailVerified: true
     });
   }
-  await admin.auth().setCustomUserClaims(user.uid, { role: account.role });
-  await admin.database().ref(`users/${user.uid}`).update({
+  await auth.setCustomUserClaims(user.uid, { role: account.role });
+  await database.ref(`users/${user.uid}`).update({
     name: account.name,
     email: account.email,
     role: account.role,
@@ -47,11 +52,11 @@ for (const account of accounts) {
   });
 }
 
-await admin.database().ref("public/menu").set(menu);
-await admin.database().ref("inventory").set(
+await database.ref("public/menu").set(menu);
+await database.ref("inventory").set(
   Object.fromEntries(Object.values(menu).map((item) => [item.id, { name: item.name, stock: item.stock, reorderPoint: 10 }]))
 );
-await admin.database().ref("public/store").set({
+await database.ref("public/store").set({
   name: "Taptap Foodtrip",
   address: "#17 Gemini Street, Pamplona Park, Pamplona Dos, Las Pinas City 1740",
   latitude: 14.4509229,

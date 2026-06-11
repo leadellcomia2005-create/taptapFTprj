@@ -8,7 +8,8 @@
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
     "emulators": "firebase emulators:start",
-    "deploy": "npm run build && firebase deploy",
+    "deploy": "npm run build && firebase deploy --only database",
+    "deploy:paid-services": "npm run build && firebase deploy",
     "test": "npm run lint --prefix client && npm run test --prefix server"
   },
   "devDependencies": {

@@ -19,10 +19,13 @@ export default function CameraProof({ onCapture, onClose }) {
   const capture = () => {
     const video = videoRef.current;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    canvas.toBlob((blob) => blob && onCapture(blob), "image/jpeg", 0.86);
+    const sourceWidth = video.videoWidth || 1280;
+    const sourceHeight = video.videoHeight || 720;
+    const scale = Math.min(1, 960 / sourceWidth);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => blob && onCapture(blob), "image/jpeg", 0.72);
   };
 
   return (

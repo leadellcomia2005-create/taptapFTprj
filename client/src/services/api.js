@@ -1,4 +1,4 @@
-import { getAuthToken } from "./firebase";
+import { getAuthToken } from "./authSession";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -30,6 +30,30 @@ export const api = {
   createPayment: (order) => request("/payments/checkout", {
     method: "POST",
     body: JSON.stringify(order)
+  }),
+  createOrder: (order) => request("/orders", {
+    method: "POST",
+    body: JSON.stringify(order)
+  }),
+  updateOrder: (orderId, values) => request(`/orders/${encodeURIComponent(orderId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(values)
+  }),
+  adjustInventory: (itemId, delta, reason) => request(`/inventory/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ delta, reason })
+  }),
+  updateRiderLocation: (orderId, location) => request("/riders/location", {
+    method: "POST",
+    body: JSON.stringify({ orderId, ...location })
+  }),
+  uploadDeliveryProof: (orderId, dataUrl) => request(`/orders/${encodeURIComponent(orderId)}/proof`, {
+    method: "POST",
+    body: JSON.stringify({ dataUrl })
+  }),
+  saveShiftLog: (entry) => request("/shift-logs", {
+    method: "POST",
+    body: JSON.stringify(entry)
   }),
   sendNotification: (notification) => request("/notifications/sms", {
     method: "POST",

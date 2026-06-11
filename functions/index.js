@@ -1,13 +1,28 @@
 import dialogflow from "@google-cloud/dialogflow";
 import cors from "cors";
 import express from "express";
-import admin from "firebase-admin";
+import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import OpenAI from "openai";
 import twilio from "twilio";
+import {
+  adjustInventoryRecord,
+  canAccessOrder,
+  createOrderRecord,
+  HttpError,
+  listOrdersForUser,
+  saveDeliveryProofRecord,
+  saveRiderLocationRecord,
+  saveShiftLogRecord,
+  updateOrderRecord,
+  validRecordId
+} from "./operations.js";
 
-admin.initializeApp();
+initializeApp();
+const database = () => getDatabase();
 
 const openaiKey = defineSecret("OPENAI_API_KEY");
 const paymongoKey = defineSecret("PAYMONGO_SECRET_KEY");
@@ -27,16 +42,37 @@ const secretValue = (secret) => {
   }
 };
 
+async function verifyUserToken(token) {
+  const decoded = await getAuth().verifyIdToken(token);
+  if (decoded.role) return decoded;
+  const profile = (await database().ref(`users/${decoded.uid}`).once("value")).val() || {};
+  return { ...decoded, role: profile.role || "customer", name: profile.name || decoded.name };
+}
+
 async function authenticate(req, res, next) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentication required." });
   try {
-    req.user = await admin.auth().verifyIdToken(token);
+    req.user = await verifyUserToken(token);
     return next();
   } catch {
     return res.status(401).json({ error: "Invalid authentication token." });
   }
 }
+
+const requireRoles = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user?.role)) return res.status(403).json({ error: `${roles.join(" or ")} access required.` });
+  return next();
+};
+
+const asyncRoute = (handler) => async (req, res) => {
+  try {
+    await handler(req, res);
+  } catch (error) {
+    if (!error.status) console.error(error);
+    res.status(error.status || 500).json({ error: error.status ? error.message : "The server could not complete the request." });
+  }
+};
 
 app.get(route("/status"), (_req, res) => {
   res.json({
@@ -101,49 +137,51 @@ app.post(route("/insights"), authenticate, async (req, res) => {
   }
 });
 
-app.post(route("/payments/checkout"), authenticate, async (req, res) => {
+app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) => {
   const key = secretValue(paymongoKey);
   if (!key) return res.status(503).json({ error: "PayMongo is not configured." });
-  try {
-    const authorization = Buffer.from(`${key}:`).toString("base64");
-    const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-      method: "POST",
-      headers: { Authorization: `Basic ${authorization}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            billing: { email: req.body.customerEmail, name: req.body.customerName, phone: req.body.phone },
-            description: `Taptap Foodtrip ${req.body.orderId}`,
-            line_items: req.body.items.map((item) => ({ currency: "PHP", amount: Math.round(item.price * 100), name: item.name, quantity: item.qty })),
-            payment_method_types: ["gcash"],
-            success_url: req.body.successUrl,
-            cancel_url: req.body.cancelUrl,
-            reference_number: req.body.orderId,
-            send_email_receipt: true,
-            show_description: true,
-            show_line_items: true
-          }
+  if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
+  const order = (await database().ref(`orders/${req.body.orderId}`).once("value")).val();
+  if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
+  const authorization = Buffer.from(`${key}:`).toString("base64");
+  const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+    method: "POST",
+    headers: { Authorization: `Basic ${authorization}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data: {
+        attributes: {
+          billing: { email: order.customerEmail, name: order.customerName, phone: order.phone },
+          description: `Taptap Foodtrip ${req.body.orderId}`,
+          line_items: order.items.map((item) => ({ currency: "PHP", amount: Math.round(item.price * 100), name: item.name, quantity: item.qty })),
+          payment_method_types: ["gcash"],
+          success_url: req.body.successUrl,
+          cancel_url: req.body.cancelUrl,
+          reference_number: req.body.orderId,
+          send_email_receipt: true,
+          show_description: true,
+          show_line_items: true
         }
-      })
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.errors?.[0]?.detail || "PayMongo request failed.");
-    return res.json({ id: payload.data.id, checkoutUrl: payload.data.attributes.checkout_url });
-  } catch (error) {
-    return res.status(502).json({ error: error.message });
-  }
-});
+      }
+    })
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new HttpError(502, payload.errors?.[0]?.detail || "PayMongo request failed.");
+  res.json({ id: payload.data.id, checkoutUrl: payload.data.attributes.checkout_url });
+}));
 
-app.post(route("/notifications/sms"), authenticate, async (req, res) => {
+app.post(route("/notifications/sms"), authenticate, requireRoles("owner", "staff"), async (req, res) => {
   const sid = secretValue(twilioSid);
   const token = secretValue(twilioToken);
-  if (!sid || !token || !process.env.TWILIO_FROM_NUMBER || !req.body.to) return res.json({ sent: false });
+  if (!validRecordId(req.body.orderId)) return res.status(400).json({ error: "Invalid order ID." });
+  const order = (await database().ref(`orders/${req.body.orderId}`).once("value")).val();
+  if (!order) return res.status(404).json({ error: "Order not found." });
+  if (!sid || !token || !process.env.TWILIO_FROM_NUMBER || !order.phone) return res.json({ sent: false });
   try {
     const client = twilio(sid, token);
     const message = await client.messages.create({
       from: process.env.TWILIO_FROM_NUMBER,
-      to: req.body.to,
-      body: `Taptap Foodtrip: Order ${req.body.orderId} is now ${String(req.body.status).replaceAll("-", " ")}.`
+      to: order.phone,
+      body: `Taptap Foodtrip: Order ${req.body.orderId} is now ${String(order.status).replaceAll("-", " ")}.`
     });
     return res.json({ sent: true, sid: message.sid });
   } catch (error) {
@@ -151,11 +189,45 @@ app.post(route("/notifications/sms"), authenticate, async (req, res) => {
   }
 });
 
-app.post(route("/admin/roles"), authenticate, async (req, res) => {
-  if (req.user.role !== "owner") return res.status(403).json({ error: "Owner access required." });
+app.get(route("/orders"), authenticate, asyncRoute(async (req, res) => {
+  res.json({ orders: await listOrdersForUser(database(), req.user) });
+}));
+
+app.post(route("/orders"), authenticate, asyncRoute(async (req, res) => {
+  const result = await createOrderRecord(database(), req.user, req.body);
+  res.status(201).json(result);
+}));
+
+app.patch(route("/orders/:orderId"), authenticate, asyncRoute(async (req, res) => {
+  const result = await updateOrderRecord(database(), req.user, req.params.orderId, req.body);
+  res.json({ id: req.params.orderId, ...result });
+}));
+
+app.get(route("/inventory"), authenticate, requireRoles("owner", "staff"), asyncRoute(async (_req, res) => {
+  res.json({ inventory: (await database().ref("inventory").once("value")).val() || {} });
+}));
+
+app.patch(route("/inventory/:itemId"), authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.json(await adjustInventoryRecord(database(), req.user, req.params.itemId, req.body));
+}));
+
+app.post(route("/riders/location"), authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {
+  res.json(await saveRiderLocationRecord(database(), req.user, req.body.orderId, req.body));
+}));
+
+app.post(route("/orders/:orderId/proof"), authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {
+  res.status(201).json(await saveDeliveryProofRecord(database(), req.user, req.params.orderId, req.body));
+}));
+
+app.post(route("/shift-logs"), authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.status(201).json(await saveShiftLogRecord(database(), req.user, req.body));
+}));
+
+app.post(route("/admin/roles"), authenticate, requireRoles("owner"), async (req, res) => {
+  if (!validRecordId(req.body.uid)) return res.status(400).json({ error: "Invalid user UID." });
   if (!["owner", "staff", "rider", "customer"].includes(req.body.role)) return res.status(400).json({ error: "Unsupported role." });
-  await admin.auth().setCustomUserClaims(req.body.uid, { role: req.body.role });
-  await admin.database().ref(`users/${req.body.uid}/role`).set(req.body.role);
+  await getAuth().setCustomUserClaims(req.body.uid, { role: req.body.role });
+  await database().ref(`users/${req.body.uid}/role`).set(req.body.role);
   return res.json({ updated: true });
 });
 

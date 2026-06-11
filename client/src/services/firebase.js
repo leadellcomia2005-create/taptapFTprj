@@ -5,21 +5,25 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   getAuth,
+  inMemoryPersistence,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
 } from "firebase/auth";
 import {
   connectDatabaseEmulator,
+  equalTo,
   get,
   getDatabase,
   onValue,
+  orderByChild,
   push,
+  query,
   ref,
-  runTransaction,
   set,
   update
 } from "firebase/database";
@@ -30,6 +34,8 @@ import {
   ref as storageRef,
   uploadBytes
 } from "firebase/storage";
+import { api } from "./api";
+import { configureAuthTokenProvider } from "./authSession";
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -42,6 +48,7 @@ const config = {
 };
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId && config.databaseURL);
+const firebaseStorageEnabled = import.meta.env.VITE_ENABLE_FIREBASE_STORAGE === "true";
 
 let app;
 let auth;
@@ -50,17 +57,19 @@ let storage;
 let analytics;
 let registrationAuth;
 let registrationDb;
+let authPersistenceReady = Promise.resolve();
 
 if (firebaseEnabled) {
   app = initializeApp(config);
   auth = getAuth(app);
   db = getDatabase(app);
-  storage = getStorage(app);
+  if (firebaseStorageEnabled) storage = getStorage(app);
   const registrationApp = getApps().some((candidate) => candidate.name === "registration")
     ? getApp("registration")
     : initializeApp(config, "registration");
   registrationAuth = getAuth(registrationApp);
   registrationDb = getDatabase(registrationApp);
+  configureAuthTokenProvider(() => auth.currentUser?.getIdToken() || "");
   isSupported().then((supported) => {
     if (supported) analytics = getAnalytics(app);
   });
@@ -69,17 +78,21 @@ if (firebaseEnabled) {
     try {
       connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
       connectDatabaseEmulator(db, "127.0.0.1", 9000);
-      connectStorageEmulator(storage, "127.0.0.1", 9199);
+      if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
       connectAuthEmulator(registrationAuth, "http://127.0.0.1:9099", { disableWarnings: true });
       connectDatabaseEmulator(registrationDb, "127.0.0.1", 9000);
     } catch {
       // Hot reload may initialize emulators more than once.
     }
   }
+  authPersistenceReady = Promise.all([
+    setPersistence(auth, inMemoryPersistence),
+    setPersistence(registrationAuth, inMemoryPersistence)
+  ]);
 }
 
-const demoUserKey = "taptap-demo-user";
 const demoDataKey = "taptap-demo-data";
+let demoUser = null;
 
 function readDemoData() {
   const saved = localStorage.getItem(demoDataKey);
@@ -105,27 +118,37 @@ function writeDemoData(data) {
 
 export function observeAuth(callback) {
   if (firebaseEnabled) {
-    return onAuthStateChanged(auth, async (user) => {
-      if (!user) return callback(null);
-      const token = await user.getIdTokenResult(true);
-      const profile = await get(ref(db, `users/${user.uid}`));
-      callback({
-        uid: user.uid,
-        email: user.email,
-        name: profile.val()?.name || user.displayName || user.email,
-        role: token.claims.role || profile.val()?.role || "customer",
-        firebaseUser: user
+    let active = true;
+    let unsubscribe = () => {};
+    authPersistenceReady.then(() => {
+      if (!active) return;
+      unsubscribe = onAuthStateChanged(auth, async (user) => {
+        if (!user) return callback(null);
+        const token = await user.getIdTokenResult(true);
+        const profile = await get(ref(db, `users/${user.uid}`));
+        callback({
+          uid: user.uid,
+          email: user.email,
+          name: profile.val()?.name || user.displayName || user.email,
+          role: token.claims.role || profile.val()?.role || "customer",
+          firebaseUser: user
+        });
       });
-    });
+    }).catch(() => callback(null));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }
-  const emit = () => callback(JSON.parse(localStorage.getItem(demoUserKey) || "null"));
+  const emit = () => callback(demoUser);
   emit();
-  window.addEventListener("storage", emit);
-  return () => window.removeEventListener("storage", emit);
+  window.addEventListener("taptap-demo-auth", emit);
+  return () => window.removeEventListener("taptap-demo-auth", emit);
 }
 
 export async function login(email, password, requestedRole, demoAccounts) {
   if (firebaseEnabled) {
+    await authPersistenceReady;
     const credential = await signInWithEmailAndPassword(auth, email, password);
     const token = await credential.user.getIdTokenResult(true);
     const profile = await get(ref(db, `users/${credential.user.uid}`));
@@ -143,13 +166,14 @@ export async function login(email, password, requestedRole, demoAccounts) {
   if (!match) throw new Error("Invalid demo account or role.");
   const [role, account] = match;
   const user = { uid: `demo-${role}`, email, name: account.name, role };
-  localStorage.setItem(demoUserKey, JSON.stringify(user));
-  window.dispatchEvent(new Event("storage"));
+  demoUser = user;
+  window.dispatchEvent(new Event("taptap-demo-auth"));
   return user;
 }
 
 export async function registerCustomer(name, email, password, onProgress = () => {}) {
   if (firebaseEnabled) {
+    await authPersistenceReady;
     let user;
     onProgress("auth", "active", "Creating the email/password identity...");
     try {
@@ -199,8 +223,8 @@ export async function registerCustomer(name, email, password, onProgress = () =>
     };
   }
   const user = { uid: `demo-${crypto.randomUUID()}`, email, name, role: "customer" };
-  localStorage.setItem(demoUserKey, JSON.stringify(user));
-  window.dispatchEvent(new Event("storage"));
+  demoUser = user;
+  window.dispatchEvent(new Event("taptap-demo-auth"));
   return { uid: user.uid, email, profilePath: `users/${user.uid}`, verificationSent: false };
 }
 
@@ -218,19 +242,17 @@ export function friendlyAuthError(error) {
 }
 
 export async function logout() {
-  if (firebaseEnabled) return signOut(auth);
-  localStorage.removeItem(demoUserKey);
-  window.dispatchEvent(new Event("storage"));
+  if (firebaseEnabled) {
+    await authPersistenceReady;
+    return signOut(auth);
+  }
+  demoUser = null;
+  window.dispatchEvent(new Event("taptap-demo-auth"));
 }
 
 export async function resetPassword(email) {
   if (!firebaseEnabled) throw new Error("Firebase must be configured to send reset emails.");
   return sendPasswordResetEmail(auth, email);
-}
-
-export async function getAuthToken() {
-  if (!firebaseEnabled || !auth.currentUser) return "";
-  return auth.currentUser.getIdToken();
 }
 
 export function subscribeUserProfile(user, callback) {
@@ -268,18 +290,39 @@ export function subscribeNotifications(user, callback) {
     callback([]);
     return () => {};
   }
-  const normalize = (value = {}) => callback(
-    Object.entries(value)
+  const normalize = (value = {}) => Object.entries(value)
       .map(([id, notification]) => ({ id, ...notification }))
       .filter((notification) =>
         notification.targetUserId === user.uid ||
-        notification.targetRole === user.role ||
-        notification.targetRole === "all"
+        notification.targetRole === user.role
       )
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-  );
-  if (firebaseEnabled) return onValue(ref(db, "notifications"), (snapshot) => normalize(snapshot.val()));
-  const emit = () => normalize(readDemoData().notifications);
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  if (firebaseEnabled) {
+    let personal = {};
+    let role = {};
+    const emit = () => callback(normalize({ ...personal, ...role }));
+    const unsubscribePersonal = onValue(
+      query(ref(db, "notifications"), orderByChild("targetUserId"), equalTo(user.uid)),
+      (snapshot) => {
+        personal = snapshot.val() || {};
+        emit();
+      }
+    );
+    const unsubscribeRole = user.role === "customer"
+      ? () => {}
+      : onValue(
+          query(ref(db, "notifications"), orderByChild("targetRole"), equalTo(user.role)),
+          (snapshot) => {
+            role = snapshot.val() || {};
+            emit();
+          }
+        );
+    return () => {
+      unsubscribePersonal();
+      unsubscribeRole();
+    };
+  }
+  const emit = () => callback(normalize(readDemoData().notifications));
   emit();
   window.addEventListener("taptap-demo-data", emit);
   window.addEventListener("storage", emit);
@@ -318,7 +361,12 @@ export function subscribeReviews(user, callback) {
       .filter((review) => user.role !== "customer" || review.customerId === user.uid)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
-  if (firebaseEnabled) return onValue(ref(db, "reviews"), (snapshot) => normalize(snapshot.val()));
+  if (firebaseEnabled) {
+    const reviewsRef = user.role === "customer"
+      ? query(ref(db, "reviews"), orderByChild("customerId"), equalTo(user.uid))
+      : ref(db, "reviews");
+    return onValue(reviewsRef, (snapshot) => normalize(snapshot.val()));
+  }
   const emit = () => normalize(readDemoData().reviews);
   emit();
   window.addEventListener("taptap-demo-data", emit);
@@ -390,9 +438,7 @@ export async function adjustInventory(item, delta, reason, actor) {
     createdAt: Date.now()
   };
   if (firebaseEnabled) {
-    await runTransaction(ref(db, `inventory/${item.id}/stock`), (current) => Math.max(0, (current ?? item.stock) + delta));
-    await push(ref(db, "auditLogs"), auditEntry);
-    return;
+    return api.adjustInventory(item.id, delta, reason);
   }
   const data = readDemoData();
   data.inventory[item.id] = {
@@ -411,10 +457,35 @@ export function subscribeOrders(user, callback) {
     return () => {};
   }
   if (firebaseEnabled) {
-    return onValue(ref(db, "orders"), (snapshot) => {
-      const orders = Object.entries(snapshot.val() || {}).map(([id, order]) => ({ id, ...order }));
-      callback(user.role === "customer" ? orders.filter((order) => order.customerId === user.uid) : orders);
-    });
+    const normalize = (snapshot) => Object.entries(snapshot.val() || {}).map(([id, order]) => ({ id, ...order }));
+    if (["owner", "staff"].includes(user.role)) {
+      return onValue(ref(db, "orders"), (snapshot) => callback(normalize(snapshot)));
+    }
+    if (user.role === "customer") {
+      const customerOrders = query(ref(db, "orders"), orderByChild("customerId"), equalTo(user.uid));
+      return onValue(customerOrders, (snapshot) => callback(normalize(snapshot)));
+    }
+    if (user.role === "rider") {
+      let assigned = [];
+      let available = [];
+      const emit = () => callback([...new Map([...assigned, ...available].map((order) => [order.id, order])).values()]);
+      const assignedOrders = query(ref(db, "orders"), orderByChild("riderId"), equalTo(user.uid));
+      const readyOrders = query(ref(db, "orders"), orderByChild("status"), equalTo("ready"));
+      const stopAssigned = onValue(assignedOrders, (snapshot) => {
+        assigned = normalize(snapshot);
+        emit();
+      });
+      const stopAvailable = onValue(readyOrders, (snapshot) => {
+        available = normalize(snapshot).filter((order) => !order.riderId);
+        emit();
+      });
+      return () => {
+        stopAssigned();
+        stopAvailable();
+      };
+    }
+    callback([]);
+    return () => {};
   }
   const emit = () => {
     const data = readDemoData();
@@ -428,19 +499,14 @@ export function subscribeOrders(user, callback) {
 
 export async function createOrder(order) {
   if (firebaseEnabled) {
-    const orderRef = push(ref(db, "orders"));
-    const id = orderRef.key;
-    await set(orderRef, { ...order, createdAt: Date.now(), status: "received" });
-    await Promise.all(order.items.map((item) =>
-      runTransaction(ref(db, `inventory/${item.id}/stock`), (current) => Math.max(0, (current ?? item.stock) - item.qty))
-    ));
-    trackEvent("purchase", { transaction_id: id, value: order.total, currency: "PHP" });
-    await Promise.all([
-      createNotification({ targetUserId: order.customerId, title: "Order confirmed", message: `Order ${id} was received.`, type: "order", orderId: id }),
-      createNotification({ targetRole: "staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
-      createNotification({ targetRole: "owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
-    ]);
-    return id;
+    const result = await api.createOrder({
+      phone: order.phone,
+      address: order.address,
+      paymentMethod: order.paymentMethod,
+      items: order.items.map(({ id, qty }) => ({ id, qty }))
+    });
+    trackEvent("purchase", { transaction_id: result.id, value: result.order.total, currency: "PHP" });
+    return result.id;
   }
   const data = readDemoData();
   const id = `TAP-${Date.now().toString().slice(-8)}`;
@@ -469,22 +535,7 @@ export async function updateOrder(orderId, values) {
     createdAt: Date.now()
   };
   if (firebaseEnabled) {
-    const currentOrder = (await get(ref(db, `orders/${orderId}`))).val();
-    await update(ref(db, `orders/${orderId}`), values);
-    await push(ref(db, "auditLogs"), auditEntry);
-    if (values.status && currentOrder?.customerId) {
-      await createNotification({
-        targetUserId: currentOrder.customerId,
-        title: "Order status updated",
-        message: `${orderId} is now ${values.status.replaceAll("-", " ")}.`,
-        type: "order",
-        orderId
-      });
-    }
-    if (values.riderId && values.riderId !== currentOrder?.riderId) {
-      await createNotification({ targetUserId: values.riderId, title: "Delivery assigned", message: `${orderId} has been assigned to you.`, type: "delivery", orderId });
-    }
-    return;
+    return api.updateOrder(orderId, values);
   }
   const data = readDemoData();
   const currentOrder = data.orders[orderId];
@@ -520,7 +571,12 @@ export function subscribeSupportMessages(callback, customerId = null) {
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     callback(messages);
   };
-  if (firebaseEnabled) return onValue(ref(db, "messages/support"), (snapshot) => normalize(snapshot.val()));
+  if (firebaseEnabled) {
+    const messagesRef = customerId
+      ? query(ref(db, "messages/support"), orderByChild("customerId"), equalTo(customerId))
+      : ref(db, "messages/support");
+    return onValue(messagesRef, (snapshot) => normalize(snapshot.val()));
+  }
   const emit = () => normalize(readDemoData().messages.support);
   emit();
   window.addEventListener("taptap-demo-data", emit);
@@ -577,15 +633,8 @@ export async function saveShiftLog(entry, actor) {
     createdAt: Date.now()
   };
   if (firebaseEnabled) {
-    const saved = await push(ref(db, "shiftLogs"), shiftEntry);
-    await push(ref(db, "auditLogs"), {
-      action: "shift_closed",
-      shiftLogId: saved.key,
-      actorId: actor.uid,
-      actorName: actor.name,
-      createdAt: Date.now()
-    });
-    return saved.key;
+    const result = await api.saveShiftLog(entry);
+    return result.id;
   }
   const data = readDemoData();
   const id = `SHIFT-${Date.now()}`;
@@ -601,26 +650,37 @@ export async function saveShiftLog(entry, actor) {
   return id;
 }
 
-export async function saveRiderLocation(riderId, location) {
-  if (firebaseEnabled) return set(ref(db, `riderLocations/${riderId}`), { ...location, updatedAt: Date.now() });
+export async function saveRiderLocation(orderId, location) {
+  if (firebaseEnabled) {
+    return api.updateRiderLocation(orderId, location);
+  }
   const data = readDemoData();
-  data.riderLocations[riderId] = { ...location, updatedAt: Date.now() };
+  data.riderLocations[orderId] = { ...location, updatedAt: Date.now() };
   writeDemoData(data);
 }
 
-export function subscribeRiderLocation(riderId, callback) {
-  if (firebaseEnabled) return onValue(ref(db, `riderLocations/${riderId}`), (snapshot) => callback(snapshot.val()));
-  const emit = () => callback(readDemoData().riderLocations[riderId] || null);
+export function subscribeRiderLocation(orderId, callback) {
+  if (firebaseEnabled) return onValue(ref(db, `orders/${orderId}/riderLocation`), (snapshot) => callback(snapshot.val()));
+  const emit = () => callback(readDemoData().riderLocations[orderId] || null);
   emit();
   window.addEventListener("taptap-demo-data", emit);
   return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
 export async function uploadProof(orderId, blob) {
-  if (!firebaseEnabled) return URL.createObjectURL(blob);
-  const fileRef = storageRef(storage, `proof-of-delivery/${orderId}/${Date.now()}.jpg`);
-  await uploadBytes(fileRef, blob, { contentType: "image/jpeg" });
-  return getDownloadURL(fileRef);
+  if (!firebaseEnabled) return { proofOfDeliveryUrl: URL.createObjectURL(blob) };
+  if (firebaseStorageEnabled) {
+    const fileRef = storageRef(storage, `proof-of-delivery/${orderId}/${Date.now()}.jpg`);
+    await uploadBytes(fileRef, blob, { contentType: "image/jpeg" });
+    return { proofOfDeliveryUrl: await getDownloadURL(fileRef) };
+  }
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("The delivery photo could not be read."));
+    reader.readAsDataURL(blob);
+  });
+  return api.uploadDeliveryProof(orderId, dataUrl);
 }
 
 export { auth, db, storage, ref, set, push, update };

@@ -33,7 +33,7 @@ import {
   updateOrder,
   uploadProof
 } from "./services/firebase";
-import { disconnectSocket, getSocket } from "./services/socket";
+import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
 
 const currency = (value) => `₱${Number(value || 0).toLocaleString("en-PH")}`;
 const statusLabel = (value) => ({
@@ -359,10 +359,9 @@ function Checkout({ cart, user, profile, onClose, onComplete, notify }) {
         items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
       };
       const orderId = await createOrder(orderPayload);
-      api.sendNotification({ to: phone, orderId, status: "received" }).catch(() => {});
       if (payment === "gcash") {
         try {
-          const result = await api.createPayment({ ...orderPayload, orderId, successUrl: window.location.href, cancelUrl: window.location.href });
+          const result = await api.createPayment({ orderId, successUrl: window.location.href, cancelUrl: window.location.href });
           if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
           else notify(`Order ${orderId} created. PayMongo is awaiting credentials.`);
         } catch (paymentError) {
@@ -865,8 +864,13 @@ function RiderWorkspace({ section, user, orders, notify }) {
     watchRef.current = navigator.geolocation.watchPosition(async ({ coords }) => {
       const next = { lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy };
       setLocation(next);
-      await saveRiderLocation(user.uid, next);
-      socket?.emit("rider:location", { riderId: user.uid, ...next });
+      if (!active?.id) return;
+      try {
+        if (socket?.connected) await sendRiderLocation(active.id, next);
+        else await saveRiderLocation(active.id, next);
+      } catch (error) {
+        notify(error.message);
+      }
     }, (error) => notify(error.message), { enableHighAccuracy: true, maximumAge: 5000 });
     setOnline(true);
   };
@@ -893,8 +897,8 @@ function RiderWorkspace({ section, user, orders, notify }) {
   };
 
   const capture = async (blob) => {
-    const url = await uploadProof(active.id, blob);
-    await updateOrder(active.id, { status: "delivered", proofOfDeliveryUrl: url, deliveredAt: Date.now() });
+    const proof = await uploadProof(active.id, blob);
+    await updateOrder(active.id, { status: "delivered", ...proof });
     setCameraOpen(false);
     navigator.vibrate?.(180);
     notify("Delivery completed with photo evidence.");
@@ -942,7 +946,8 @@ function TrackingView({ order, onClose }) {
   const [rider, setRider] = useState(null);
   useEffect(() => {
     if (!order?.riderId) return undefined;
-    return subscribeRiderLocation(order.riderId, setRider);
+    joinOrderRoom(order.id).catch(() => {});
+    return subscribeRiderLocation(order.id, setRider);
   }, [order]);
   if (!order) return null;
   return (
@@ -1087,13 +1092,26 @@ export default function App() {
   }, [user]);
   useEffect(() => {
     api.status().then((result) => setServiceStatus((current) => ({ ...current, ...result.services }))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!user) {
+      disconnectSocket();
+      setServiceStatus((current) => ({ ...current, socket: false }));
+      return undefined;
+    }
+    let activeSocket;
     getSocket().then((socket) => {
+      activeSocket = socket;
       setServiceStatus((current) => ({ ...current, socket: socket.connected }));
       socket.on("connect", () => setServiceStatus((current) => ({ ...current, socket: true })));
       socket.on("disconnect", () => setServiceStatus((current) => ({ ...current, socket: false })));
     }).catch(() => {});
-    return disconnectSocket;
-  }, []);
+    return () => {
+      activeSocket?.off("connect");
+      activeSocket?.off("disconnect");
+      disconnectSocket();
+    };
+  }, [user]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 4500);

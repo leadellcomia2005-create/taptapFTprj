@@ -20,48 +20,70 @@
       }
     },
     "orders": {
+      ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid) || (auth.token.role == 'rider' && ((query.orderByChild == 'riderId' && query.equalTo == auth.uid) || (query.orderByChild == 'status' && query.equalTo == 'ready'))))",
+      ".indexOn": ["customerId", "riderId", "status"],
       "$orderId": {
         ".read": "auth != null && (data.child('customerId').val() == auth.uid || data.child('riderId').val() == auth.uid || auth.token.role == 'owner' || auth.token.role == 'staff')",
-        ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || auth.token.role == 'rider' || (!data.exists() && newData.child('customerId').val() == auth.uid))"
+        ".write": false
       }
     },
     "inventory": {
       ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')",
-      ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')"
+      ".write": false
     },
     "riderLocations": {
       "$riderId": {
-        ".read": "auth != null",
-        ".write": "auth != null && (auth.uid == $riderId || auth.token.role == 'owner' || auth.token.role == 'staff')"
+        ".read": "auth != null && (auth.uid == $riderId || auth.token.role == 'owner' || auth.token.role == 'staff')",
+        ".write": false
+      }
+    },
+    "deliveryProofs": {
+      "$orderId": {
+        ".read": "auth != null && (root.child('orders').child($orderId).child('customerId').val() == auth.uid || root.child('orders').child($orderId).child('riderId').val() == auth.uid || auth.token.role == 'owner' || auth.token.role == 'staff')",
+        ".write": false
       }
     },
     "messages": {
-      "$orderId": {
-        ".read": "auth != null",
+      "support": {
+        ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid))",
+        ".indexOn": ["customerId"],
         "$messageId": {
-          ".write": "auth != null && newData.child('senderId').val() == auth.uid",
-          ".validate": "newData.hasChildren(['text', 'senderId', 'senderName', 'senderRole', 'createdAt'])"
+          ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
+          ".write": "auth != null && !data.exists() && newData.child('senderId').val() == auth.uid && ((newData.child('senderRole').val() == 'customer' && newData.child('customerId').val() == auth.uid && (auth.token.role == 'customer' || auth.token.role == null)) || (newData.child('senderRole').val() == 'staff' && auth.token.role == 'staff'))",
+          ".validate": "newData.hasChildren(['text', 'senderId', 'senderName', 'senderRole', 'customerId', 'conversationId', 'createdAt']) && newData.child('text').isString() && newData.child('text').val().length <= 2000"
         }
       }
     },
     "auditLogs": {
       ".read": "auth != null && auth.token.role == 'owner'",
-      ".write": "auth != null"
+      ".write": false
     },
     "shiftLogs": {
       ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')",
-      ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')"
+      ".write": false
     },
     "reviews": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid))",
+      ".indexOn": ["customerId"],
       "$orderId": {
+        ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
         ".write": "auth != null && newData.child('customerId').val() == auth.uid && root.child('orders').child($orderId).child('customerId').val() == auth.uid",
         ".validate": "newData.hasChildren(['orderId', 'customerId', 'customerName', 'rating', 'createdAt']) && newData.child('rating').isNumber() && newData.child('rating').val() >= 1 && newData.child('rating').val() <= 5"
       }
     },
     "notifications": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": "auth != null && ((query.orderByChild == 'targetUserId' && query.equalTo == auth.uid) || (query.orderByChild == 'targetRole' && query.equalTo == auth.token.role))",
+      ".indexOn": ["targetUserId", "targetRole"],
+      "$notificationId": {
+        ".read": "auth != null && (data.child('targetUserId').val() == auth.uid || data.child('targetRole').val() == auth.token.role)",
+        ".write": "auth != null && !data.exists() && ((newData.child('targetRole').val() == 'staff' && (newData.child('type').val() == 'chat' || newData.child('type').val() == 'review') && (auth.token.role == 'customer' || auth.token.role == null)) || (newData.child('targetUserId').isString() && newData.child('type').val() == 'chat' && auth.token.role == 'staff'))",
+        ".validate": "newData.hasChildren(['title', 'message', 'type', 'createdAt']) && newData.child('title').isString() && newData.child('title').val().length <= 120 && newData.child('message').isString() && newData.child('message').val().length <= 1000",
+        "readBy": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid && newData.val() == true"
+          }
+        }
+      }
     }
   }
 }

@@ -54,6 +54,20 @@ Without Firebase configuration these use the built-in local demo mode. After
 running the seed command, the same accounts use Firebase Authentication and
 role claims.
 
+## Role workspaces
+
+- Customer: storefront, cart, checkout, purchases, delivery tracking and AI
+  menu assistance.
+- Owner / Super Admin: dashboard, sales and orders, inventory, reports and
+  reconciliation, users and roles, audit logs, and system settings.
+- Staff / Admin: shift dashboard, walk-in POS, order queue, inventory
+  receiving and wastage, shift logs, chat support, and workstation settings.
+- Rider: assigned orders, duty/GPS status, delivery milestones, navigation,
+  camera proof of delivery, and COD ledger.
+
+Only customers can access the storefront after login. Employee roles are
+redirected directly to their authorized operational workspace.
+
 ## Local setup
 
 1. Install Node.js 22 or newer.

@@ -72,7 +72,17 @@ const demoDataKey = "taptap-demo-data";
 
 function readDemoData() {
   const saved = localStorage.getItem(demoDataKey);
-  return saved ? JSON.parse(saved) : { orders: {}, inventory: {}, riderLocations: {}, users: {} };
+  const data = saved ? JSON.parse(saved) : {};
+  return {
+    orders: {},
+    inventory: {},
+    riderLocations: {},
+    users: {},
+    auditLogs: {},
+    messages: {},
+    shiftLogs: {},
+    ...data
+  };
 }
 
 function writeDemoData(data) {
@@ -170,6 +180,51 @@ export function subscribeMenu(fallback, callback) {
   return () => {};
 }
 
+export function subscribeInventory(fallback, callback) {
+  const mergeInventory = (inventory = {}) => callback(
+    fallback.map((item) => ({
+      ...item,
+      stock: inventory[item.id]?.stock ?? item.stock,
+      reorderPoint: inventory[item.id]?.reorderPoint ?? 10
+    }))
+  );
+  if (firebaseEnabled) {
+    return onValue(ref(db, "inventory"), (snapshot) => mergeInventory(snapshot.val()));
+  }
+  const emit = () => mergeInventory(readDemoData().inventory);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function adjustInventory(item, delta, reason, actor) {
+  const auditEntry = {
+    action: delta > 0 ? "inventory_received" : "inventory_adjusted",
+    itemId: item.id,
+    itemName: item.name,
+    quantity: delta,
+    reason,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) {
+    await runTransaction(ref(db, `inventory/${item.id}/stock`), (current) => Math.max(0, (current ?? item.stock) + delta));
+    await push(ref(db, "auditLogs"), auditEntry);
+    return;
+  }
+  const data = readDemoData();
+  data.inventory[item.id] = {
+    ...data.inventory[item.id],
+    name: item.name,
+    reorderPoint: item.reorderPoint ?? 10,
+    stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) + delta)
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
+  writeDemoData(data);
+}
+
 export function subscribeOrders(user, callback) {
   if (!user) {
     callback([]);
@@ -217,10 +272,107 @@ export function trackEvent(name, parameters = {}) {
 }
 
 export async function updateOrder(orderId, values) {
-  if (firebaseEnabled) return update(ref(db, `orders/${orderId}`), values);
+  const auditEntry = {
+    action: "order_updated",
+    orderId,
+    status: values.status || null,
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) {
+    await update(ref(db, `orders/${orderId}`), values);
+    await push(ref(db, "auditLogs"), auditEntry);
+    return;
+  }
   const data = readDemoData();
   data.orders[orderId] = { ...data.orders[orderId], ...values };
+  data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
   writeDemoData(data);
+}
+
+export function subscribeAuditLogs(callback) {
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, entry]) => ({ id, ...entry }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+  if (firebaseEnabled) return onValue(ref(db, "auditLogs"), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().auditLogs);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export function subscribeSupportMessages(callback) {
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, message]) => ({ id, ...message }))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+  );
+  if (firebaseEnabled) return onValue(ref(db, "messages/support"), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().messages.support);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function sendSupportMessage(text, actor) {
+  const message = {
+    text,
+    senderId: actor.uid,
+    senderName: actor.name,
+    senderRole: actor.role,
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) return push(ref(db, "messages/support"), message);
+  const data = readDemoData();
+  data.messages.support ||= {};
+  data.messages.support[`MSG-${Date.now()}`] = message;
+  writeDemoData(data);
+}
+
+export function subscribeShiftLogs(callback) {
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, entry]) => ({ id, ...entry }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+  if (firebaseEnabled) return onValue(ref(db, "shiftLogs"), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().shiftLogs);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function saveShiftLog(entry, actor) {
+  const shiftEntry = {
+    ...entry,
+    staffId: actor.uid,
+    staffName: actor.name,
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) {
+    const saved = await push(ref(db, "shiftLogs"), shiftEntry);
+    await push(ref(db, "auditLogs"), {
+      action: "shift_closed",
+      shiftLogId: saved.key,
+      actorId: actor.uid,
+      actorName: actor.name,
+      createdAt: Date.now()
+    });
+    return saved.key;
+  }
+  const data = readDemoData();
+  const id = `SHIFT-${Date.now()}`;
+  data.shiftLogs[id] = shiftEntry;
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "shift_closed",
+    shiftLogId: id,
+    actorId: actor.uid,
+    actorName: actor.name,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return id;
 }
 
 export async function saveRiderLocation(riderId, location) {

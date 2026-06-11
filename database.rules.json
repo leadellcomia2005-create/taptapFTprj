@@ -48,6 +48,10 @@
     "auditLogs": {
       ".read": "auth != null && auth.token.role == 'owner'",
       ".write": "auth != null"
+    },
+    "shiftLogs": {
+      ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')"
     }
   }
 }

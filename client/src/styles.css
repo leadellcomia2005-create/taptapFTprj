@@ -44,6 +44,8 @@ button { font: inherit; }
 .app-header nav button.active { color: white; background: var(--ink); }
 .role-navigation { max-width: min(63vw,980px); overflow-x: auto; scrollbar-width: thin; }
 .header-actions { display: flex; align-items: center; gap: 12px; }
+.notification-button { position: relative; padding: 7px 10px; color: var(--ink); border: 1px solid var(--line); background: white; border-radius: 9px; font-size: 9px; font-weight: 800; }
+.notification-button span { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; color: white; background: var(--red); border: 2px solid white; border-radius: 10px; font-size: 7px; }
 .user-chip { display: flex; align-items: center; gap: 8px; }
 .user-chip > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 50%; font-size: 9px; font-weight: 800; }
 .user-chip strong, .user-chip small { display: block; }
@@ -101,6 +103,23 @@ button { font: inherit; }
 
 .order-card { display: flex; justify-content: space-between; gap: 25px; margin-bottom: 12px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 14px; }
 .order-card h3 { margin: 6px 0; font: 700 18px var(--display); }.order-card p,.order-card small { margin: 0; color: var(--muted); font-size: 9px; }.order-card .text-end strong,.order-card .text-end button { display: block; margin-left: auto; }.order-card .text-end strong { margin-top: 9px; }
+.customer-page { min-height: calc(100vh - 76px); }
+.profile-form { max-width: 900px; margin: 0 auto; padding: 30px; }
+.profile-preferences { display: flex; flex-wrap: wrap; gap: 18px; margin: 22px 0; padding: 18px; background: var(--paper); border-radius: 12px; }
+.profile-preferences > strong { width: 100%; font: 700 17px var(--display); }
+.profile-preferences label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.profile-preferences input { accent-color: var(--red); }
+.receipt-grid { display: grid; gap: 12px; }
+.receipt-card { display: grid; grid-template-columns: 50px minmax(0,1fr) auto; align-items: center; gap: 16px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 15px; }
+.receipt-brand { width: 48px; height: 48px; display: grid; place-items: center; color: white; background: var(--red); border-radius: 50% 50% 50% 12px; font: italic 800 25px var(--display); }
+.receipt-card h3 { margin: 4px 0; font: 700 18px var(--display); }.receipt-card p { margin: 0 0 5px; color: var(--muted); font-size: 10px; }.receipt-card small,.receipt-card span { color: var(--muted); font-size: 8px; }
+.receipt-total { display: grid; justify-items: end; gap: 9px; }.receipt-total strong { font: 700 21px var(--display); }
+.review-form { position: sticky; top: 100px; }
+.rating-picker { display: flex; gap: 5px; margin: 18px 0; }
+.rating-picker button { padding: 0; color: #c8bfb3; border: 0; background: transparent; font-size: 32px; line-height: 1; }.rating-picker button.active { color: var(--gold); }
+.previous-review { padding: 17px 0; border-bottom: 1px solid var(--line); }
+.previous-review > div { display: flex; justify-content: space-between; gap: 15px; }.previous-review > div strong { font: 700 17px var(--display); }.previous-review > div span { color: var(--gold); letter-spacing: .08em; }
+.previous-review p { margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }.previous-review small { color: var(--muted); font-size: 8px; }
 .empty-state { padding: 80px; color: var(--muted); background: white; border: 1px solid var(--line); border-radius: 15px; text-align: center; }
 .empty-state.compact { padding: 45px 20px; }
 .service-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
@@ -168,6 +187,15 @@ button { font: inherit; }
 .assistant-messages { height: 280px; overflow: auto; padding: 14px; background: var(--paper); }.assistant-messages > div { max-width: 86%; margin-bottom: 9px; padding: 10px 12px; border-radius: 12px; font-size: 10px; line-height: 1.55; }.assistant-messages .bot { background: white; }.assistant-messages .user { margin-left: auto; color: white; background: var(--red); }.assistant-messages small { display: block; margin-top: 4px; opacity: .55; font-size: 7px; }
 .assistant-panel form { display: flex; gap: 7px; padding: 11px; }.assistant-panel input { min-width: 0; flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; }.assistant-panel form button { color: white; border: 0; background: var(--red); border-radius: 8px; font-size: 9px; font-weight: 800; }
 .app-toast { position: fixed; z-index: 1200; left: 50%; bottom: 25px; padding: 12px 18px; color: white; background: var(--ink); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.22); transform: translateX(-50%); font-size: 10px; }
+.notification-backdrop { position: fixed; z-index: 1240; inset: 0; border: 0; background: rgba(20,17,13,.35); backdrop-filter: blur(2px); }
+.notification-center { position: fixed; z-index: 1250; top: 0; right: 0; width: min(420px,100vw); height: 100vh; display: flex; flex-direction: column; background: white; box-shadow: -20px 0 60px rgba(25,20,14,.2); }
+.notification-center > header { display: flex; align-items: center; justify-content: space-between; padding: 23px; border-bottom: 1px solid var(--line); }
+.notification-center > header h3 { margin: 5px 0 0; font: 700 27px var(--display); }.notification-center > header button { color: var(--muted); border: 0; background: transparent; font-size: 25px; }
+.notification-list { overflow-y: auto; padding: 12px; }
+.notification-list > button { position: relative; width: 100%; display: grid; grid-template-columns: 38px minmax(0,1fr) 8px; gap: 11px; padding: 14px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: white; border-radius: 10px; }
+.notification-list > button.unread { background: #fff7f5; }.notification-list > button > i { width: 7px; height: 7px; align-self: center; background: var(--red); border-radius: 50%; }
+.notification-icon { width: 38px; height: 38px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 11px; font-size: 10px; font-weight: 900; }.notification-icon.order,.notification-icon.sale { background: var(--red); }.notification-icon.chat { background: #3e6e9b; }.notification-icon.delivery { background: var(--green); }.notification-icon.review { color: var(--ink); background: var(--gold); }
+.notification-list strong,.notification-list time { display: block; }.notification-list strong { font-size: 10px; }.notification-list p { margin: 4px 0; color: var(--muted); font-size: 9px; line-height: 1.5; }.notification-list time { color: #aaa096; font-size: 7px; }
 
 @media (max-width: 900px) {
   .login-screen { grid-template-columns: 1fr; }.login-visual { min-height: 45vh; padding: 30px; }.login-visual .brand-lockup { margin-bottom: 90px; }
@@ -183,4 +211,5 @@ button { font: inherit; }
   .integrated-hero { min-height: 600px; padding: 45px 20px; }.integrated-hero h1 { font-size: 50px; }
   .section-title h2,.dashboard-heading h2 { font-size: 38px; }.service-grid { grid-template-columns: 1fr; }
   .order-card { flex-direction: column; }.order-card .text-end { text-align: left !important; }.order-card .text-end strong,.order-card .text-end button { margin-left: 0; }
+  .receipt-card { grid-template-columns: 42px 1fr; }.receipt-total { grid-column: 1 / -1; justify-items: stretch; }.receipt-total strong { text-align: right; }
 }

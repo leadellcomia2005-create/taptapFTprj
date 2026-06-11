@@ -81,6 +81,8 @@ function readDemoData() {
     auditLogs: {},
     messages: {},
     shiftLogs: {},
+    reviews: {},
+    notifications: {},
     ...data
   };
 }
@@ -169,6 +171,122 @@ export async function getAuthToken() {
   return auth.currentUser.getIdToken();
 }
 
+export function subscribeUserProfile(user, callback) {
+  if (!user) {
+    callback(null);
+    return () => {};
+  }
+  const fallback = {
+    name: user.name,
+    email: user.email,
+    phone: "",
+    address: "",
+    city: "Las Pinas City",
+    notificationPreferences: { orderUpdates: true, promotions: true }
+  };
+  if (firebaseEnabled) {
+    return onValue(ref(db, `users/${user.uid}`), (snapshot) => callback({ ...fallback, ...(snapshot.val() || {}) }));
+  }
+  const emit = () => callback({ ...fallback, ...(readDemoData().users[user.uid] || {}) });
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function saveUserProfile(user, profile) {
+  const values = { ...profile, email: user.email, role: user.role, updatedAt: Date.now() };
+  if (firebaseEnabled) return update(ref(db, `users/${user.uid}`), values);
+  const data = readDemoData();
+  data.users[user.uid] = { ...data.users[user.uid], ...values };
+  writeDemoData(data);
+}
+
+export function subscribeNotifications(user, callback) {
+  if (!user) {
+    callback([]);
+    return () => {};
+  }
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, notification]) => ({ id, ...notification }))
+      .filter((notification) =>
+        notification.targetUserId === user.uid ||
+        notification.targetRole === user.role ||
+        notification.targetRole === "all"
+      )
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+  if (firebaseEnabled) return onValue(ref(db, "notifications"), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().notifications);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  window.addEventListener("storage", emit);
+  return () => {
+    window.removeEventListener("taptap-demo-data", emit);
+    window.removeEventListener("storage", emit);
+  };
+}
+
+export async function createNotification(notification) {
+  const entry = { ...notification, createdAt: Date.now(), readBy: {} };
+  if (firebaseEnabled) return push(ref(db, "notifications"), entry);
+  const data = readDemoData();
+  data.notifications[`NOTIF-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`] = entry;
+  writeDemoData(data);
+}
+
+export async function markNotificationRead(notificationId, userId) {
+  if (firebaseEnabled) return set(ref(db, `notifications/${notificationId}/readBy/${userId}`), true);
+  const data = readDemoData();
+  if (data.notifications[notificationId]) {
+    data.notifications[notificationId].readBy ||= {};
+    data.notifications[notificationId].readBy[userId] = true;
+    writeDemoData(data);
+  }
+}
+
+export function subscribeReviews(user, callback) {
+  if (!user) {
+    callback([]);
+    return () => {};
+  }
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, review]) => ({ id, ...review }))
+      .filter((review) => user.role !== "customer" || review.customerId === user.uid)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+  if (firebaseEnabled) return onValue(ref(db, "reviews"), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().reviews);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function submitReview(order, user, rating, comment) {
+  const review = {
+    orderId: order.id,
+    customerId: user.uid,
+    customerName: user.name,
+    rating: Number(rating),
+    comment,
+    items: order.items?.map((item) => item.name) || [],
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) await set(ref(db, `reviews/${order.id}`), review);
+  else {
+    const data = readDemoData();
+    data.reviews[order.id] = review;
+    writeDemoData(data);
+  }
+  await createNotification({
+    targetRole: "staff",
+    title: "New customer review",
+    message: `${user.name} rated order ${order.id} ${rating}/5.`,
+    type: "review"
+  });
+}
+
 export function subscribeMenu(fallback, callback) {
   if (firebaseEnabled) {
     return onValue(ref(db, "public/menu"), (snapshot) => {
@@ -255,6 +373,11 @@ export async function createOrder(order) {
       runTransaction(ref(db, `inventory/${item.id}/stock`), (current) => Math.max(0, (current ?? item.stock) - item.qty))
     ));
     trackEvent("purchase", { transaction_id: id, value: order.total, currency: "PHP" });
+    await Promise.all([
+      createNotification({ targetUserId: order.customerId, title: "Order confirmed", message: `Order ${id} was received.`, type: "order", orderId: id }),
+      createNotification({ targetRole: "staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
+      createNotification({ targetRole: "owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
+    ]);
     return id;
   }
   const data = readDemoData();
@@ -264,6 +387,11 @@ export async function createOrder(order) {
     data.inventory[item.id] = { stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) - item.qty) };
   }
   writeDemoData(data);
+  await Promise.all([
+    createNotification({ targetUserId: order.customerId, title: "Order confirmed", message: `Order ${id} was received.`, type: "order", orderId: id }),
+    createNotification({ targetRole: "staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
+    createNotification({ targetRole: "owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
+  ]);
   return id;
 }
 
@@ -279,14 +407,34 @@ export async function updateOrder(orderId, values) {
     createdAt: Date.now()
   };
   if (firebaseEnabled) {
+    const currentOrder = (await get(ref(db, `orders/${orderId}`))).val();
     await update(ref(db, `orders/${orderId}`), values);
     await push(ref(db, "auditLogs"), auditEntry);
+    if (values.status && currentOrder?.customerId) {
+      await createNotification({
+        targetUserId: currentOrder.customerId,
+        title: "Order status updated",
+        message: `${orderId} is now ${values.status.replaceAll("-", " ")}.`,
+        type: "order",
+        orderId
+      });
+    }
+    if (values.riderId && values.riderId !== currentOrder?.riderId) {
+      await createNotification({ targetUserId: values.riderId, title: "Delivery assigned", message: `${orderId} has been assigned to you.`, type: "delivery", orderId });
+    }
     return;
   }
   const data = readDemoData();
+  const currentOrder = data.orders[orderId];
   data.orders[orderId] = { ...data.orders[orderId], ...values };
   data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
   writeDemoData(data);
+  if (values.status && currentOrder?.customerId) {
+    await createNotification({ targetUserId: currentOrder.customerId, title: "Order status updated", message: `${orderId} is now ${values.status.replaceAll("-", " ")}.`, type: "order", orderId });
+  }
+  if (values.riderId && values.riderId !== currentOrder?.riderId) {
+    await createNotification({ targetUserId: values.riderId, title: "Delivery assigned", message: `${orderId} has been assigned to you.`, type: "delivery", orderId });
+  }
 }
 
 export function subscribeAuditLogs(callback) {
@@ -334,11 +482,16 @@ export async function sendSupportMessage(text, actor, conversation = {}) {
     channel: "support",
     createdAt: Date.now()
   };
-  if (firebaseEnabled) return push(ref(db, "messages/support"), message);
-  const data = readDemoData();
-  data.messages.support ||= {};
-  data.messages.support[`MSG-${Date.now()}`] = message;
-  writeDemoData(data);
+  if (firebaseEnabled) await push(ref(db, "messages/support"), message);
+  else {
+    const data = readDemoData();
+    data.messages.support ||= {};
+    data.messages.support[`MSG-${Date.now()}`] = message;
+    writeDemoData(data);
+  }
+  await createNotification(actor.role === "customer"
+    ? { targetRole: "staff", title: "New support message", message: `${actor.name}: ${text}`, type: "chat" }
+    : { targetUserId: customerId, title: "Staff replied", message: `${actor.name}: ${text}`, type: "chat" });
 }
 
 export function subscribeShiftLogs(callback) {

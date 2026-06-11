@@ -10,19 +10,25 @@ import {
   firebaseEnabled,
   login,
   logout,
+  markNotificationRead,
   observeAuth,
   registerCustomer,
   resetPassword,
+  saveUserProfile,
   saveShiftLog,
   saveRiderLocation,
   sendSupportMessage,
+  submitReview,
   subscribeAuditLogs,
   subscribeInventory,
   subscribeMenu,
+  subscribeNotifications,
   subscribeOrders,
   subscribeRiderLocation,
+  subscribeReviews,
   subscribeShiftLogs,
   subscribeSupportMessages,
+  subscribeUserProfile,
   updateOrder,
   uploadProof
 } from "./services/firebase";
@@ -41,7 +47,10 @@ const statusLabel = (value) => ({
 const roleNavigation = {
   customer: [
     ["store", "Storefront"],
-    ["orders", "My orders"]
+    ["orders", "Order History"],
+    ["receipts", "Digital Receipts"],
+    ["feedback", "Reviews & Feedback"],
+    ["profile", "Personal Info"]
   ],
   owner: [
     ["owner-overview", "Dashboard"],
@@ -163,7 +172,7 @@ function LoginPanel({ onLoggedIn }) {
   );
 }
 
-function AppHeader({ user, cartCount, activeView, onCart, onNavigate }) {
+function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigate, onNotifications }) {
   const navigation = roleNavigation[user.role] || [];
   const homeView = defaultViewForRole(user.role);
   return (
@@ -178,10 +187,32 @@ function AppHeader({ user, cartCount, activeView, onCart, onNavigate }) {
       </nav>
       <div className="header-actions">
         {user.role === "customer" && <button className="btn btn-outline-dark btn-sm" onClick={onCart}>Cart ({cartCount})</button>}
+        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications">Alerts{unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div>
         <button className="btn btn-link text-danger btn-sm" onClick={logout}>Log out</button>
       </div>
     </header>
+  );
+}
+
+function NotificationCenter({ user, notifications, onClose }) {
+  const markRead = async (notification) => {
+    if (!notification.readBy?.[user.uid]) await markNotificationRead(notification.id, user.uid);
+  };
+  return (
+    <>
+      <button className="notification-backdrop" aria-label="Close notifications" onClick={onClose} />
+      <aside className="notification-center">
+        <header><div><p className="eyebrow text-danger">Realtime updates</p><h3>Notifications</h3></div><button onClick={onClose}>×</button></header>
+        <div className="notification-list">
+          {notifications.length === 0 && <div className="empty-chat">No notifications yet.</div>}
+          {notifications.map((notification) => {
+            const unread = !notification.readBy?.[user.uid];
+            return <button className={unread ? "unread" : ""} key={notification.id} onClick={() => markRead(notification)}><span className={`notification-icon ${notification.type || "system"}`}>{notification.type?.slice(0, 1).toUpperCase() || "N"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><time>{new Date(notification.createdAt).toLocaleString("en-PH")}</time></div>{unread && <i />}</button>;
+          })}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -235,10 +266,10 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
   );
 }
 
-function Checkout({ cart, user, onClose, onComplete, notify }) {
+function Checkout({ cart, user, profile, onClose, onComplete, notify }) {
   const [payment, setPayment] = useState("gcash");
-  const [phone, setPhone] = useState("+639171234567");
-  const [address, setAddress] = useState("BF Resort Village, Las Pinas City");
+  const [phone, setPhone] = useState(profile?.phone || "+639171234567");
+  const [address, setAddress] = useState(profile?.address || "BF Resort Village, Las Pinas City");
   const [busy, setBusy] = useState(false);
   const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0) + 49;
 
@@ -299,13 +330,92 @@ function Checkout({ cart, user, onClose, onComplete, notify }) {
 function OrdersView({ orders, onTrack }) {
   return (
     <main className="container py-5">
-      <div className="section-title"><div><p className="eyebrow text-danger">Realtime Database</p><h2>My purchases</h2></div></div>
+      <div className="section-title"><div><p className="eyebrow text-danger">Realtime Database</p><h2>Order history</h2></div><p>Review previous and active purchases with live delivery status.</p></div>
       {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : orders.map((order) => (
         <article className="order-card" key={order.id}>
           <div><small>{order.id}</small><h3>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</h3><p>{order.address}</p></div>
           <div className="text-end"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span><strong>{currency(order.total)}</strong><button className="btn btn-link btn-sm" onClick={() => onTrack(order)}>Track live</button></div>
         </article>
       ))}
+    </main>
+  );
+}
+
+function CustomerProfile({ user, profile, notify }) {
+  const [form, setForm] = useState(profile || {});
+  useEffect(() => setForm(profile || {}), [profile]);
+  const save = async (event) => {
+    event.preventDefault();
+    await saveUserProfile(user, form);
+    notify("Personal information and saved address updated.");
+  };
+  return (
+    <main className="container py-5 customer-page">
+      <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Personal info</h2></div><p>Keep your contact details and preferred delivery address ready for checkout.</p></div>
+      <form className="dashboard-card profile-form" onSubmit={save}>
+        <div className="row g-3">
+          <label className="form-label col-md-6">Full name<input className="form-control" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
+          <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
+          <label className="form-label col-md-6">Mobile number<input className="form-control" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /></label>
+          <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
+          <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
+        </div>
+        <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label></div>
+        <button className="btn btn-danger">Save personal information</button>
+      </form>
+    </main>
+  );
+}
+
+function ReceiptsView({ orders }) {
+  const downloadReceipt = async (order) => {
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF();
+    pdf.setFontSize(20);
+    pdf.text("Taptap Foodtrip", 18, 20);
+    pdf.setFontSize(12);
+    pdf.text("Digital Receipt", 18, 29);
+    pdf.setFontSize(10);
+    pdf.text(`Receipt: ${order.id}`, 18, 40);
+    pdf.text(`Date: ${new Date(order.createdAt).toLocaleString("en-PH")}`, 18, 47);
+    pdf.text(`Customer: ${order.customerName}`, 18, 54);
+    pdf.text(`Payment: ${order.paymentMethod?.toUpperCase()}`, 18, 61);
+    order.items?.forEach((item, index) => pdf.text(`${item.qty} x ${item.name} - ${currency(item.qty * item.price)}`, 18, 76 + index * 8));
+    pdf.setFontSize(13);
+    pdf.text(`Total: ${currency(order.total)}`, 18, 90 + (order.items?.length || 0) * 8);
+    pdf.save(`${order.id}-receipt.pdf`);
+  };
+  return (
+    <main className="container py-5 customer-page">
+      <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
+      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><div className="receipt-brand">T</div><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
+    </main>
+  );
+}
+
+function ReviewsView({ user, orders, reviews, notify }) {
+  const reviewByOrder = new Map(reviews.map((review) => [review.orderId, review]));
+  const eligibleOrders = orders.filter((order) => order.status === "delivered" && !reviewByOrder.has(order.id));
+  const [selectedOrderId, setSelectedOrderId] = useState("");
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+  const selectedOrder = eligibleOrders.find((order) => order.id === selectedOrderId) || eligibleOrders[0];
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!selectedOrder) return;
+    await submitReview(selectedOrder, user, rating, comment.trim());
+    setSelectedOrderId("");
+    setRating(5);
+    setComment("");
+    notify(`Thank you for rating ${selectedOrder.id}.`);
+  };
+  return (
+    <main className="container py-5 customer-page">
+      <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
+      <div className="row g-4">
+        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} · {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
+        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} · {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
+      </div>
     </main>
   );
 }
@@ -826,21 +936,32 @@ function Assistant({ user, menu }) {
 
 export default function App() {
   const [user, setUser] = useState(undefined);
+  const [profile, setProfile] = useState(null);
   const [menu, setMenu] = useState(fallbackMenu);
   const [inventory, setInventory] = useState(fallbackMenu.map((item) => ({ ...item, reorderPoint: 10 })));
   const [orders, setOrders] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [shiftLogs, setShiftLogs] = useState([]);
   const [supportMessages, setSupportMessages] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [cart, setCart] = useState([]);
   const [view, setView] = useState("store");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [serviceStatus, setServiceStatus] = useState({ firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
 
   useEffect(() => observeAuth(setUser), []);
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return undefined;
+    }
+    return subscribeUserProfile(user, setProfile);
+  }, [user]);
   useEffect(() => subscribeMenu(fallbackMenu, setMenu), []);
   useEffect(() => {
     if (!user || !["owner", "staff"].includes(user.role)) {
@@ -876,6 +997,20 @@ export default function App() {
     return subscribeSupportMessages(setSupportMessages);
   }, [user]);
   useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      return undefined;
+    }
+    return subscribeNotifications(user, setNotifications);
+  }, [user]);
+  useEffect(() => {
+    if (user?.role !== "customer") {
+      setReviews([]);
+      return undefined;
+    }
+    return subscribeReviews(user, setReviews);
+  }, [user]);
+  useEffect(() => {
     if (user) setView(defaultViewForRole(user.role));
   }, [user]);
   useEffect(() => {
@@ -897,27 +1032,33 @@ export default function App() {
   if (user === undefined) return <div className="loading-screen">Loading Taptap Foodtrip...</div>;
   if (!user) return <LoginPanel />;
 
+  const currentUser = { ...user, name: profile?.name || user.name };
+  const unreadCount = notifications.filter((notification) => !notification.readBy?.[user.uid]).length;
   const allowedViews = roleNavigation[user.role]?.map(([roleView]) => roleView) || [];
   const navigate = (nextView) => {
     if (allowedViews.includes(nextView)) setView(nextView);
   };
   const workspace = user.role === "owner"
-    ? <OwnerWorkspace section={view} user={user} orders={orders} inventory={inventory} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
+    ? <OwnerWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
     : user.role === "staff"
-      ? <StaffWorkspace section={view} user={user} orders={orders} inventory={inventory} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
+      ? <StaffWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
       : user.role === "rider"
-        ? <RiderWorkspace section={view} user={user} orders={orders} notify={setNotice} />
+        ? <RiderWorkspace section={view} user={currentUser} orders={orders} notify={setNotice} />
         : <OrdersView orders={orders} onTrack={setTrackingOrder} />;
 
   return (
     <div className="app-shell">
-      <AppHeader user={user} cartCount={cartCount} activeView={view} onCart={() => setCheckoutOpen(true)} onNavigate={navigate} />
+      <AppHeader user={currentUser} cartCount={cartCount} activeView={view} unreadCount={unreadCount} onCart={() => setCheckoutOpen(true)} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} />}
       {user.role === "customer" && view === "orders" && <OrdersView orders={orders} onTrack={setTrackingOrder} />}
+      {user.role === "customer" && view === "receipts" && <ReceiptsView orders={orders} />}
+      {user.role === "customer" && view === "feedback" && <ReviewsView user={currentUser} orders={orders} reviews={reviews} notify={setNotice} />}
+      {user.role === "customer" && view === "profile" && <CustomerProfile user={currentUser} profile={profile} notify={setNotice} />}
       {user.role !== "customer" && workspace}
-      {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={user} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
+      {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
-      {user.role === "customer" && <Assistant user={user} menu={menu} />}
+      {user.role === "customer" && <Assistant user={currentUser} menu={menu} />}
+      {notificationsOpen && <NotificationCenter user={currentUser} notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast">{notice}</div>}
     </div>
   );

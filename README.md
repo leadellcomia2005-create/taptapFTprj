@@ -56,8 +56,9 @@ role claims.
 
 ## Role workspaces
 
-- Customer: storefront, cart, checkout, purchases, delivery tracking and AI
-  menu assistance.
+- Customer: storefront, cart, checkout, personal information with a saved
+  delivery address, order history, downloadable digital receipts, previous
+  reviews, recent-order ratings, delivery tracking and AI menu assistance.
 - Owner / Super Admin: dashboard, sales and orders, inventory, reports and
   reconciliation, users and roles, audit logs, and system settings.
 - Staff / Admin: shift dashboard, walk-in POS, order queue, inventory
@@ -73,6 +74,10 @@ Staff can select the customer's conversation and reply; the reply appears
 inside that customer's chatbot. The walk-in POS supports increasing,
 decreasing, removing, and clearing line items before payment, with totals
 recalculated immediately.
+
+Every role has a realtime notification center. Customers receive order and
+staff-reply updates, staff receive new order/chat/review alerts, riders receive
+delivery assignments, and owners receive live sale notifications.
 
 ## Local setup
 

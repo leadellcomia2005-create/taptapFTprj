@@ -53,6 +53,17 @@
     "shiftLogs": {
       ".read": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')",
       ".write": "auth != null && (auth.token.role == 'owner' || auth.token.role == 'staff')"
+    },
+    "reviews": {
+      ".read": "auth != null",
+      "$orderId": {
+        ".write": "auth != null && newData.child('customerId').val() == auth.uid && root.child('orders').child($orderId).child('customerId').val() == auth.uid",
+        ".validate": "newData.hasChildren(['orderId', 'customerId', 'customerName', 'rating', 'createdAt']) && newData.child('rating').isNumber() && newData.child('rating').val() >= 1 && newData.child('rating').val() <= 5"
+      }
+    },
+    "notifications": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }

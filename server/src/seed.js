@@ -53,7 +53,9 @@ await admin.database().ref("inventory").set(
 );
 await admin.database().ref("public/store").set({
   name: "Taptap Foodtrip",
-  address: "BF Resort Drive, Las Pinas City",
+  address: "#17 Gemini Street, Pamplona Park, Pamplona Dos, Las Pinas City 1740",
+  latitude: 14.4509229,
+  longitude: 120.9764514,
   phone: "+639171234567",
   hours: "10:00 AM - 10:00 PM",
   updatedAt: Date.now()

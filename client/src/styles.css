@@ -96,7 +96,9 @@ button { font: inherit; }
 .pos-product .menu-photo { height: 130px; }
 .pos-product strong,.pos-product span { display: block; margin: 10px 13px 0; }.pos-product strong { font: 700 15px var(--display); }.pos-product span { color: var(--red); font-size: 10px; font-weight: 800; }
 .sticky-pos { position: sticky; top: 95px; }
-.delivery-map { width: 100%; height: 440px; }
+.delivery-map-wrap { position: relative; width: 100%; height: 440px; }
+.delivery-map { width: 100%; height: 100%; }
+.focus-store-button { position: absolute; z-index: 500; top: 12px; right: 12px; padding: 9px 12px; color: white; border: 2px solid white; background: var(--red); border-radius: 9px; box-shadow: 0 5px 18px rgba(20,17,13,.24); font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
 .custom-map-marker { background: transparent; border: 0; }
 .custom-map-marker span { width: 34px; height: 34px; display: grid; place-items: center; color: white; border: 4px solid white; border-radius: 50%; box-shadow: 0 4px 15px rgba(0,0,0,.25); font-size: 10px; font-weight: 900; }
 .camera-modal { z-index: 1100; }
@@ -171,7 +173,7 @@ button { font: inherit; }
 .assigned-list > button:hover,.assigned-list > button.active { border-color: var(--line); background: var(--paper); }
 .assigned-list > button span:first-child,.assigned-list > button strong,.assigned-list > button small { display: block; }
 .assigned-list > button small { max-width: 220px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.rider-map .delivery-map { height: 360px; border-radius: 12px; }
+.rider-map .delivery-map-wrap { height: 360px; overflow: hidden; border-radius: 12px; }
 .pos-cart-item { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .pos-cart-item > div:first-child strong,.pos-cart-item > div:first-child small { display: block; }
 .pos-cart-item > div:first-child strong { font-size: 10px; }.pos-cart-item > div:first-child small { margin-top: 3px; color: var(--muted); font-size: 8px; }

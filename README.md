@@ -79,6 +79,13 @@ Every role has a realtime notification center. Customers receive order and
 staff-reply updates, staff receive new order/chat/review alerts, riders receive
 delivery assignments, and owners receive live sale notifications.
 
+The delivery map defaults to the exact shop pin at **#17 Gemini Street,
+Pamplona Park, Pamplona Dos, Las Pinas City 1740**
+(`14.4509229, 120.9764514`). Use `VITE_STORE_LATITUDE` and
+`VITE_STORE_LONGITUDE` in `client/.env` if the storefront entrance pin needs
+fine adjustment. The `Focus Taptap shop` button restores the shop-centered
+map at any time.
+
 ## Local setup
 
 1. Install Node.js 22 or newer.

@@ -8,6 +8,7 @@ import {
   adjustInventory,
   createOrder,
   firebaseEnabled,
+  friendlyAuthError,
   login,
   logout,
   markNotificationRead,
@@ -93,31 +94,78 @@ function ServiceBadge({ name, active, note }) {
 }
 
 function LoginPanel({ onLoggedIn }) {
+  const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
+  const registrationStepDefaults = [
+    { id: "auth", label: "Authentication user", detail: "Waiting to create the secure email/password identity.", status: "pending" },
+    { id: "profile", label: "Customer profile", detail: "Waiting to save the profile in Realtime Database.", status: "pending" },
+    { id: "verification", label: "Verification email", detail: "Waiting to request the email from Firebase.", status: "pending" },
+    { id: "session", label: "Registration session", detail: "Waiting to close the temporary registration session.", status: "pending" }
+  ];
   const [role, setRole] = useState("customer");
-  const [registering, setRegistering] = useState(false);
+  const [registering, setRegistering] = useState(registrationRequested);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(demoAccounts.customer.email);
-  const [password, setPassword] = useState(demoAccounts.customer.password);
+  const [email, setEmail] = useState(registrationRequested ? "" : demoAccounts.customer.email);
+  const [password, setPassword] = useState(registrationRequested ? "" : demoAccounts.customer.password);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
+  const [registrationResult, setRegistrationResult] = useState(null);
+
+  const updateRegistrationStep = (id, status, detail) => {
+    setRegistrationSteps((current) => current.map((step) => (
+      step.id === id ? { ...step, status, detail } : step
+    )));
+  };
+
+  const toggleRegistration = () => {
+    setRegistering((current) => {
+      const next = !current;
+      const url = new URL(window.location.href);
+      if (next) url.searchParams.set("register", "true");
+      else url.searchParams.delete("register");
+      window.history.replaceState({}, "", url);
+      return next;
+    });
+    setRole("customer");
+    setName("");
+    setEmail("");
+    setPassword("");
+    setError("");
+    setRegistrationResult(null);
+    setRegistrationSteps(registrationStepDefaults);
+  };
 
   const selectRole = (nextRole) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("register");
+    window.history.replaceState({}, "", url);
     setRole(nextRole);
     setEmail(demoAccounts[nextRole].email);
     setPassword(demoAccounts[nextRole].password);
     setRegistering(false);
+    setRegistrationResult(null);
+    setRegistrationSteps(registrationStepDefaults);
   };
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setError("");
+    if (registering) {
+      setRegistrationResult(null);
+      setRegistrationSteps(registrationStepDefaults);
+    }
     try {
-      if (registering) await registerCustomer(name, email, password);
-      else await login(email, password, role, demoAccounts);
-      onLoggedIn?.();
+      if (registering) {
+        const result = await registerCustomer(name, email, password, updateRegistrationStep);
+        setRegistrationResult(result);
+        setPassword("");
+      } else {
+        await login(email, password, role, demoAccounts);
+        onLoggedIn?.();
+      }
     } catch (authError) {
-      setError(authError.message);
+      setError(friendlyAuthError(authError));
     } finally {
       setBusy(false);
     }
@@ -158,10 +206,34 @@ function LoginPanel({ onLoggedIn }) {
           <label className="form-label">Password
             <input className="form-control" type="password" minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
           </label>
+          {registering && (
+            <div className="firebase-registration-flow" aria-live="polite">
+              <div className="registration-flow-heading">
+                <div><strong>Live Firebase activity</strong><small>Project: taptapftprj-leadell-2026</small></div>
+                <span>{registrationResult ? "Complete" : busy ? "Working" : "Ready"}</span>
+              </div>
+              {registrationSteps.map((step) => (
+                <div className={`registration-step registration-${step.status}`} key={step.id}>
+                  <span className="registration-step-icon" aria-hidden="true" />
+                  <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+                </div>
+              ))}
+              {registrationResult && (
+                <div className="registration-result">
+                  <strong>Customer account created</strong>
+                  <span>UID: <code>{registrationResult.uid}</code></span>
+                  <span>Database: <code>{registrationResult.profilePath}</code></span>
+                  <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
+                </div>
+              )}
+            </div>
+          )}
           {error && <div className="alert alert-danger py-2 small">{error}</div>}
-          <button className="btn btn-danger w-100" disabled={busy}>{busy ? "Please wait..." : registering ? "Register with Firebase" : `Sign in as ${role}`}</button>
+          <button className="btn btn-danger w-100" disabled={busy}>
+            {busy ? "Registering in Firebase..." : registering ? "Register with Firebase" : `Sign in as ${role}`}
+          </button>
           <div className="d-flex justify-content-between mt-3 small">
-            <button type="button" className="btn btn-link p-0" onClick={() => setRegistering(!registering)}>
+            <button type="button" className="btn btn-link p-0" onClick={toggleRegistration}>
               {registering ? "Back to sign in" : "Customer registration"}
             </button>
             {!registering && <button type="button" className="btn btn-link p-0" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}

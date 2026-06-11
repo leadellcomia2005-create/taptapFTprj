@@ -1,14 +1,16 @@
-import { initializeApp } from "firebase/app";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAnalytics, isSupported, logEvent } from "firebase/analytics";
 import {
   connectAuthEmulator,
   createUserWithEmailAndPassword,
+  deleteUser,
   getAuth,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signOut
+  signOut,
+  updateProfile
 } from "firebase/auth";
 import {
   connectDatabaseEmulator,
@@ -46,12 +48,19 @@ let auth;
 let db;
 let storage;
 let analytics;
+let registrationAuth;
+let registrationDb;
 
 if (firebaseEnabled) {
   app = initializeApp(config);
   auth = getAuth(app);
   db = getDatabase(app);
   storage = getStorage(app);
+  const registrationApp = getApps().some((candidate) => candidate.name === "registration")
+    ? getApp("registration")
+    : initializeApp(config, "registration");
+  registrationAuth = getAuth(registrationApp);
+  registrationDb = getDatabase(registrationApp);
   isSupported().then((supported) => {
     if (supported) analytics = getAnalytics(app);
   });
@@ -61,6 +70,8 @@ if (firebaseEnabled) {
       connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
       connectDatabaseEmulator(db, "127.0.0.1", 9000);
       connectStorageEmulator(storage, "127.0.0.1", 9199);
+      connectAuthEmulator(registrationAuth, "http://127.0.0.1:9099", { disableWarnings: true });
+      connectDatabaseEmulator(registrationDb, "127.0.0.1", 9000);
     } catch {
       // Hot reload may initialize emulators more than once.
     }
@@ -137,22 +148,73 @@ export async function login(email, password, requestedRole, demoAccounts) {
   return user;
 }
 
-export async function registerCustomer(name, email, password) {
+export async function registerCustomer(name, email, password, onProgress = () => {}) {
   if (firebaseEnabled) {
-    const credential = await createUserWithEmailAndPassword(auth, email, password);
-    await set(ref(db, `users/${credential.user.uid}`), {
-      name,
-      email,
-      role: "customer",
-      createdAt: Date.now()
-    });
-    await sendEmailVerification(credential.user);
-    return credential.user;
+    let user;
+    onProgress("auth", "active", "Creating the email/password identity...");
+    try {
+      const credential = await createUserWithEmailAndPassword(registrationAuth, email, password);
+      user = credential.user;
+      await updateProfile(user, { displayName: name });
+      onProgress("auth", "success", `Authentication user created with UID ${user.uid}.`);
+    } catch (error) {
+      if (user) await deleteUser(user).catch(() => {});
+      onProgress("auth", "error", friendlyAuthError(error));
+      throw error;
+    }
+
+    onProgress("profile", "active", "Saving the customer profile to Realtime Database...");
+    try {
+      await set(ref(registrationDb, `users/${user.uid}`), {
+        name,
+        email,
+        role: "customer",
+        createdAt: Date.now()
+      });
+      onProgress("profile", "success", `Profile saved at users/${user.uid}.`);
+    } catch (error) {
+      await deleteUser(user).catch(() => {});
+      onProgress("profile", "error", "The profile could not be saved, so the incomplete Authentication user was removed.");
+      throw error;
+    }
+
+    let verificationSent = false;
+    onProgress("verification", "active", `Requesting a verification email for ${email}...`);
+    try {
+      await sendEmailVerification(user);
+      verificationSent = true;
+      onProgress("verification", "success", "Firebase accepted the verification email request.");
+    } catch {
+      onProgress("verification", "warning", "The account is ready, but Firebase could not send the verification email. It can be resent after sign-in.");
+    }
+
+    onProgress("session", "active", "Closing the temporary registration session...");
+    await signOut(registrationAuth);
+    onProgress("session", "success", "Registration finished. The customer can now sign in.");
+    return {
+      uid: user.uid,
+      email: user.email,
+      profilePath: `users/${user.uid}`,
+      verificationSent
+    };
   }
   const user = { uid: `demo-${crypto.randomUUID()}`, email, name, role: "customer" };
   localStorage.setItem(demoUserKey, JSON.stringify(user));
   window.dispatchEvent(new Event("storage"));
-  return user;
+  return { uid: user.uid, email, profilePath: `users/${user.uid}`, verificationSent: false };
+}
+
+export function friendlyAuthError(error) {
+  const messages = {
+    "auth/email-already-in-use": "This email already has a Firebase account. Use sign in or reset the password.",
+    "auth/invalid-email": "Enter a valid email address.",
+    "auth/weak-password": "Use a stronger password with at least 8 characters.",
+    "auth/network-request-failed": "Firebase could not be reached. Check the internet connection and try again.",
+    "auth/operation-not-allowed": "Email/Password registration is disabled in Firebase Authentication.",
+    "auth/invalid-credential": "The email or password is incorrect.",
+    "auth/invalid-login-credentials": "The email or password is incorrect."
+  };
+  return messages[error?.code] || error?.message || "Firebase could not complete the request.";
 }
 
 export async function logout() {

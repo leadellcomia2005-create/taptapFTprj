@@ -33,6 +33,22 @@ button { font: inherit; }
 .login-card h2 { margin: 7px 0 5px; font: 700 38px var(--display); }
 .login-card .form-label { width: 100%; margin: 10px 0 4px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .login-card .form-control { margin-top: 6px; min-height: 44px; font-size: 13px; text-transform: none; }
+.firebase-registration-flow { margin: 14px 0; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: #fbfaf8; }
+.registration-flow-heading,.registration-step { display: flex; align-items: center; gap: 10px; }
+.registration-flow-heading { justify-content: space-between; margin-bottom: 8px; }
+.registration-flow-heading strong,.registration-flow-heading small,.registration-step strong,.registration-step small,.registration-result span { display: block; }
+.registration-flow-heading strong { font-size: 11px; }
+.registration-flow-heading small,.registration-step small,.registration-result { color: var(--muted); font-size: 9px; }
+.registration-flow-heading > span { padding: 4px 7px; border-radius: 12px; color: #23659e; background: #e8f2fb; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.registration-step { padding: 8px 0; border-top: 1px solid var(--line); }
+.registration-step-icon { width: 11px; height: 11px; flex: 0 0 11px; border: 2px solid #bbb; border-radius: 50%; }
+.registration-active .registration-step-icon { border-color: #23659e; border-top-color: transparent; animation: registration-spin .8s linear infinite; }
+.registration-success .registration-step-icon { border-color: var(--green); background: var(--green); box-shadow: inset 0 0 0 2px #fff; }
+.registration-warning .registration-step-icon { border-color: #c68a1d; background: #f7c963; }
+.registration-error .registration-step-icon { border-color: var(--red); background: var(--red); }
+.registration-result { display: grid; gap: 3px; margin-top: 8px; padding: 10px; border-radius: 10px; color: #195f36; background: #e6f4eb; }
+.registration-result code { overflow-wrap: anywhere; color: inherit; }
+@keyframes registration-spin { to { transform: rotate(360deg); } }
 .role-tabs { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin: 20px 0 12px; padding: 5px; background: var(--paper); border-radius: 10px; }
 .role-tabs button { padding: 8px 3px; border: 0; color: var(--muted); background: transparent; border-radius: 7px; font-size: 9px; font-weight: 800; text-transform: capitalize; }
 .role-tabs button.active { color: white; background: var(--ink); }

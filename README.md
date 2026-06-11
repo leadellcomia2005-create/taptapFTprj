@@ -75,6 +75,12 @@ inside that customer's chatbot. The walk-in POS supports increasing,
 decreasing, removing, and clearing line items before payment, with totals
 recalculated immediately.
 
+Customer registration displays the live Firebase steps for Authentication
+user creation, Realtime Database profile storage, verification email request,
+and temporary session cleanup. Open `http://localhost:5173/?register=true` to
+go directly to this view. Realtime Database rules lock self-registered users
+to the customer role; only the owner can assign operational roles.
+
 Every role has a realtime notification center. Customers receive order and
 staff-reply updates, staff receive new order/chat/review alerts, riders receive
 delivery assignments, and owners receive live sale notifications.

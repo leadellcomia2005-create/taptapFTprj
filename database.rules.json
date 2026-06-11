@@ -16,9 +16,7 @@
       "$uid": {
         ".read": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
         ".write": "auth != null && (auth.uid == $uid || auth.token.role == 'owner')",
-        "role": {
-          ".write": "auth != null && auth.token.role == 'owner'"
-        }
+        ".validate": "auth.token.role == 'owner' || newData.child('role').val() == (data.exists() ? data.child('role').val() : 'customer')"
       }
     },
     "orders": {

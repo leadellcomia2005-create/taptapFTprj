@@ -102,13 +102,21 @@ installed.
 
 ## Firebase configuration
 
-1. Create a Firebase project and Web app.
-2. Enable Email/Password Authentication.
-3. Create a Realtime Database in `asia-southeast1`.
-4. Enable Storage, Analytics, Hosting and Cloud Functions.
-5. Copy `.firebaserc.example` to `.firebaserc` and add the project ID.
-6. Install the Firebase CLI and sign in with `firebase login`.
-7. Set Cloud Function secrets:
+This repository is linked to Firebase project
+`taptapftprj-leadell-2026`. Its Web app and Realtime Database in
+`asia-southeast1` are created, and the role-based database rules are deployed.
+
+1. In Firebase Console, open Authentication and click **Get started**.
+2. Enable the **Email/Password** provider.
+3. Install the Firebase CLI and sign in with `firebase login`.
+4. Use Application Default Credentials or an ignored local service-account
+   file when running Admin SDK commands.
+5. Run `npm run seed --prefix server` to create the four demo accounts,
+   custom role claims, menu, store details and inventory.
+6. Enable Storage only when proof-of-delivery uploads are required.
+7. Cloud Functions deployment requires the Blaze plan. Do not enable billing
+   unless serverless deployment is needed.
+8. Set Cloud Function secrets when deploying Functions:
 
 ```powershell
 firebase functions:secrets:set OPENAI_API_KEY
@@ -117,12 +125,11 @@ firebase functions:secrets:set TWILIO_ACCOUNT_SID
 firebase functions:secrets:set TWILIO_AUTH_TOKEN
 ```
 
-8. Add `DIALOGFLOW_PROJECT_ID`, `DIALOGFLOW_LANGUAGE_CODE`,
+9. Add `DIALOGFLOW_PROJECT_ID`, `DIALOGFLOW_LANGUAGE_CODE`,
    `OPENAI_MODEL`, and `TWILIO_FROM_NUMBER` to `functions/.env`.
-9. Give the Firebase Functions service account Dialogflow API Client access.
-10. Run `npm run seed --prefix server` with Application Default Credentials
-    to create the four demo accounts, custom role claims, menu and inventory.
-11. Run `npm run build`, then `firebase deploy`.
+10. Give the Firebase Functions service account Dialogflow API Client access.
+11. Run `npm run build`, then deploy the Firebase services available on the
+    selected plan.
 
 ## Socket.IO deployment
 

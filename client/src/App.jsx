@@ -232,11 +232,12 @@ function LoginPanel({ onLoggedIn }) {
           <button className="btn btn-danger w-100" disabled={busy}>
             {busy ? "Registering in Firebase..." : registering ? "Register with Firebase" : `Sign in as ${role}`}
           </button>
-          <div className="d-flex justify-content-between mt-3 small">
-            <button type="button" className="btn btn-link p-0" onClick={toggleRegistration}>
+          {/* erick: dating plain links, ginawang outline buttons para clickable. */}
+          <div className="d-flex justify-content-between gap-2 mt-3">
+            <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
               {registering ? "Back to sign in" : "Customer registration"}
             </button>
-            {!registering && <button type="button" className="btn btn-link p-0" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
+            {!registering && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
           </div>
         </form>
       </div>
@@ -261,7 +262,8 @@ function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigat
         {user.role === "customer" && <button className="btn btn-outline-dark btn-sm" onClick={onCart}>Cart ({cartCount})</button>}
         <button className="notification-button" onClick={onNotifications} aria-label="Open notifications">Alerts{unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div>
-        <button className="btn btn-link text-danger btn-sm" onClick={logout}>Log out</button>
+        {/* erick: ginawang solid red button (dati plain text link). */}
+        <button className="btn btn-danger btn-sm" onClick={logout}>Log out</button>
       </div>
     </header>
   );
@@ -292,11 +294,15 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
   const [category, setCategory] = useState("All");
   const categories = ["All", ...new Set(menu.map((item) => item.category))];
   const visible = category === "All" ? menu : menu.filter((item) => item.category === category);
+  // erick: i-cap ang add-to-cart sa available stock (gaya ng POS) para hindi lumampas.
   const add = (product) => setCart((current) => {
     const existing = current.find((item) => item.id === product.id);
-    return existing
-      ? current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1 } : item)
-      : [...current, { ...product, qty: 1 }];
+    if (existing) {
+      if (existing.qty >= product.stock) return current;
+      return current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1, stock: product.stock } : item);
+    }
+    if (product.stock < 1) return current;
+    return [...current, { ...product, qty: 1 }];
   });
 
   return (
@@ -769,13 +775,14 @@ function OrderManagement({ orders, canAdvance, notify }) {
     api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
   };
+  // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
   return (
     <div className="dashboard-card">
       <h3>Live order ledger</h3>
       <div className="table-responsive">
         <table className="table align-middle">
-          <thead><tr><th>Order</th><th>Customer</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{order.paymentMethod}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}</td></tr>)}</tbody>
+          <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ") || "—"}</span>{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}</td><td>{order.paymentMethod}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}</td></tr>)}</tbody>
         </table>
       </div>
     </div>

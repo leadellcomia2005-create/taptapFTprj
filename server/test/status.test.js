@@ -4,6 +4,6 @@ import { serviceStatus } from "../src/services.js";
 
 test("service status reports all credentialed integrations", () => {
   const status = serviceStatus();
-  assert.deepEqual(Object.keys(status).sort(), ["dialogflow", "firebase", "openai", "paymongo", "socket", "twilio", "twoFactor"]);
+  assert.deepEqual(Object.keys(status).sort(), ["dialogflow", "emailOtp", "firebase", "openai", "paymongo", "socket", "twilio", "twoFactor"]);
   assert.equal(status.socket, true);
 });

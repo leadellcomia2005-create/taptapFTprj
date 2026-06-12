@@ -1,4 +1,5 @@
 import dialogflow from "@google-cloud/dialogflow";
+import nodemailer from "nodemailer";
 import OpenAI from "openai";
 import twilio from "twilio";
 
@@ -12,7 +13,8 @@ export function serviceStatus() {
     openai: has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: has("PAYMONGO_SECRET_KEY"),
-    twilio: has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER")
+    twilio: has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
+    emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD")
   };
 }
 
@@ -126,5 +128,27 @@ export async function sendTwoFactorSms(to, code) {
     from: process.env.TWILIO_FROM_NUMBER,
     to,
     body: `Taptap Foodtrip verification code: ${code}. It expires in 10 minutes.`
+  });
+}
+
+let gmailTransport;
+
+export async function sendTwoFactorEmail(to, code) {
+  if (!serviceStatus().emailOtp || !to) {
+    throw new Error("Email OTP is unavailable because Gmail SMTP is not configured.");
+  }
+  gmailTransport ||= nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD
+    }
+  });
+  return gmailTransport.sendMail({
+    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+    to,
+    subject: "Your Taptap Foodtrip verification code",
+    text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes. If you did not request this code, change your password.`,
+    html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 10 minutes. If you did not request this code, change your password.</p>`
   });
 }

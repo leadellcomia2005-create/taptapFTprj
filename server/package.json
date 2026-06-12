@@ -17,6 +17,7 @@
     "express-rate-limit": "latest",
     "firebase-admin": "latest",
     "helmet": "latest",
+    "nodemailer": "^8.0.11",
     "openai": "latest",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",

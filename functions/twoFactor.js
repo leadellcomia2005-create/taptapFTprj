@@ -14,6 +14,10 @@ import { HttpError, validRecordId } from "./operations.js";
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const backupAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const maxFailures = 3;
+const otpExpiryMs = 600_000;
+const otpResendCooldownMs = 60_000;
+const otpSendWindowMs = 3_600_000;
+const maxOtpSendsPerWindow = 5;
 
 function keyFrom(value) {
   const key = Buffer.from(value || "", "base64");
@@ -101,6 +105,13 @@ const maskPhone = (value = "") => {
   const digits = value.replace(/\D/g, "");
   return digits.length >= 4 ? `••••••${digits.slice(-4)}` : "";
 };
+const maskEmail = (value = "") => {
+  const [name, domain] = String(value).split("@");
+  if (!name || !domain) return "";
+  return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
+};
+
+export const allowedTwoFactorMethods = (role) => role === "customer" ? ["totp", "sms", "email"] : ["totp"];
 
 async function transactionWithInitial(ref, initialValue, update) {
   let firstCall = true;
@@ -157,9 +168,10 @@ async function completeSuccess(db, user, method) {
   return issueSessionToken(db, user);
 }
 
-export async function twoFactorStatus(db, user, smsAvailable, encryptionKey, idToken) {
+export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, encryptionKey, idToken) {
   const [profile, initialConfig] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   let config = initialConfig;
+  const role = user.role || profile.role || "customer";
   if (config.locked && Number(config.lockedPasswordUpdatedAt || 0) > 0) {
     const currentPasswordVersion = await passwordUpdatedAt(idToken);
     if (currentPasswordVersion > Number(config.lockedPasswordUpdatedAt)) {
@@ -170,7 +182,7 @@ export async function twoFactorStatus(db, user, smsAvailable, encryptionKey, idT
   }
   let totpAvailable = true;
   try { keyFrom(encryptionKey); } catch { totpAvailable = false; }
-  return { uid: user.uid, name: profile.name || user.name || user.email, role: user.role || profile.role || "customer", emailVerified: user.email_verified === true, enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(smsAvailable && profile.phone), totpAvailable };
+  return { uid: user.uid, name: profile.name || user.name || user.email, role, emailVerified: user.email_verified === true, enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone), emailOtpAvailable: Boolean(role === "customer" && emailAvailable && user.email && user.email_verified === true), emailMasked: maskEmail(user.email), allowedMethods: allowedTwoFactorMethods(role), totpAvailable };
 }
 
 export async function beginTotpSetup(db, user, encryptionKey) {
@@ -186,19 +198,50 @@ export async function beginTotpSetup(db, user, encryptionKey) {
 
 export async function sendSmsCode(db, user, sendSms, purpose = "challenge") {
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
+  if (role !== "customer") throw new HttpError(403, "Operational accounts must use an authenticator app.");
   if (!profile.phone) throw new HttpError(400, "Add a phone number before choosing SMS.");
   if (purpose === "challenge" && (!config.enabled || config.method !== "sms")) throw new HttpError(409, "SMS is not the enrolled 2FA method.");
   const code = String(randomInt(100000, 1000000));
-  await db.ref(`twoFactor/${user.uid}/pendingSms`).set({ ...hashCode(code), purpose, expiresAt: Date.now() + 600_000 });
+  await db.ref(`twoFactor/${user.uid}/pendingSms`).set({ ...hashCode(code), purpose, expiresAt: Date.now() + otpExpiryMs });
   await sendSms(profile.phone, code);
   await audit(db, user.uid, "sms_sent", { method: "sms" });
-  return { sent: true, phoneMasked: maskPhone(profile.phone), expiresAt: Date.now() + 600_000 };
+  return { sent: true, phoneMasked: maskPhone(profile.phone), expiresAt: Date.now() + otpExpiryMs };
+}
+
+export async function sendEmailCode(db, user, sendEmail, purpose = "challenge", now = Date.now()) {
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
+  if (config.locked) throw new HttpError(423, "This account is locked.");
+  if (role !== "customer") throw new HttpError(403, "Email OTP is available only to customer accounts.");
+  if (user.email_verified !== true || !user.email) throw new HttpError(403, "Verify your email address before using email OTP.");
+  if (purpose === "challenge" && (!config.enabled || config.method !== "email")) throw new HttpError(409, "Email OTP is not the enrolled 2FA method.");
+
+  const previous = config.pendingEmail || {};
+  if (Number(previous.sentAt || 0) + otpResendCooldownMs > now) throw new HttpError(429, "Wait one minute before requesting another email code.");
+  const sameWindow = Number(previous.windowStartedAt || 0) + otpSendWindowMs > now;
+  const sendCount = sameWindow ? Number(previous.sendCount || 0) + 1 : 1;
+  if (sendCount > maxOtpSendsPerWindow) throw new HttpError(429, "Too many email codes requested. Try again in one hour.");
+
+  const code = String(randomInt(100000, 1000000));
+  const record = { ...hashCode(code), purpose, expiresAt: now + otpExpiryMs, sentAt: now, windowStartedAt: sameWindow ? Number(previous.windowStartedAt) : now, sendCount };
+  await db.ref(`twoFactor/${user.uid}/pendingEmail`).set(record);
+  try {
+    await sendEmail(user.email, code);
+  } catch (error) {
+    await db.ref(`twoFactor/${user.uid}/pendingEmail`).remove();
+    throw error;
+  }
+  await audit(db, user.uid, "email_sent", { method: "email" });
+  return { sent: true, emailMasked: maskEmail(user.email), expiresAt: record.expiresAt };
 }
 
 export async function finishEnrollment(db, user, method, code, encryptionKey, idToken) {
-  const config = await configurationFor(db, user.uid);
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
+  if (!allowedTwoFactorMethods(role).includes(method)) throw new HttpError(403, "Operational accounts must enroll with an authenticator app.");
   let secret;
   let valid = false;
   if (method === "totp") {
@@ -207,6 +250,8 @@ export async function finishEnrollment(db, user, method, code, encryptionKey, id
     valid = verifyTotp(secret, code);
   } else if (method === "sms") {
     valid = config.pendingSms?.purpose === "setup" && Number(config.pendingSms.expiresAt) >= Date.now() && verifyHash(code, config.pendingSms);
+  } else if (method === "email") {
+    valid = config.pendingEmail?.purpose === "setup" && Number(config.pendingEmail.expiresAt) >= Date.now() && verifyHash(code, config.pendingEmail);
   } else throw new HttpError(400, "Unsupported 2FA method.");
   if (!valid) return recordFailure(db, user, method, idToken);
   const backupCodes = Array.from({ length: 8 }, backupCode);
@@ -235,9 +280,11 @@ export async function verifyChallenge(db, user, input, encryptionKey, idToken) {
   }
   const valid = config.method === "totp"
     ? verifyTotp(decrypt(config.totpSecret, encryptionKey), input.code)
-    : config.pendingSms?.purpose === "challenge" && Number(config.pendingSms.expiresAt) >= Date.now() && verifyHash(input.code, config.pendingSms);
+    : config.method === "sms"
+      ? config.pendingSms?.purpose === "challenge" && Number(config.pendingSms.expiresAt) >= Date.now() && verifyHash(input.code, config.pendingSms)
+      : config.pendingEmail?.purpose === "challenge" && Number(config.pendingEmail.expiresAt) >= Date.now() && verifyHash(input.code, config.pendingEmail);
   if (!valid) return recordFailure(db, user, config.method, idToken);
-  await db.ref(`twoFactor/${user.uid}/pendingSms`).remove();
+  await db.ref(`twoFactor/${user.uid}`).update({ pendingSms: null, pendingEmail: null });
   return { customToken: await completeSuccess(db, user, config.method) };
 }
 
@@ -250,6 +297,6 @@ export async function resetTwoFactor(db, actor, userId) {
 
 export async function unlockTwoFactor(db, actor, userId) {
   if (!validRecordId(userId)) throw new HttpError(400, "Invalid user UID.");
-  await db.ref(`twoFactor/${userId}`).update({ failedAttempts: 0, locked: false, lockedAt: null, lockedPasswordUpdatedAt: null, unlockedAt: Date.now(), unlockedBy: actor.uid });
+  await db.ref(`twoFactor/${userId}`).update({ failedAttempts: 0, locked: false, lockedAt: null, lockedPasswordUpdatedAt: null, pendingEmail: null, pendingSms: null, unlockedAt: Date.now(), unlockedBy: actor.uid });
   await audit(db, userId, "unlocked", { actorId: actor.uid, actorName: actor.name });
 }

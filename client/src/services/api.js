@@ -25,6 +25,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ purpose })
   }),
+  sendTwoFactorEmail: (purpose) => request("/2fa/email/send", {
+    method: "POST",
+    body: JSON.stringify({ purpose })
+  }),
   finishTwoFactorSetup: (method, code) => request("/2fa/setup/verify", {
     method: "POST",
     body: JSON.stringify({ method, code })

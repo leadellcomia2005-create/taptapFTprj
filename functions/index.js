@@ -7,6 +7,7 @@ import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import OpenAI from "openai";
+import nodemailer from "nodemailer";
 import twilio from "twilio";
 import {
   adjustInventoryRecord,
@@ -31,6 +32,7 @@ import {
   beginTotpSetup,
   finishEnrollment,
   resetTwoFactor,
+  sendEmailCode,
   sendSmsCode,
   twoFactorStatus,
   unlockTwoFactor,
@@ -45,6 +47,8 @@ const paymongoKey = defineSecret("PAYMONGO_SECRET_KEY");
 const twilioSid = defineSecret("TWILIO_ACCOUNT_SID");
 const twilioToken = defineSecret("TWILIO_AUTH_TOKEN");
 const twoFactorKey = defineSecret("TWO_FACTOR_ENCRYPTION_KEY");
+const gmailUser = defineSecret("GMAIL_USER");
+const gmailAppPassword = defineSecret("GMAIL_APP_PASSWORD");
 const app = express();
 
 app.use(cors({ origin: true }));
@@ -116,6 +120,7 @@ app.get(route("/status"), (_req, res) => {
       dialogflow: Boolean(process.env.DIALOGFLOW_PROJECT_ID || process.env.GCLOUD_PROJECT),
       paymongo: Boolean(secretValue(paymongoKey)),
       twilio: Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER),
+      emailOtp: Boolean(secretValue(gmailUser) && secretValue(gmailAppPassword)),
       twoFactor: Boolean(secretValue(twoFactorKey))
     }
   });
@@ -132,14 +137,32 @@ const sendTwoFactorSms = async (to, code) => {
   });
 };
 
+let gmailTransport;
+const sendTwoFactorEmail = async (to, code) => {
+  const user = secretValue(gmailUser);
+  const password = secretValue(gmailAppPassword);
+  if (!user || !password || !to) throw new HttpError(503, "Email OTP is unavailable.");
+  gmailTransport ||= nodemailer.createTransport({ service: "gmail", auth: { user, pass: password } });
+  return gmailTransport.sendMail({
+    from: `"Taptap Foodtrip" <${user}>`,
+    to,
+    subject: "Your Taptap Foodtrip verification code",
+    text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes.`,
+    html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 10 minutes.</p>`
+  });
+};
+
 app.get(route("/2fa/status"), authenticateBootstrap, asyncRoute(async (req, res) => {
-  res.json(await twoFactorStatus(database(), req.user, Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER), secretValue(twoFactorKey), req.authToken));
+  res.json(await twoFactorStatus(database(), req.user, Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER), Boolean(secretValue(gmailUser) && secretValue(gmailAppPassword)), secretValue(twoFactorKey), req.authToken));
 }));
 app.post(route("/2fa/setup/totp"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await beginTotpSetup(database(), req.user, secretValue(twoFactorKey)));
 }));
 app.post(route("/2fa/sms/send"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await sendSmsCode(database(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
+}));
+app.post(route("/2fa/email/send"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await sendEmailCode(database(), req.user, sendTwoFactorEmail, req.body.purpose === "setup" ? "setup" : "challenge"));
 }));
 app.post(route("/2fa/setup/verify"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await finishEnrollment(database(), req.user, req.body.method, req.body.code, secretValue(twoFactorKey), req.authToken));
@@ -341,5 +364,5 @@ export const api = onRequest({
   region: "asia-southeast1",
   timeoutSeconds: 60,
   memory: "512MiB",
-  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey]
+  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey, gmailUser, gmailAppPassword]
 }, app);

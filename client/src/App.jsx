@@ -362,7 +362,8 @@ function EmailVerificationPanel({ user, onVerified }) {
 function TwoFactorPanel({ user, onComplete }) {
   const status = user.twoFactor || {};
   const setup = !status.enabled;
-  const [method, setMethod] = useState(status.method || "totp");
+  const customerAccount = status.role === "customer";
+  const [method, setMethod] = useState(status.method || (customerAccount && status.emailOtpAvailable ? "email" : "totp"));
   const [setupData, setSetupData] = useState(null);
   const [code, setCode] = useState("");
   const [backupMode, setBackupMode] = useState(false);
@@ -370,10 +371,12 @@ function TwoFactorPanel({ user, onComplete }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [deliveryMessage, setDeliveryMessage] = useState("");
 
   const beginTotp = async () => {
     setBusy(true);
     setError("");
+    setDeliveryMessage("");
     try {
       setSetupData(await api.beginTotpSetup());
     } catch (requestError) {
@@ -386,8 +389,24 @@ function TwoFactorPanel({ user, onComplete }) {
   const sendSms = async () => {
     setBusy(true);
     setError("");
+    setDeliveryMessage("");
     try {
-      await api.sendTwoFactorSms(setup ? "setup" : "challenge");
+      const response = await api.sendTwoFactorSms(setup ? "setup" : "challenge");
+      setDeliveryMessage(`A six-digit code was sent to ${response.phoneMasked}.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendEmail = async () => {
+    setBusy(true);
+    setError("");
+    setDeliveryMessage("");
+    try {
+      const response = await api.sendTwoFactorEmail(setup ? "setup" : "challenge");
+      setDeliveryMessage(`A six-digit code was sent to ${response.emailMasked}. Check Inbox and Spam.`);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -399,6 +418,7 @@ function TwoFactorPanel({ user, onComplete }) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setDeliveryMessage("");
     try {
       const response = setup
         ? await api.finishTwoFactorSetup(method, code)
@@ -457,20 +477,32 @@ function TwoFactorPanel({ user, onComplete }) {
       <form className="security-card" onSubmit={verify}>
         <p className="eyebrow text-danger">{setup ? "Required security setup" : "Second verification step"}</p>
         <h2>{setup ? "Set up two-factor authentication" : "Verify your sign-in"}</h2>
-        <p>{setup ? "Choose an authenticator app or SMS. Every POS account must enroll before access is granted." : `Enter the code from your ${status.method === "sms" ? "phone" : "authenticator app"}.`}</p>
+        <p>{setup
+          ? customerAccount
+            ? "Choose email, an authenticator app, or SMS. Your verified email is the easiest option without another app."
+            : "Operational accounts must use an authenticator app before accessing protected POS tools."
+          : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "authenticator app"}.`}</p>
         {setup && (
           <div className="security-methods">
-            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); }}>
+            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
               <strong>Authenticator App</strong><small>Free, offline 30-second codes</small>
             </button>
-            <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); }}>
-              <strong>SMS OTP</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Requires a phone number and Twilio"}</small>
-            </button>
+            {customerAccount && (
+              <>
+                <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
+                  <strong>Email OTP</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Gmail sender setup required"}</small>
+                </button>
+                <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
+                  <strong>SMS OTP</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Requires a phone number and Twilio"}</small>
+                </button>
+              </>
+            )}
           </div>
         )}
         {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Generate authenticator QR code</button>}
         {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Authenticator setup QR code" /><p>Manual key: <code>{setupData.manualKey}</code></p></div>}
         {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
+        {method === "email" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.emailOtpAvailable} onClick={sendEmail}>Send 6-digit email code</button>}
         {!backupMode ? (
           <>
             <label className="form-label">6-digit verification code</label>
@@ -479,6 +511,7 @@ function TwoFactorPanel({ user, onComplete }) {
         ) : (
           <label className="form-label">Single-use backup code<input className="form-control" autoComplete="one-time-code" value={backupCode} onChange={(event) => setBackupCode(event.target.value.toUpperCase())} /></label>
         )}
+        {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
         {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
         <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
           {busy ? "Verifying..." : setup ? "Verify and enable 2FA" : "Verify and open POS"}

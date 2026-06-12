@@ -26,6 +26,7 @@ prototype remains in the separate `taptap-foodtrip` folder.
 | PayMongo | Hosted GCash checkout sessions |
 | Twilio | SMS order-status notifications |
 | TOTP / QR code | Mandatory two-factor enrollment and per-session verification |
+| Gmail SMTP | Customer-only six-digit email OTP as an alternative 2FA method |
 | HTML5 Geolocation API | Rider `watchPosition` tracking |
 | MediaDevices API | Rear-camera proof of delivery |
 | Vibration API | Rider assignment and milestone alerts |
@@ -84,6 +85,14 @@ go directly to this view. Realtime Database rules lock self-registered users
 to the customer role; only the owner can assign operational roles. On first
 login, Firebase email verification is required before 2FA enrollment and POS
 access.
+
+Customers may enroll with email OTP, an authenticator app, or SMS. Owner,
+staff, and rider accounts must use an authenticator app. Email OTP codes are
+hashed in the database, expire after 10 minutes, are limited to five sends per
+hour with a one-minute resend delay, and are sent only to the verified Firebase
+email address. Configure `GMAIL_USER` and `GMAIL_APP_PASSWORD` in `server/.env`
+to enable the local sender. Use a dedicated Gmail account and an App Password,
+not its normal password.
 
 Every role has a realtime notification center. Customers receive order and
 staff-reply updates, staff receive new order/chat/review alerts, riders receive

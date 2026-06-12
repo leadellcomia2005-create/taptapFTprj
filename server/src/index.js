@@ -33,6 +33,7 @@ import {
   createPayMongoCheckout,
   detectDialogflowIntent,
   generateInsights,
+  sendTwoFactorEmail,
   sendTwoFactorSms,
   sendTwilioSms,
   serviceStatus
@@ -48,6 +49,7 @@ import {
   beginTotpSetup,
   finishEnrollment,
   resetTwoFactor,
+  sendEmailCode,
   sendSmsCode,
   twoFactorStatus,
   unlockTwoFactor,
@@ -144,7 +146,8 @@ app.get("/api/status", (_req, res) => res.json({
 }));
 
 app.get("/api/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {
-  res.json(await twoFactorStatus(db(), req.user, serviceStatus().twilio, req.authToken));
+  const status = serviceStatus();
+  res.json(await twoFactorStatus(db(), req.user, status.twilio, status.emailOtp, req.authToken));
 }));
 
 app.post("/api/2fa/setup/totp", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
@@ -153,6 +156,10 @@ app.post("/api/2fa/setup/totp", authenticateBootstrap, requireVerifiedEmail, asy
 
 app.post("/api/2fa/sms/send", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await sendSmsCode(db(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
+}));
+
+app.post("/api/2fa/email/send", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await sendEmailCode(db(), req.user, sendTwoFactorEmail, req.body.purpose === "setup" ? "setup" : "challenge"));
 }));
 
 app.post("/api/2fa/setup/verify", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {

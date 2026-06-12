@@ -338,14 +338,18 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
   );
 }
 
-function Checkout({ cart, user, profile, onClose, onComplete, notify }) {
-  const [payment, setPayment] = useState("gcash");
+function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, notify }) {
+  const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
   const [phone, setPhone] = useState(profile?.phone || "+639171234567");
   const [address, setAddress] = useState(profile?.address || "BF Resort Village, Las Pinas City");
   const [busy, setBusy] = useState(false);
   const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0) + 49;
 
   const place = async () => {
+    if (!phone.trim() || !address.trim()) {
+      notify("Enter a mobile number and delivery address before placing the order.");
+      return;
+    }
     setBusy(true);
     try {
       const orderPayload = {
@@ -371,6 +375,8 @@ function Checkout({ cart, user, profile, onClose, onComplete, notify }) {
         notify(`Order ${orderId} was sent to the kitchen.`);
       }
       onComplete(orderId);
+    } catch (error) {
+      notify(error.message || "The order could not be placed. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -386,12 +392,12 @@ function Checkout({ cart, user, profile, onClose, onComplete, notify }) {
             <label className="form-label mt-3">Mobile number<input className="form-control" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
             <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
             <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>via PayMongo</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "via PayMongo" : "Not configured"}</small></button></div>
               <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
             </div>
             <div className="checkout-total"><span>Total including delivery</span><strong>{currency(total)}</strong></div>
           </div>
-          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
+          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !phone.trim() || !address.trim()} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
         </div>
       </div>
     </div>
@@ -1145,7 +1151,7 @@ export default function App() {
       {user.role === "customer" && view === "feedback" && <ReviewsView user={currentUser} orders={orders} reviews={reviews} notify={setNotice} />}
       {user.role === "customer" && view === "profile" && <CustomerProfile user={currentUser} profile={profile} notify={setNotice} />}
       {user.role !== "customer" && workspace}
-      {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
+      {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu} />}
       {notificationsOpen && <NotificationCenter user={currentUser} notifications={notifications} onClose={() => setNotificationsOpen(false)} />}

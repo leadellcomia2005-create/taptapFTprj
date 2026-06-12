@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { notificationRecord } from "../src/notifications.js";
+import { hasVerifiedEmail } from "../src/security.js";
 import { verifyTotp } from "../src/twoFactor.js";
 
 test("verifies RFC 6238 compatible six-digit TOTP values", () => {
@@ -22,4 +23,10 @@ test("creates user-scoped notifications with a 30-day expiry", () => {
   assert.ok(entry.expiresAt - entry.createdAt === 30 * 24 * 60 * 60 * 1000);
   assert.ok(entry.createdAt >= before);
   assert.equal("targetRole" in entry, false);
+});
+
+test("requires Firebase's verified-email claim before POS access", () => {
+  assert.equal(hasVerifiedEmail({ email_verified: true }), true);
+  assert.equal(hasVerifiedEmail({ email_verified: false }), false);
+  assert.equal(hasVerifiedEmail({}), false);
 });

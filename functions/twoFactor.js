@@ -170,7 +170,7 @@ export async function twoFactorStatus(db, user, smsAvailable, encryptionKey, idT
   }
   let totpAvailable = true;
   try { keyFrom(encryptionKey); } catch { totpAvailable = false; }
-  return { uid: user.uid, name: profile.name || user.name || user.email, role: user.role || profile.role || "customer", enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(smsAvailable && profile.phone), totpAvailable };
+  return { uid: user.uid, name: profile.name || user.name || user.email, role: user.role || profile.role || "customer", emailVerified: user.email_verified === true, enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(smsAvailable && profile.phone), totpAvailable };
 }
 
 export async function beginTotpSetup(db, user, encryptionKey) {

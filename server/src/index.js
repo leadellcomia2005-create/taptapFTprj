@@ -22,8 +22,10 @@ import {
   bearerToken,
   canAccessOrder,
   errorResponse,
+  hasVerifiedEmail,
   HttpError,
   requireRoles,
+  requireVerifiedEmail,
   validRecordId
 } from "./security.js";
 import {
@@ -114,6 +116,9 @@ async function authenticateBootstrap(req, res, next) {
 
 async function authenticate(req, res, next) {
   return authenticateBootstrap(req, res, () => {
+    if (!hasVerifiedEmail(req.user)) {
+      return res.status(403).json({ error: "Verify your email address before accessing the POS.", code: "EMAIL_VERIFICATION_REQUIRED" });
+    }
     if (req.user.mfaSession !== true) {
       return res.status(403).json({ error: "Complete two-factor authentication before accessing the POS.", code: "TWO_FACTOR_REQUIRED" });
     }
@@ -142,19 +147,19 @@ app.get("/api/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) =>
   res.json(await twoFactorStatus(db(), req.user, serviceStatus().twilio, req.authToken));
 }));
 
-app.post("/api/2fa/setup/totp", authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post("/api/2fa/setup/totp", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await beginTotpSetup(db(), req.user));
 }));
 
-app.post("/api/2fa/sms/send", authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post("/api/2fa/sms/send", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await sendSmsCode(db(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
 }));
 
-app.post("/api/2fa/setup/verify", authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post("/api/2fa/setup/verify", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await finishEnrollment(db(), req.user, req.body.method, req.body.code, req.authToken));
 }));
 
-app.post("/api/2fa/challenge", authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post("/api/2fa/challenge", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await verifyChallenge(db(), req.user, req.body, req.authToken));
 }));
 
@@ -328,6 +333,7 @@ io.use(async (socket, next) => {
   if (!firebaseAdminEnabled) return next(new Error("Firebase Admin is unavailable."));
   try {
     socket.user = await verifyUserToken(socket.handshake.auth?.token);
+    if (!hasVerifiedEmail(socket.user)) throw new Error("Email verification required.");
     if (socket.user.mfaSession !== true) throw new Error("Two-factor authentication required.");
     return next();
   } catch {

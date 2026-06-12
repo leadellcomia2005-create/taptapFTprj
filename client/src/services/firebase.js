@@ -7,6 +7,7 @@ import {
   getAuth,
   inMemoryPersistence,
   onAuthStateChanged,
+  reload,
   sendEmailVerification,
   sendPasswordResetEmail,
   setPersistence,
@@ -126,7 +127,7 @@ export function observeAuth(callback) {
       unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) return callback(null);
         const token = await user.getIdTokenResult(true);
-        if (token.claims.mfaSession !== true) {
+        if (token.claims.mfaSession !== true || token.claims.email_verified !== true) {
           try {
             const status = await api.twoFactorStatus();
             return callback({
@@ -134,7 +135,8 @@ export function observeAuth(callback) {
               email: user.email,
               name: status.name || user.displayName || user.email,
               role: status.role || token.claims.role || "customer",
-              mfaVerified: false,
+              emailVerified: status.emailVerified,
+              mfaVerified: token.claims.mfaSession === true,
               twoFactor: status,
               firebaseUser: user
             });
@@ -149,6 +151,7 @@ export function observeAuth(callback) {
           email: user.email,
           name: profile.val()?.name || user.displayName || user.email,
           role: token.claims.role || profile.val()?.role || "customer",
+          emailVerified: true,
           mfaVerified: true,
           firebaseUser: user
         });
@@ -191,8 +194,38 @@ export async function login(email, password, requestedRole, demoAccounts) {
 
 export async function completeTwoFactorSession(customToken) {
   if (!firebaseEnabled) return;
-  await signInWithCustomToken(auth, customToken);
-  await auth.currentUser?.getIdToken(true);
+  const credential = await signInWithCustomToken(auth, customToken);
+  const token = await credential.user.getIdTokenResult(true);
+  if (token.claims.mfaSession !== true) throw new Error("The secure POS session could not be created. Please try again.");
+  const profile = await get(ref(db, `users/${credential.user.uid}`));
+  return {
+    uid: credential.user.uid,
+    email: credential.user.email,
+    name: profile.val()?.name || credential.user.displayName || credential.user.email,
+    role: token.claims.role || profile.val()?.role || "customer",
+    emailVerified: token.claims.email_verified === true,
+    mfaVerified: true,
+    firebaseUser: credential.user
+  };
+}
+
+export async function resendVerificationEmail() {
+  if (!firebaseEnabled || !auth.currentUser) throw new Error("Sign in again before requesting a verification email.");
+  await reload(auth.currentUser);
+  if (auth.currentUser.emailVerified) return { alreadyVerified: true };
+  await sendEmailVerification(auth.currentUser);
+  return { alreadyVerified: false };
+}
+
+export async function refreshEmailVerification() {
+  if (!firebaseEnabled || !auth.currentUser) throw new Error("Sign in again before checking verification.");
+  await reload(auth.currentUser);
+  await auth.currentUser.getIdToken(true);
+  const status = await api.twoFactorStatus();
+  return {
+    verified: status.emailVerified === true,
+    status
+  };
 }
 
 export async function registerCustomer(name, email, password, onProgress = () => {}) {

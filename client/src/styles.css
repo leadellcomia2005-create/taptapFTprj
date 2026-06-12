@@ -63,6 +63,7 @@ button { font: inherit; }
 .otp-inputs input:focus { outline: 2px solid rgba(217,54,36,.22); border-color: var(--red); }
 .totp-setup { margin: 16px 0; text-align: center; }.totp-setup img { width: 220px; max-width: 100%; border: 8px solid white; box-shadow: 0 8px 30px rgba(0,0,0,.1); }.totp-setup code { overflow-wrap: anywhere; }
 .backup-code-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 20px 0; }.backup-code-grid code { padding: 11px; color: var(--ink); background: var(--paper); border-radius: 8px; text-align: center; font-size: 14px; font-weight: 800; }
+.email-verification-actions { display: grid; gap: 10px; margin-top: 22px; }
 .role-tabs { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin: 20px 0 12px; padding: 5px; background: var(--paper); border-radius: 10px; }
 .role-tabs button { padding: 8px 3px; border: 0; color: var(--muted); background: transparent; border-radius: 7px; font-size: 9px; font-weight: 800; text-transform: capitalize; }
 .role-tabs button.active { color: white; background: var(--ink); }

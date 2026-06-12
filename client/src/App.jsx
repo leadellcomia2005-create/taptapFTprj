@@ -14,6 +14,8 @@ import {
   logout,
   observeAuth,
   registerCustomer,
+  refreshEmailVerification,
+  resendVerificationEmail,
   resetPassword,
   saveUserProfile,
   saveShiftLog,
@@ -295,7 +297,69 @@ function OtpInput({ value, onChange, disabled }) {
   );
 }
 
-function TwoFactorPanel({ user }) {
+function EmailVerificationPanel({ user, onVerified }) {
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const resend = async () => {
+    setBusy("resend");
+    setMessage("");
+    setError("");
+    try {
+      const result = await resendVerificationEmail();
+      setMessage(result.alreadyVerified
+        ? "Firebase already shows this email as verified. Click check again to continue."
+        : `A new verification link was sent to ${user.email}. Check Inbox and Spam.`);
+    } catch (requestError) {
+      setError(friendlyAuthError(requestError));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const check = async () => {
+    setBusy("check");
+    setMessage("");
+    setError("");
+    try {
+      const result = await refreshEmailVerification();
+      if (!result.verified) {
+        setError("Firebase still shows this email as unverified. Open the link in your email, then check again.");
+        return;
+      }
+      onVerified(result.status);
+    } catch (requestError) {
+      setError(friendlyAuthError(requestError));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="security-screen">
+      <div className="security-card">
+        <p className="eyebrow text-danger">First login verification</p>
+        <h2>Verify your email</h2>
+        <p>Before setting up 2FA, open the Firebase verification link sent to <strong>{user.email}</strong>.</p>
+        <div className="email-verification-actions">
+          <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
+          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy)} onClick={resend}>
+            {busy === "resend" ? "Sending..." : "Resend verification email"}
+          </button>
+          <button className="btn btn-danger w-100" disabled={Boolean(busy)} onClick={check}>
+            {busy === "check" ? "Checking Firebase..." : "I verified my email, check again"}
+          </button>
+        </div>
+        {message && <div className="alert alert-success py-2 small mt-3">{message}</div>}
+        {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
+        <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
+      </div>
+    </div>
+  );
+}
+
+function TwoFactorPanel({ user, onComplete }) {
   const status = user.twoFactor || {};
   const setup = !status.enabled;
   const [method, setMethod] = useState(status.method || "totp");
@@ -340,10 +404,22 @@ function TwoFactorPanel({ user }) {
         ? await api.finishTwoFactorSetup(method, code)
         : await api.verifyTwoFactor(backupMode ? { backupCode } : { code });
       if (response.backupCodes) setResult(response);
-      else await completeTwoFactorSession(response.customToken);
+      else onComplete(await completeTwoFactorSession(response.customToken));
     } catch (requestError) {
       setCode("");
       setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const continueWithBackupCodes = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      onComplete(await completeTwoFactorSession(result.customToken));
+    } catch (requestError) {
+      setError(friendlyAuthError(requestError));
     } finally {
       setBusy(false);
     }
@@ -368,7 +444,10 @@ function TwoFactorPanel({ user }) {
         <h2>Save these backup codes</h2>
         <p>Each code works once. They cannot be displayed again after you continue.</p>
         <div className="backup-code-grid">{result.backupCodes.map((item) => <code key={item}>{item}</code>)}</div>
-        <button className="btn btn-danger w-100" onClick={() => completeTwoFactorSession(result.customToken)}>I saved my codes, continue</button>
+        {error && <div className="alert alert-danger py-2 small">{error}</div>}
+        <button className="btn btn-danger w-100" disabled={busy} onClick={continueWithBackupCodes}>
+          {busy ? "Opening your dashboard..." : "I saved my codes, continue"}
+        </button>
       </div></div>
     );
   }
@@ -1342,7 +1421,14 @@ export default function App() {
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
   if (user === undefined) return <div className="loading-screen">Loading Taptap Foodtrip...</div>;
   if (!user) return <LoginPanel />;
-  if (!user.mfaVerified) return <TwoFactorPanel user={user} />;
+  if (user.emailVerified !== true) {
+    return <EmailVerificationPanel user={user} onVerified={(status) => setUser((current) => ({
+      ...current,
+      emailVerified: true,
+      twoFactor: status
+    }))} />;
+  }
+  if (!user.mfaVerified) return <TwoFactorPanel user={user} onComplete={setUser} />;
 
   const currentUser = { ...user, name: profile?.name || user.name };
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;

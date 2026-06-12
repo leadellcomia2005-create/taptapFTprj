@@ -78,8 +78,16 @@ async function authenticateBootstrap(req, res, next) {
   }
 }
 
+function requireVerifiedEmail(req, res, next) {
+  if (req.user?.email_verified !== true) {
+    return res.status(403).json({ error: "Verify your email address before continuing.", code: "EMAIL_VERIFICATION_REQUIRED" });
+  }
+  return next();
+}
+
 async function authenticate(req, res, next) {
   return authenticateBootstrap(req, res, () => {
+    if (req.user?.email_verified !== true) return res.status(403).json({ error: "Verify your email address before accessing the POS.", code: "EMAIL_VERIFICATION_REQUIRED" });
     if (req.user.mfaSession !== true) return res.status(403).json({ error: "Complete two-factor authentication before accessing the POS." });
     return next();
   });
@@ -127,16 +135,16 @@ const sendTwoFactorSms = async (to, code) => {
 app.get(route("/2fa/status"), authenticateBootstrap, asyncRoute(async (req, res) => {
   res.json(await twoFactorStatus(database(), req.user, Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER), secretValue(twoFactorKey), req.authToken));
 }));
-app.post(route("/2fa/setup/totp"), authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post(route("/2fa/setup/totp"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await beginTotpSetup(database(), req.user, secretValue(twoFactorKey)));
 }));
-app.post(route("/2fa/sms/send"), authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post(route("/2fa/sms/send"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await sendSmsCode(database(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
 }));
-app.post(route("/2fa/setup/verify"), authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post(route("/2fa/setup/verify"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await finishEnrollment(database(), req.user, req.body.method, req.body.code, secretValue(twoFactorKey), req.authToken));
 }));
-app.post(route("/2fa/challenge"), authenticateBootstrap, asyncRoute(async (req, res) => {
+app.post(route("/2fa/challenge"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await verifyChallenge(database(), req.user, req.body, secretValue(twoFactorKey), req.authToken));
 }));
 

@@ -248,6 +248,7 @@ export async function twoFactorStatus(db, user, smsAvailable, idToken) {
     uid: user.uid,
     name: profile.name || user.name || user.email,
     role: user.role || profile.role || "customer",
+    emailVerified: user.email_verified === true,
     enabled: Boolean(config.enabled),
     method: config.method || null,
     locked: Boolean(config.locked),

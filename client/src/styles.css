@@ -81,7 +81,8 @@ button { font: inherit; }
 .menu-card h3 { margin: 0; font: 700 21px var(--display); }
 .menu-card p { min-height: 42px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .menu-card small { color: #998f83; font-size: 8px; }
-.floating-checkout { position: fixed; z-index: 900; right: 24px; bottom: 24px; padding: 13px 20px; box-shadow: 0 12px 28px rgba(180,40,23,.32); }
+/* erick: inangat sa 92px para hindi mag-overlap sa AI button (na nasa 24px). */
+.floating-checkout { position: fixed; z-index: 900; right: 24px; bottom: 92px; padding: 13px 20px; box-shadow: 0 12px 28px rgba(180,40,23,.32); }
 
 .modal.d-block { display: block; background: rgba(20,17,13,.6); backdrop-filter: blur(4px); }
 .payment-option { width: 100%; padding: 15px; text-align: left; border: 1px solid var(--line); background: white; border-radius: 12px; }
@@ -90,6 +91,10 @@ button { font: inherit; }
 .checkout-total { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .checkout-total strong { font: 700 23px var(--display); }
 
+/* erick: wrap ang mahabang items list sa Order Queue. */
+.order-items-cell { max-width: 260px; }
+.order-items-cell span { display: block; white-space: normal; word-break: break-word; }
+.order-items-cell small { margin-top: 3px; font-size: 9px; }
 .dashboard-page { min-height: calc(100vh - 76px); }
 .dashboard-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 24px; }
 .metric-card,.dashboard-card { height: 100%; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 15px; }
@@ -199,7 +204,7 @@ button { font: inherit; }
 .pos-remove { grid-column: 1 / -1; justify-self: start; padding: 0; color: var(--red); border: 0; background: transparent; font-size: 8px; font-weight: 800; }
 
 .assistant-launcher { position: fixed; z-index: 999; right: 24px; bottom: 24px; width: 54px; height: 54px; color: white; border: 0; background: var(--red); border-radius: 50% 50% 8px 50%; box-shadow: 0 12px 28px rgba(180,40,23,.32); font-weight: 900; }
-.floating-checkout + .assistant-launcher { bottom: 90px; }
+/* erick: tinanggal ang sirang sibling rule; fixed bottom positions na lang. */
 .assistant-panel { position: fixed; z-index: 1050; right: 24px; bottom: 88px; width: min(360px,calc(100vw - 30px)); overflow: hidden; background: white; border-radius: 17px; box-shadow: 0 25px 70px rgba(25,20,14,.24); }
 .assistant-panel header { display: flex; justify-content: space-between; padding: 16px; color: white; background: var(--ink); }.assistant-panel header strong,.assistant-panel header small { display: block; }.assistant-panel header small { color: rgba(255,255,255,.55); font-size: 8px; }.assistant-panel header button { color: white; border: 0; background: none; font-size: 20px; }
 .assistant-messages { height: 280px; overflow: auto; padding: 14px; background: var(--paper); }.assistant-messages > div { max-width: 86%; margin-bottom: 9px; padding: 10px 12px; border-radius: 12px; font-size: 10px; line-height: 1.55; }.assistant-messages .bot { background: white; }.assistant-messages .user { margin-left: auto; color: white; background: var(--red); }.assistant-messages small { display: block; margin-top: 4px; opacity: .55; font-size: 7px; }

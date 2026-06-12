@@ -103,6 +103,8 @@ export async function createOrderRecord(db, user, input) {
 
   if (!transaction.committed) throw new HttpError(409, transactionError || "The order could not be completed.");
 
+  const committedInventory = transaction.snapshot.val() || {};
+
   const updates = {
     [`orders/${orderId}`]: order,
     [`auditLogs/AUD-${createdAt}-${orderId}`]: {
@@ -130,12 +132,16 @@ export async function createOrderRecord(db, user, input) {
       orderId
     })
   };
+  // erick: i-mirror ang nabawasang stock sa public/menu para live ang storefront availability.
+  for (const item of items) {
+    updates[`public/menu/${item.id}/stock`] = Number(committedInventory[item.id]?.stock ?? 0);
+  }
 
   try {
     await db.ref().update(updates);
   } catch (error) {
     const rollbackSnapshot = await inventoryRef.once("value");
-    await transactionWithInitial(inventoryRef, rollbackSnapshot.val(), (inventory) => {
+    const rollback = await transactionWithInitial(inventoryRef, rollbackSnapshot.val(), (inventory) => {
       if (!inventory) return inventory;
       const restored = { ...inventory };
       for (const item of items) {
@@ -144,6 +150,13 @@ export async function createOrderRecord(db, user, input) {
       }
       return restored;
     });
+    // erick: ibalik din ang public/menu stock kapag na-rollback ang order.
+    const restoredInventory = rollback.snapshot?.val() || {};
+    const menuRestore = {};
+    for (const item of items) {
+      menuRestore[`public/menu/${item.id}/stock`] = Number(restoredInventory[item.id]?.stock ?? 0);
+    }
+    await db.ref().update(menuRestore).catch(() => {});
     throw error;
   }
   return { id: orderId, order };
@@ -236,6 +249,8 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
   });
   if (!result.committed) throw new HttpError(failure === "Inventory item not found." ? 404 : 409, failure || "Inventory was not updated.");
   const item = result.snapshot.val();
+  // erick: i-sync ang public/menu stock sa manual na adjustment.
+  await db.ref(`public/menu/${itemId}/stock`).set(Number(item.stock || 0));
   await db.ref("auditLogs").push({
     action: delta > 0 ? "inventory_received" : "inventory_adjusted",
     itemId,

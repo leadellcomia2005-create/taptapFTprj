@@ -48,6 +48,9 @@ for (const account of accounts) {
       emailVerified: true
     });
   }
+  if (account.role !== "customer" && !user.emailVerified) {
+    user = await auth.updateUser(user.uid, { emailVerified: true });
+  }
   await auth.setCustomUserClaims(user.uid, { role: account.role });
   await database.ref(`users/${user.uid}`).update({
     name: account.name,

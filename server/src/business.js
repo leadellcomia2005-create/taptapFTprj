@@ -7,16 +7,13 @@ import {
   validateLocation,
   validateOrderItems
 } from "./security.js";
+import { notificationUpdates, userIdsForRoles } from "./notifications.js";
 
 const deliveryFee = 49;
 const paymentMethods = ["gcash", "cod", "cash"];
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
-}
-
-function notification(title, message, values = {}) {
-  return { title, message, createdAt: Date.now(), readBy: {}, ...values };
 }
 
 function cloneData(value) {
@@ -62,9 +59,10 @@ export async function createOrderRecord(db, user, input) {
   const customerId = isWalkIn ? "walk-in" : user.uid;
   const customerName = isWalkIn ? "Walk-in Customer" : profile.name || user.name || user.email;
   const orderId = db.ref("orders").push().key;
-  const customerNotificationId = db.ref("notifications").push().key;
-  const staffNotificationId = db.ref("notifications").push().key;
-  const ownerNotificationId = db.ref("notifications").push().key;
+  const [staffUserIds, ownerUserIds] = await Promise.all([
+    userIdsForRoles(db, ["staff"]),
+    userIdsForRoles(db, ["owner"])
+  ]);
   const createdAt = Date.now();
   const order = {
     customerId,
@@ -116,18 +114,21 @@ export async function createOrderRecord(db, user, input) {
       total,
       createdAt
     },
-    [`notifications/${customerNotificationId}`]: notification("Order confirmed", `Order ${orderId} was received.`, {
-      targetUserId: customerId,
+    ...notificationUpdates(db, customerId === "walk-in" ? [] : [customerId], {
+      title: "Order confirmed",
+      message: `Order ${orderId} was received.`,
       type: "order",
       orderId
     }),
-    [`notifications/${staffNotificationId}`]: notification("New order received", `${orderId} from ${customerName} is waiting in the queue.`, {
-      targetRole: "staff",
+    ...notificationUpdates(db, staffUserIds, {
+      title: "New order received",
+      message: `${orderId} from ${customerName} is waiting in the queue.`,
       type: "order",
       orderId
     }),
-    [`notifications/${ownerNotificationId}`]: notification("New sale recorded", `${orderId} added ${total} PHP to the live sales ledger.`, {
-      targetRole: "owner",
+    ...notificationUpdates(db, ownerUserIds, {
+      title: "New sale recorded",
+      message: `${orderId} added ${total} PHP to the live sales ledger.`,
       type: "sale",
       orderId
     })
@@ -205,18 +206,20 @@ export async function updateOrderRecord(db, user, orderId, input) {
     }
   };
   if (changes.status && order.customerId !== "walk-in") {
-    updates[`notifications/${db.ref("notifications").push().key}`] = notification(
-      "Order status updated",
-      `${orderId} is now ${changes.status.replaceAll("-", " ")}.`,
-      { targetUserId: order.customerId, type: "order", orderId }
-    );
+    Object.assign(updates, notificationUpdates(db, [order.customerId], {
+      title: "Order status updated",
+      message: `${orderId} is now ${changes.status.replaceAll("-", " ")}.`,
+      type: "order",
+      orderId
+    }));
   }
   if (changes.riderId && changes.riderId !== previous.riderId) {
-    updates[`notifications/${db.ref("notifications").push().key}`] = notification(
-      "Delivery assigned",
-      `${orderId} has been assigned to you.`,
-      { targetUserId: changes.riderId, type: "delivery", orderId }
-    );
+    Object.assign(updates, notificationUpdates(db, [changes.riderId], {
+      title: "Delivery assigned",
+      message: `${orderId} has been assigned to you.`,
+      type: "delivery",
+      orderId
+    }));
   }
   await db.ref().update(updates);
   return { order, changes };
@@ -251,7 +254,8 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
   const item = result.snapshot.val();
   // erick: i-sync ang public/menu stock sa manual na adjustment.
   await db.ref(`public/menu/${itemId}/stock`).set(Number(item.stock || 0));
-  await db.ref("auditLogs").push({
+  const updates = {
+    [`auditLogs/${db.ref("auditLogs").push().key}`]: {
     action: delta > 0 ? "inventory_received" : "inventory_adjusted",
     itemId,
     itemName: item.name,
@@ -261,7 +265,17 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
     actorName: user.name || user.email,
     actorRole: user.role,
     createdAt: Date.now()
-  });
+    }
+  };
+  if (Number(item.stock || 0) <= Number(item.reorderPoint || 10)) {
+    const ownerIds = await userIdsForRoles(db, ["owner"]);
+    Object.assign(updates, notificationUpdates(db, [...ownerIds, user.uid], {
+      title: "Low stock alert",
+      message: `${item.name} has ${item.stock || 0} item(s) remaining.`,
+      type: "inventory"
+    }));
+  }
+  await db.ref().update(updates);
   return { item: { id: itemId, ...item } };
 }
 
@@ -324,7 +338,12 @@ export async function saveShiftLogRecord(db, user, input) {
       actorName: user.name || user.email,
       actorRole: user.role,
       createdAt
-    }
+    },
+    ...notificationUpdates(db, [user.uid], {
+      title: "Shift summary ready",
+      message: `Your shift summary is ready with ${entry.orderCount} order(s) and a variance of ${entry.variance} PHP.`,
+      type: "shift"
+    })
   });
   return { id: shiftId };
 }

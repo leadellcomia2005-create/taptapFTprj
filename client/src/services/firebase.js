@@ -10,6 +10,7 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   setPersistence,
+  signInWithCustomToken,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
@@ -125,12 +126,30 @@ export function observeAuth(callback) {
       unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) return callback(null);
         const token = await user.getIdTokenResult(true);
+        if (token.claims.mfaSession !== true) {
+          try {
+            const status = await api.twoFactorStatus();
+            return callback({
+              uid: user.uid,
+              email: user.email,
+              name: status.name || user.displayName || user.email,
+              role: status.role || token.claims.role || "customer",
+              mfaVerified: false,
+              twoFactor: status,
+              firebaseUser: user
+            });
+          } catch {
+            await signOut(auth);
+            return callback(null);
+          }
+        }
         const profile = await get(ref(db, `users/${user.uid}`));
         callback({
           uid: user.uid,
           email: user.email,
           name: profile.val()?.name || user.displayName || user.email,
           role: token.claims.role || profile.val()?.role || "customer",
+          mfaVerified: true,
           firebaseUser: user
         });
       });
@@ -150,9 +169,8 @@ export async function login(email, password, requestedRole, demoAccounts) {
   if (firebaseEnabled) {
     await authPersistenceReady;
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    const token = await credential.user.getIdTokenResult(true);
-    const profile = await get(ref(db, `users/${credential.user.uid}`));
-    const role = token.claims.role || profile.val()?.role || "customer";
+    const status = await api.twoFactorStatus();
+    const role = status.role || "customer";
     if (requestedRole && requestedRole !== role) {
       await signOut(auth);
       throw new Error(`This account is registered as ${role}, not ${requestedRole}.`);
@@ -169,6 +187,12 @@ export async function login(email, password, requestedRole, demoAccounts) {
   demoUser = user;
   window.dispatchEvent(new Event("taptap-demo-auth"));
   return user;
+}
+
+export async function completeTwoFactorSession(customToken) {
+  if (!firebaseEnabled) return;
+  await signInWithCustomToken(auth, customToken);
+  await auth.currentUser?.getIdToken(true);
 }
 
 export async function registerCustomer(name, email, password, onProgress = () => {}) {
@@ -292,35 +316,14 @@ export function subscribeNotifications(user, callback) {
   }
   const normalize = (value = {}) => Object.entries(value)
       .map(([id, notification]) => ({ id, ...notification }))
-      .filter((notification) =>
-        notification.targetUserId === user.uid ||
-        notification.targetRole === user.role
-      )
+      .filter((notification) => notification.targetUserId === user.uid && Number(notification.expiresAt || Infinity) > Date.now())
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   if (firebaseEnabled) {
-    let personal = {};
-    let role = {};
-    const emit = () => callback(normalize({ ...personal, ...role }));
-    const unsubscribePersonal = onValue(
+    api.cleanupNotifications().catch(() => {});
+    return onValue(
       query(ref(db, "notifications"), orderByChild("targetUserId"), equalTo(user.uid)),
-      (snapshot) => {
-        personal = snapshot.val() || {};
-        emit();
-      }
+      (snapshot) => callback(normalize(snapshot.val() || {}))
     );
-    const unsubscribeRole = user.role === "customer"
-      ? () => {}
-      : onValue(
-          query(ref(db, "notifications"), orderByChild("targetRole"), equalTo(user.role)),
-          (snapshot) => {
-            role = snapshot.val() || {};
-            emit();
-          }
-        );
-    return () => {
-      unsubscribePersonal();
-      unsubscribeRole();
-    };
   }
   const emit = () => callback(normalize(readDemoData().notifications));
   emit();
@@ -333,19 +336,18 @@ export function subscribeNotifications(user, callback) {
 }
 
 export async function createNotification(notification) {
-  const entry = { ...notification, createdAt: Date.now(), readBy: {} };
-  if (firebaseEnabled) return push(ref(db, "notifications"), entry);
+  const entry = { ...notification, createdAt: Date.now(), expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, readAt: null };
+  if (firebaseEnabled) return api.createNotification(notification);
   const data = readDemoData();
   data.notifications[`NOTIF-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`] = entry;
   writeDemoData(data);
 }
 
 export async function markNotificationRead(notificationId, userId) {
-  if (firebaseEnabled) return set(ref(db, `notifications/${notificationId}/readBy/${userId}`), true);
+  if (firebaseEnabled) return api.markAllNotificationsRead();
   const data = readDemoData();
   if (data.notifications[notificationId]) {
-    data.notifications[notificationId].readBy ||= {};
-    data.notifications[notificationId].readBy[userId] = true;
+    if (data.notifications[notificationId].targetUserId === userId) data.notifications[notificationId].readAt = Date.now();
     writeDemoData(data);
   }
 }
@@ -390,7 +392,8 @@ export async function submitReview(order, user, rating, comment) {
     writeDemoData(data);
   }
   await createNotification({
-    targetRole: "staff",
+    targetUserId: firebaseEnabled ? undefined : "demo-staff",
+    targetRole: firebaseEnabled ? "staff" : undefined,
     title: "New customer review",
     message: `${user.name} rated order ${order.id} ${rating}/5.`,
     type: "review"
@@ -517,8 +520,8 @@ export async function createOrder(order) {
   writeDemoData(data);
   await Promise.all([
     createNotification({ targetUserId: order.customerId, title: "Order confirmed", message: `Order ${id} was received.`, type: "order", orderId: id }),
-    createNotification({ targetRole: "staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
-    createNotification({ targetRole: "owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
+    createNotification({ targetUserId: "demo-staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
+    createNotification({ targetUserId: "demo-owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
   ]);
   return id;
 }
@@ -608,7 +611,7 @@ export async function sendSupportMessage(text, actor, conversation = {}) {
     writeDemoData(data);
   }
   await createNotification(actor.role === "customer"
-    ? { targetRole: "staff", title: "New support message", message: `${actor.name}: ${text}`, type: "chat" }
+    ? { targetUserId: firebaseEnabled ? undefined : "demo-staff", targetRole: firebaseEnabled ? "staff" : undefined, title: "New support message", message: `${actor.name}: ${text}`, type: "chat" }
     : { targetUserId: customerId, title: "Staff replied", message: `${actor.name}: ${text}`, type: "chat" });
 }
 

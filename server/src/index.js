@@ -1,9 +1,10 @@
-import "dotenv/config";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import cors from "cors";
+import dotenv from "dotenv";
 import express from "express";
 import rateLimit from "express-rate-limit";
-import { applicationDefault, initializeApp } from "firebase-admin/app";
+import { applicationDefault, cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getDatabase } from "firebase-admin/database";
 import helmet from "helmet";
@@ -30,9 +31,28 @@ import {
   createPayMongoCheckout,
   detectDialogflowIntent,
   generateInsights,
+  sendTwoFactorSms,
   sendTwilioSms,
   serviceStatus
 } from "./services.js";
+import {
+  cleanupExpiredNotifications,
+  clearNotifications,
+  createNotification,
+  dismissNotification,
+  markAllNotificationsRead
+} from "./notifications.js";
+import {
+  beginTotpSetup,
+  finishEnrollment,
+  resetTwoFactor,
+  sendSmsCode,
+  twoFactorStatus,
+  unlockTwoFactor,
+  verifyChallenge
+} from "./twoFactor.js";
+
+dotenv.config({ override: true });
 
 const app = express();
 const server = createServer(app);
@@ -47,7 +67,9 @@ let firebaseAdminEnabled = false;
 let firebaseAdminError = "Firebase Admin credentials are not configured.";
 if (process.env.FIREBASE_DATABASE_URL) {
   try {
-    const credential = applicationDefault();
+    const credential = process.env.GOOGLE_APPLICATION_CREDENTIALS
+      ? cert(JSON.parse(readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf8")))
+      : applicationDefault();
     await credential.getAccessToken();
     initializeApp({
       credential,
@@ -77,16 +99,26 @@ function requireFirebaseAdmin(_req, res, next) {
   return next();
 }
 
-async function authenticate(req, res, next) {
+async function authenticateBootstrap(req, res, next) {
   if (!firebaseAdminEnabled) return requireFirebaseAdmin(req, res, next);
   const token = bearerToken(req.headers.authorization);
   if (!token) return res.status(401).json({ error: "Authentication required." });
   try {
+    req.authToken = token;
     req.user = await verifyUserToken(token);
     return next();
   } catch {
     return res.status(401).json({ error: "Invalid authentication token." });
   }
+}
+
+async function authenticate(req, res, next) {
+  return authenticateBootstrap(req, res, () => {
+    if (req.user.mfaSession !== true) {
+      return res.status(403).json({ error: "Complete two-factor authentication before accessing the POS.", code: "TWO_FACTOR_REQUIRED" });
+    }
+    return next();
+  });
 }
 
 function asyncRoute(handler) {
@@ -104,6 +136,26 @@ function asyncRoute(handler) {
 app.get("/api/status", (_req, res) => res.json({
   services: { ...serviceStatus(), firebase: firebaseAdminEnabled, socket: firebaseAdminEnabled },
   firebaseAdminError: firebaseAdminEnabled ? null : firebaseAdminError
+}));
+
+app.get("/api/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await twoFactorStatus(db(), req.user, serviceStatus().twilio, req.authToken));
+}));
+
+app.post("/api/2fa/setup/totp", authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await beginTotpSetup(db(), req.user));
+}));
+
+app.post("/api/2fa/sms/send", authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await sendSmsCode(db(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
+}));
+
+app.post("/api/2fa/setup/verify", authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await finishEnrollment(db(), req.user, req.body.method, req.body.code, req.authToken));
+}));
+
+app.post("/api/2fa/challenge", authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await verifyChallenge(db(), req.user, req.body, req.authToken));
 }));
 
 app.post("/api/assistant", authenticate, asyncRoute(async (req, res) => {
@@ -139,6 +191,29 @@ app.post("/api/notifications/sms", authenticate, requireRoles("owner", "staff"),
   if (!order) throw new HttpError(404, "Order not found.");
   const result = await sendTwilioSms({ to: order.phone, orderId: req.body.orderId, status: order.status });
   res.json({ sent: Boolean(result), sid: result?.sid || null });
+}));
+
+app.post("/api/notifications", authenticate, asyncRoute(async (req, res) => {
+  res.status(201).json(await createNotification(db(), req.user, req.body));
+}));
+
+app.post("/api/notifications/read-all", authenticate, asyncRoute(async (req, res) => {
+  await markAllNotificationsRead(db(), req.user.uid);
+  res.json({ updated: true });
+}));
+
+app.post("/api/notifications/cleanup", authenticate, asyncRoute(async (req, res) => {
+  res.json({ deleted: await cleanupExpiredNotifications(db(), req.user.uid) });
+}));
+
+app.delete("/api/notifications", authenticate, asyncRoute(async (req, res) => {
+  await clearNotifications(db(), req.user.uid);
+  res.json({ cleared: true });
+}));
+
+app.delete("/api/notifications/:notificationId", authenticate, asyncRoute(async (req, res) => {
+  await dismissNotification(db(), req.user.uid, req.params.notificationId);
+  res.json({ dismissed: true });
 }));
 
 app.get("/api/orders", authenticate, asyncRoute(async (req, res) => {
@@ -200,6 +275,50 @@ app.post("/api/admin/roles", authenticate, requireRoles("owner"), asyncRoute(asy
   res.json({ updated: true });
 }));
 
+app.get("/api/admin/users", authenticate, requireRoles("owner"), asyncRoute(async (_req, res) => {
+  const [authResult, profilesSnapshot, twoFactorSnapshot] = await Promise.all([
+    getAuth().listUsers(1000),
+    db().ref("users").once("value"),
+    db().ref("twoFactor").once("value")
+  ]);
+  const profiles = profilesSnapshot.val() || {};
+  const security = twoFactorSnapshot.val() || {};
+  const users = authResult.users.map((record) => {
+    const profile = profiles[record.uid] || {};
+    const status = security[record.uid] || {};
+    return {
+      uid: record.uid,
+      email: record.email || profile.email || "",
+      name: profile.name || record.displayName || record.email || record.uid,
+      role: record.customClaims?.role || profile.role || "customer",
+      twoFactorEnabled: Boolean(status.enabled),
+      twoFactorMethod: status.method || null,
+      twoFactorLocked: Boolean(status.locked)
+    };
+  });
+  res.json({ users });
+}));
+
+app.post("/api/admin/users/:uid/2fa/reset", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  await resetTwoFactor(db(), req.user, req.params.uid);
+  res.json({ reset: true });
+}));
+
+app.post("/api/admin/users/:uid/2fa/unlock", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  await unlockTwoFactor(db(), req.user, req.params.uid);
+  res.json({ unlocked: true });
+}));
+
+app.post("/api/admin/users/:uid/message", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  const result = await createNotification(db(), req.user, {
+    targetUserId: req.params.uid,
+    title: req.body.title || "Message from administrator",
+    message: req.body.message,
+    type: "admin"
+  });
+  res.status(201).json(result);
+}));
+
 const io = new SocketServer(server, {
   cors: { origin: allowedOrigins, credentials: true },
   maxHttpBufferSize: 100_000
@@ -209,6 +328,7 @@ io.use(async (socket, next) => {
   if (!firebaseAdminEnabled) return next(new Error("Firebase Admin is unavailable."));
   try {
     socket.user = await verifyUserToken(socket.handshake.auth?.token);
+    if (socket.user.mfaSession !== true) throw new Error("Two-factor authentication required.");
     return next();
   } catch {
     return next(new Error("Unauthorized"));

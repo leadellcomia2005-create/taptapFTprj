@@ -25,6 +25,7 @@ prototype remains in the separate `taptap-foodtrip` folder.
 | OpenAI API | Assistant fallback plus sales and inventory insights |
 | PayMongo | Hosted GCash checkout sessions |
 | Twilio | SMS order-status notifications |
+| TOTP / QR code | Mandatory two-factor enrollment and per-session verification |
 | HTML5 Geolocation API | Rider `watchPosition` tracking |
 | MediaDevices API | Rear-camera proof of delivery |
 | Vibration API | Rider assignment and milestone alerts |
@@ -148,6 +149,7 @@ firebase functions:secrets:set OPENAI_API_KEY
 firebase functions:secrets:set PAYMONGO_SECRET_KEY
 firebase functions:secrets:set TWILIO_ACCOUNT_SID
 firebase functions:secrets:set TWILIO_AUTH_TOKEN
+firebase functions:secrets:set TWO_FACTOR_ENCRYPTION_KEY
 ```
 
 9. Add `DIALOGFLOW_PROJECT_ID`, `DIALOGFLOW_LANGUAGE_CODE`,

@@ -1,14 +1,19 @@
-import "dotenv/config";
-import { applicationDefault, initializeApp } from "firebase-admin/app";
+import dotenv from "dotenv";
+import { readFileSync } from "node:fs";
+import { applicationDefault, cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getDatabase } from "firebase-admin/database";
+
+dotenv.config({ override: true });
 
 if (!process.env.FIREBASE_DATABASE_URL) {
   throw new Error("Set FIREBASE_DATABASE_URL before running the seed command.");
 }
 
 initializeApp({
-  credential: applicationDefault(),
+  credential: process.env.GOOGLE_APPLICATION_CREDENTIALS
+    ? cert(JSON.parse(readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf8")))
+    : applicationDefault(),
   databaseURL: process.env.FIREBASE_DATABASE_URL
 });
 

@@ -59,8 +59,21 @@ function validateDeliveryProof(dataUrl) {
   return dataUrl;
 }
 
-function notification(title, message, values = {}) {
-  return { title, message, createdAt: Date.now(), readBy: {}, ...values };
+function notification(targetUserId, title, message, values = {}) {
+  const createdAt = Date.now();
+  return { targetUserId, title, message, createdAt, expiresAt: createdAt + 30 * 24 * 60 * 60 * 1000, readAt: null, ...values };
+}
+
+function notificationUpdates(db, recipients, title, message, values = {}) {
+  return Object.fromEntries([...new Set(recipients.filter(Boolean))].map((targetUserId) => [
+    `notifications/${db.ref("notifications").push().key}`,
+    notification(targetUserId, title, message, values)
+  ]));
+}
+
+async function userIdsForRoles(db, roleValues) {
+  const users = (await db.ref("users").once("value")).val() || {};
+  return Object.entries(users).filter(([, profile]) => roleValues.includes(profile?.role)).map(([uid]) => uid);
 }
 
 function cloneData(value) {
@@ -140,9 +153,7 @@ export async function createOrderRecord(db, user, input) {
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
   const isWalkIn = user.role !== "customer";
   const orderId = db.ref("orders").push().key;
-  const customerNotificationId = db.ref("notifications").push().key;
-  const staffNotificationId = db.ref("notifications").push().key;
-  const ownerNotificationId = db.ref("notifications").push().key;
+  const [staffIds, ownerIds] = await Promise.all([userIdsForRoles(db, ["staff"]), userIdsForRoles(db, ["owner"])]);
   const createdAt = Date.now();
   const order = {
     customerId: isWalkIn ? "walk-in" : user.uid,
@@ -179,19 +190,21 @@ export async function createOrderRecord(db, user, input) {
   });
   if (!transaction.committed) throw new HttpError(409, transactionError || "The order could not be completed.");
 
+  const committedInventory = transaction.snapshot.val() || {};
   const updates = {
     [`orders/${orderId}`]: order,
     [`auditLogs/AUD-${createdAt}-${orderId}`]: { action: "order_created", orderId, actorId: user.uid, actorRole: user.role, total: order.total, createdAt },
-    [`notifications/${customerNotificationId}`]: notification("Order confirmed", `Order ${orderId} was received.`, { targetUserId: order.customerId, type: "order", orderId }),
-    [`notifications/${staffNotificationId}`]: notification("New order received", `${orderId} from ${order.customerName} is waiting in the queue.`, { targetRole: "staff", type: "order", orderId }),
-    [`notifications/${ownerNotificationId}`]: notification("New sale recorded", `${orderId} added ${order.total} PHP to the live sales ledger.`, { targetRole: "owner", type: "sale", orderId })
+    ...notificationUpdates(db, isWalkIn ? [] : [order.customerId], "Order confirmed", `Order ${orderId} was received.`, { type: "order", orderId }),
+    ...notificationUpdates(db, staffIds, "New order received", `${orderId} from ${order.customerName} is waiting in the queue.`, { type: "order", orderId }),
+    ...notificationUpdates(db, ownerIds, "New sale recorded", `${orderId} added ${order.total} PHP to the live sales ledger.`, { type: "sale", orderId })
   };
+  for (const item of items) updates[`public/menu/${item.id}/stock`] = Number(committedInventory[item.id]?.stock ?? 0);
 
   try {
     await db.ref().update(updates);
   } catch (error) {
     const rollbackSnapshot = await inventoryRef.once("value");
-    await transactionWithInitial(inventoryRef, rollbackSnapshot.val(), (inventory) => {
+    const rollback = await transactionWithInitial(inventoryRef, rollbackSnapshot.val(), (inventory) => {
       if (!inventory) return inventory;
       const restored = { ...inventory };
       for (const item of items) {
@@ -200,6 +213,10 @@ export async function createOrderRecord(db, user, input) {
       }
       return restored;
     });
+    const menuRestore = {};
+    const restoredInventory = rollback.snapshot?.val() || {};
+    for (const item of items) menuRestore[`public/menu/${item.id}/stock`] = Number(restoredInventory[item.id]?.stock ?? 0);
+    await db.ref().update(menuRestore).catch(() => {});
     throw error;
   }
   return { id: orderId, order };
@@ -239,10 +256,10 @@ export async function updateOrderRecord(db, user, orderId, input) {
     [`auditLogs/AUD-${Date.now()}-${orderId}`]: { action: "order_updated", orderId, status: changes.status || null, actorId: user.uid, actorRole: user.role, createdAt: Date.now() }
   };
   if (changes.status && order.customerId !== "walk-in") {
-    updates[`notifications/${db.ref("notifications").push().key}`] = notification("Order status updated", `${orderId} is now ${changes.status.replaceAll("-", " ")}.`, { targetUserId: order.customerId, type: "order", orderId });
+    Object.assign(updates, notificationUpdates(db, [order.customerId], "Order status updated", `${orderId} is now ${changes.status.replaceAll("-", " ")}.`, { type: "order", orderId }));
   }
   if (changes.riderId && changes.riderId !== previous.riderId) {
-    updates[`notifications/${db.ref("notifications").push().key}`] = notification("Delivery assigned", `${orderId} has been assigned to you.`, { targetUserId: changes.riderId, type: "delivery", orderId });
+    Object.assign(updates, notificationUpdates(db, [changes.riderId], "Delivery assigned", `${orderId} has been assigned to you.`, { type: "delivery", orderId }));
   }
   await db.ref().update(updates);
   return { order, changes };
@@ -273,7 +290,15 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
   });
   if (!result.committed) throw new HttpError(failure === "Inventory item not found." ? 404 : 409, failure || "Inventory was not updated.");
   const item = result.snapshot.val();
-  await db.ref("auditLogs").push({ action: delta > 0 ? "inventory_received" : "inventory_adjusted", itemId, itemName: item.name, quantity: delta, reason, actorId: user.uid, actorRole: user.role, createdAt: Date.now() });
+  const updates = {
+    [`public/menu/${itemId}/stock`]: Number(item.stock || 0),
+    [`auditLogs/${db.ref("auditLogs").push().key}`]: { action: delta > 0 ? "inventory_received" : "inventory_adjusted", itemId, itemName: item.name, quantity: delta, reason, actorId: user.uid, actorRole: user.role, createdAt: Date.now() }
+  };
+  if (Number(item.stock || 0) <= Number(item.reorderPoint || 10)) {
+    const ownerIds = await userIdsForRoles(db, ["owner"]);
+    Object.assign(updates, notificationUpdates(db, [...ownerIds, user.uid], "Low stock alert", `${item.name} has ${item.stock || 0} item(s) remaining.`, { type: "inventory" }));
+  }
+  await db.ref().update(updates);
   return { item: { id: itemId, ...item } };
 }
 
@@ -320,7 +345,8 @@ export async function saveShiftLogRecord(db, user, input) {
   const createdAt = Date.now();
   await db.ref().update({
     [`shiftLogs/${id}`]: { ...entry, staffId: user.uid, staffName: user.name || user.email, createdAt },
-    [`auditLogs/AUD-${createdAt}-${id}`]: { action: "shift_closed", shiftLogId: id, actorId: user.uid, actorRole: user.role, createdAt }
+    [`auditLogs/AUD-${createdAt}-${id}`]: { action: "shift_closed", shiftLogId: id, actorId: user.uid, actorRole: user.role, createdAt },
+    ...notificationUpdates(db, [user.uid], "Shift summary ready", `Your shift summary is ready with ${entry.orderCount} order(s) and a variance of ${entry.variance} PHP.`, { type: "shift" })
   });
   return { id };
 }

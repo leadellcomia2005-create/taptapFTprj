@@ -8,6 +8,7 @@ export function serviceStatus() {
   return {
     firebase: has("FIREBASE_DATABASE_URL"),
     socket: true,
+    twoFactor: has("TWO_FACTOR_ENCRYPTION_KEY"),
     openai: has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: has("PAYMONGO_SECRET_KEY"),
@@ -113,5 +114,17 @@ export async function sendTwilioSms({ to, orderId, status }) {
     from: process.env.TWILIO_FROM_NUMBER,
     to,
     body: `Taptap Foodtrip: Order ${orderId} is now ${String(status).replaceAll("-", " ")}.`
+  });
+}
+
+export async function sendTwoFactorSms(to, code) {
+  if (!serviceStatus().twilio || !to) {
+    throw new Error("SMS 2FA is unavailable because Twilio is not configured.");
+  }
+  const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  return client.messages.create({
+    from: process.env.TWILIO_FROM_NUMBER,
+    to,
+    body: `Taptap Foodtrip verification code: ${code}. It expires in 10 minutes.`
   });
 }

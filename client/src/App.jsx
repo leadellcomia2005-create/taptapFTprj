@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CameraProof from "./components/CameraProof";
 import DeliveryMap from "./components/DeliveryMap";
 import SalesChart from "./components/SalesChart";
@@ -6,12 +6,12 @@ import { demoAccounts, demoSales, fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
 import {
   adjustInventory,
+  completeTwoFactorSession,
   createOrder,
   firebaseEnabled,
   friendlyAuthError,
   login,
   logout,
-  markNotificationRead,
   observeAuth,
   registerCustomer,
   resetPassword,
@@ -44,6 +44,17 @@ const statusLabel = (value) => ({
   arrived: "Arrived",
   delivered: "Delivered"
 }[value] || value);
+
+const relativeTime = (timestamp) => {
+  const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+};
 
 const roleNavigation = {
   customer: [
@@ -245,6 +256,161 @@ function LoginPanel({ onLoggedIn }) {
   );
 }
 
+function OtpInput({ value, onChange, disabled }) {
+  const refs = useRef([]);
+  const digits = Array.from({ length: 6 }, (_, index) => value[index] || "");
+  const update = (index, nextValue) => {
+    const digit = nextValue.replace(/\D/g, "").slice(-1);
+    const next = [...digits];
+    next[index] = digit;
+    onChange(next.join(""));
+    if (digit && index < 5) refs.current[index + 1]?.focus();
+  };
+  const paste = (event) => {
+    const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted.length) return;
+    event.preventDefault();
+    onChange(pasted);
+    refs.current[Math.min(pasted.length, 6) - 1]?.focus();
+  };
+  return (
+    <div className="otp-inputs" onPaste={paste}>
+      {digits.map((digit, index) => (
+        <input
+          aria-label={`Digit ${index + 1}`}
+          autoComplete="one-time-code"
+          disabled={disabled}
+          inputMode="numeric"
+          key={index}
+          maxLength="1"
+          onChange={(event) => update(index, event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Backspace" && !digits[index] && index > 0) refs.current[index - 1]?.focus();
+          }}
+          ref={(element) => { refs.current[index] = element; }}
+          value={digit}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TwoFactorPanel({ user }) {
+  const status = user.twoFactor || {};
+  const setup = !status.enabled;
+  const [method, setMethod] = useState(status.method || "totp");
+  const [setupData, setSetupData] = useState(null);
+  const [code, setCode] = useState("");
+  const [backupMode, setBackupMode] = useState(false);
+  const [backupCode, setBackupCode] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const beginTotp = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setSetupData(await api.beginTotpSetup());
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendSms = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.sendTwoFactorSms(setup ? "setup" : "challenge");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = setup
+        ? await api.finishTwoFactorSetup(method, code)
+        : await api.verifyTwoFactor(backupMode ? { backupCode } : { code });
+      if (response.backupCodes) setResult(response);
+      else await completeTwoFactorSession(response.customToken);
+    } catch (requestError) {
+      setCode("");
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (status.locked) {
+    return (
+      <div className="security-screen"><div className="security-card">
+        <p className="eyebrow text-danger">Account locked</p>
+        <h2>2FA verification is locked</h2>
+        <p>Three consecutive verification attempts failed. An owner must unlock this account from Users & Roles.</p>
+        <button className="btn btn-outline-danger" onClick={() => resetPassword(user.email).then(() => window.alert("Password reset email sent. After changing the password, sign in again to unlock 2FA.")).catch((requestError) => window.alert(requestError.message))}>Reset password to unlock</button>
+        <button className="btn btn-link text-danger" onClick={logout}>Return to sign in</button>
+      </div></div>
+    );
+  }
+
+  if (result?.backupCodes) {
+    return (
+      <div className="security-screen"><div className="security-card">
+        <p className="eyebrow text-danger">Recovery codes</p>
+        <h2>Save these backup codes</h2>
+        <p>Each code works once. They cannot be displayed again after you continue.</p>
+        <div className="backup-code-grid">{result.backupCodes.map((item) => <code key={item}>{item}</code>)}</div>
+        <button className="btn btn-danger w-100" onClick={() => completeTwoFactorSession(result.customToken)}>I saved my codes, continue</button>
+      </div></div>
+    );
+  }
+
+  return (
+    <div className="security-screen">
+      <form className="security-card" onSubmit={verify}>
+        <p className="eyebrow text-danger">{setup ? "Required security setup" : "Second verification step"}</p>
+        <h2>{setup ? "Set up two-factor authentication" : "Verify your sign-in"}</h2>
+        <p>{setup ? "Choose an authenticator app or SMS. Every POS account must enroll before access is granted." : `Enter the code from your ${status.method === "sms" ? "phone" : "authenticator app"}.`}</p>
+        {setup && (
+          <div className="security-methods">
+            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); }}>
+              <strong>Authenticator App</strong><small>Free, offline 30-second codes</small>
+            </button>
+            <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); }}>
+              <strong>SMS OTP</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Requires a phone number and Twilio"}</small>
+            </button>
+          </div>
+        )}
+        {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Generate authenticator QR code</button>}
+        {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Authenticator setup QR code" /><p>Manual key: <code>{setupData.manualKey}</code></p></div>}
+        {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
+        {!backupMode ? (
+          <>
+            <label className="form-label">6-digit verification code</label>
+            <OtpInput value={code} onChange={setCode} disabled={busy} />
+          </>
+        ) : (
+          <label className="form-label">Single-use backup code<input className="form-control" autoComplete="one-time-code" value={backupCode} onChange={(event) => setBackupCode(event.target.value.toUpperCase())} /></label>
+        )}
+        {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
+        <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
+          {busy ? "Verifying..." : setup ? "Verify and enable 2FA" : "Verify and open POS"}
+        </button>
+        {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
+        <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
+      </form>
+    </div>
+  );
+}
+
 function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigate, onNotifications }) {
   const navigation = roleNavigation[user.role] || [];
   const homeView = defaultViewForRole(user.role);
@@ -260,7 +426,7 @@ function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigat
       </nav>
       <div className="header-actions">
         {user.role === "customer" && <button className="btn btn-outline-dark btn-sm" onClick={onCart}>Cart ({cartCount})</button>}
-        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications">Alerts{unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}</button>
+        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><span className="bell-icon" aria-hidden="true">&#128276;</span>{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
         <button className="btn btn-danger btn-sm" onClick={logout}>Log out</button>
@@ -269,20 +435,27 @@ function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigat
   );
 }
 
-function NotificationCenter({ user, notifications, onClose }) {
-  const markRead = async (notification) => {
-    if (!notification.readBy?.[user.uid]) await markNotificationRead(notification.id, user.uid);
+function NotificationCenter({ notifications, onClose }) {
+  useEffect(() => {
+    api.markAllNotificationsRead().catch(() => {});
+  }, []);
+  const clearAll = async () => {
+    if (!window.confirm("Clear all notifications? This cannot be undone.")) return;
+    await api.clearNotifications();
+  };
+  const dismiss = async (notificationId) => {
+    await api.dismissNotification(notificationId);
   };
   return (
     <>
       <button className="notification-backdrop" aria-label="Close notifications" onClick={onClose} />
       <aside className="notification-center">
-        <header><div><p className="eyebrow text-danger">Realtime updates</p><h3>Notifications</h3></div><button onClick={onClose}>×</button></header>
+        <header><div><p className="eyebrow text-danger">Your realtime updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}>X</button></div></header>
         <div className="notification-list">
           {notifications.length === 0 && <div className="empty-chat">No notifications yet.</div>}
           {notifications.map((notification) => {
-            const unread = !notification.readBy?.[user.uid];
-            return <button className={unread ? "unread" : ""} key={notification.id} onClick={() => markRead(notification)}><span className={`notification-icon ${notification.type || "system"}`}>{notification.type?.slice(0, 1).toUpperCase() || "N"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><time>{new Date(notification.createdAt).toLocaleString("en-PH")}</time></div>{unread && <i />}</button>;
+            const unread = !notification.readAt;
+            return <article className={unread ? "unread" : ""} key={notification.id}><span className={`notification-icon ${notification.type || "system"}`}>{notification.type?.slice(0, 1).toUpperCase() || "N"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><time title={new Date(notification.createdAt).toLocaleString("en-PH")}>{relativeTime(notification.createdAt)}</time></div>{unread && <i />}<button className="notification-dismiss" aria-label={`Dismiss ${notification.title}`} onClick={() => dismiss(notification.id)}>X</button></article>;
           })}
         </div>
       </aside>
@@ -688,6 +861,19 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   const [insight, setInsight] = useState("Generate a live OpenAI sales and inventory summary.");
   const [salesGoal, setSalesGoal] = useState(100000);
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff" });
+  const [managedUsers, setManagedUsers] = useState([]);
+  const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
+  const refreshUsers = useCallback(async () => {
+    try {
+      const result = await api.listUsers();
+      setManagedUsers(result.users || []);
+    } catch (error) {
+      if (section === "owner-users") notify(error.message);
+    }
+  }, [notify, section]);
+  useEffect(() => {
+    if (section === "owner-users") refreshUsers();
+  }, [refreshUsers, section]);
   const downloadReport = async () => {
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF();
@@ -710,13 +896,33 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       setInsight(`Demo insight: Sisig demand is strongest after 6 PM. Reorder pork belly before the next evening shift. (${error.message})`);
     }
   };
-  const seededUsers = Object.entries(demoAccounts).map(([role, account]) => ({ role, ...account }));
   const updateRole = async (event) => {
     event.preventDefault();
     try {
       await api.assignRole(roleForm.uid, roleForm.role);
       notify(`User role updated to ${roleForm.role}.`);
       setRoleForm({ uid: "", role: "staff" });
+      await refreshUsers();
+    } catch (error) {
+      notify(error.message);
+    }
+  };
+  const securityAction = async (uid, action) => {
+    try {
+      if (action === "reset") await api.resetUserTwoFactor(uid);
+      else await api.unlockUserTwoFactor(uid);
+      notify(action === "reset" ? "2FA reset. The user must enroll again." : "The account was unlocked.");
+      await refreshUsers();
+    } catch (error) {
+      notify(error.message);
+    }
+  };
+  const sendAdminMessage = async (event) => {
+    event.preventDefault();
+    try {
+      await api.sendAdminMessage(adminMessage.uid, adminMessage.title, adminMessage.message);
+      notify("Private notification sent.");
+      setAdminMessage((current) => ({ ...current, message: "" }));
     } catch (error) {
       notify(error.message);
     }
@@ -742,8 +948,9 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   );
   if (section === "owner-users") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Firebase Authentication</p><h2>Users & Roles</h2></div></div><div className="row g-3">
-      <div className="col-xl-8"><div className="dashboard-card"><h3>Configured project accounts</h3><div className="table-responsive"><table className="table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th></tr></thead><tbody>{seededUsers.map((account) => <tr key={account.email}><td>{account.name}</td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "owner" ? "Full system" : account.role === "staff" ? "Operations" : account.role === "rider" ? "Assigned deliveries" : "Storefront"}</td></tr>)}</tbody></table></div></div></div>
-      <div className="col-xl-4"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign Firebase role</h3><p className="module-note">Enter a Firebase Authentication UID. Custom claims are updated securely by the Node.js API.</p><label className="form-label">User UID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
+      <div className="col-12"><div className="dashboard-card"><h3>Project users and 2FA security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No Firebase users were returned.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${account.twoFactorMethod} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset 2FA</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
+      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign Firebase role</h3><p className="module-note">Enter a Firebase Authentication UID. Custom claims are updated securely by the Node.js API.</p><label className="form-label">User UID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
+      <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
     </div></main>
   );
   if (section === "owner-audit") return (
@@ -1043,71 +1250,72 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [serviceStatus, setServiceStatus] = useState({ firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
+  const activeUser = user?.mfaVerified ? user : null;
 
   useEffect(() => observeAuth(setUser), []);
   useEffect(() => {
-    if (!user) {
+    if (!activeUser) {
       setProfile(null);
       return undefined;
     }
-    return subscribeUserProfile(user, setProfile);
-  }, [user]);
+    return subscribeUserProfile(activeUser, setProfile);
+  }, [activeUser]);
   useEffect(() => subscribeMenu(fallbackMenu, setMenu), []);
   useEffect(() => {
-    if (!user || !["owner", "staff"].includes(user.role)) {
+    if (!activeUser || !["owner", "staff"].includes(activeUser.role)) {
       setInventory(menu.map((item) => ({ ...item, reorderPoint: item.reorderPoint ?? 10 })));
       return undefined;
     }
     return subscribeInventory(menu, setInventory);
-  }, [menu, user]);
-  useEffect(() => subscribeOrders(user, (nextOrders) => {
-    if (user?.role === "rider" && nextOrders.length > previousOrderCount.current) navigator.vibrate?.([150, 80, 150]);
+  }, [menu, activeUser]);
+  useEffect(() => subscribeOrders(activeUser, (nextOrders) => {
+    if (activeUser?.role === "rider" && nextOrders.length > previousOrderCount.current) navigator.vibrate?.([150, 80, 150]);
     previousOrderCount.current = nextOrders.length;
     setOrders(nextOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
-  }), [user]);
+  }), [activeUser]);
   useEffect(() => {
-    if (user?.role !== "owner") {
+    if (activeUser?.role !== "owner") {
       setAuditLogs([]);
       return undefined;
     }
     return subscribeAuditLogs(setAuditLogs);
-  }, [user]);
+  }, [activeUser]);
   useEffect(() => {
-    if (!user || !["owner", "staff"].includes(user.role)) {
+    if (!activeUser || !["owner", "staff"].includes(activeUser.role)) {
       setShiftLogs([]);
       return undefined;
     }
     return subscribeShiftLogs(setShiftLogs);
-  }, [user]);
+  }, [activeUser]);
   useEffect(() => {
-    if (user?.role !== "staff") {
+    if (activeUser?.role !== "staff") {
       setSupportMessages([]);
       return undefined;
     }
     return subscribeSupportMessages(setSupportMessages);
-  }, [user]);
+  }, [activeUser]);
   useEffect(() => {
-    if (!user) {
+    if (!activeUser) {
       setNotifications([]);
       return undefined;
     }
-    return subscribeNotifications(user, setNotifications);
-  }, [user]);
+    return subscribeNotifications(activeUser, setNotifications);
+  }, [activeUser]);
   useEffect(() => {
-    if (user?.role !== "customer") {
+    if (activeUser?.role !== "customer") {
       setReviews([]);
       return undefined;
     }
-    return subscribeReviews(user, setReviews);
-  }, [user]);
+    return subscribeReviews(activeUser, setReviews);
+  }, [activeUser]);
   useEffect(() => {
-    if (user) setView(defaultViewForRole(user.role));
-  }, [user]);
+    if (activeUser) setView(defaultViewForRole(activeUser.role));
+  }, [activeUser]);
   useEffect(() => {
     api.status().then((result) => setServiceStatus((current) => ({ ...current, ...result.services }))).catch(() => {});
   }, []);
   useEffect(() => {
-    if (!user) {
+    if (!activeUser) {
       disconnectSocket();
       setServiceStatus((current) => ({ ...current, socket: false }));
       return undefined;
@@ -1124,7 +1332,7 @@ export default function App() {
       activeSocket?.off("disconnect");
       disconnectSocket();
     };
-  }, [user]);
+  }, [activeUser]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 4500);
@@ -1134,9 +1342,10 @@ export default function App() {
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
   if (user === undefined) return <div className="loading-screen">Loading Taptap Foodtrip...</div>;
   if (!user) return <LoginPanel />;
+  if (!user.mfaVerified) return <TwoFactorPanel user={user} />;
 
   const currentUser = { ...user, name: profile?.name || user.name };
-  const unreadCount = notifications.filter((notification) => !notification.readBy?.[user.uid]).length;
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const allowedViews = roleNavigation[user.role]?.map(([roleView]) => roleView) || [];
   const navigate = (nextView) => {
     if (allowedViews.includes(nextView)) setView(nextView);
@@ -1161,7 +1370,7 @@ export default function App() {
       {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu} />}
-      {notificationsOpen && <NotificationCenter user={currentUser} notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
+      {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast">{notice}</div>}
     </div>
   );

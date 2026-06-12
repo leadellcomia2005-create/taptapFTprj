@@ -20,6 +20,22 @@ import {
   updateOrderRecord,
   validRecordId
 } from "./operations.js";
+import {
+  cleanupExpiredNotifications,
+  clearNotifications,
+  createNotification,
+  dismissNotification,
+  markAllNotificationsRead
+} from "./notifications.js";
+import {
+  beginTotpSetup,
+  finishEnrollment,
+  resetTwoFactor,
+  sendSmsCode,
+  twoFactorStatus,
+  unlockTwoFactor,
+  verifyChallenge
+} from "./twoFactor.js";
 
 initializeApp();
 const database = () => getDatabase();
@@ -28,6 +44,7 @@ const openaiKey = defineSecret("OPENAI_API_KEY");
 const paymongoKey = defineSecret("PAYMONGO_SECRET_KEY");
 const twilioSid = defineSecret("TWILIO_ACCOUNT_SID");
 const twilioToken = defineSecret("TWILIO_AUTH_TOKEN");
+const twoFactorKey = defineSecret("TWO_FACTOR_ENCRYPTION_KEY");
 const app = express();
 
 app.use(cors({ origin: true }));
@@ -49,15 +66,23 @@ async function verifyUserToken(token) {
   return { ...decoded, role: profile.role || "customer", name: profile.name || decoded.name };
 }
 
-async function authenticate(req, res, next) {
+async function authenticateBootstrap(req, res, next) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentication required." });
   try {
+    req.authToken = token;
     req.user = await verifyUserToken(token);
     return next();
   } catch {
     return res.status(401).json({ error: "Invalid authentication token." });
   }
+}
+
+async function authenticate(req, res, next) {
+  return authenticateBootstrap(req, res, () => {
+    if (req.user.mfaSession !== true) return res.status(403).json({ error: "Complete two-factor authentication before accessing the POS." });
+    return next();
+  });
 }
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -82,10 +107,38 @@ app.get(route("/status"), (_req, res) => {
       openai: Boolean(secretValue(openaiKey)),
       dialogflow: Boolean(process.env.DIALOGFLOW_PROJECT_ID || process.env.GCLOUD_PROJECT),
       paymongo: Boolean(secretValue(paymongoKey)),
-      twilio: Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER)
+      twilio: Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER),
+      twoFactor: Boolean(secretValue(twoFactorKey))
     }
   });
 });
+
+const sendTwoFactorSms = async (to, code) => {
+  const sid = secretValue(twilioSid);
+  const token = secretValue(twilioToken);
+  if (!sid || !token || !process.env.TWILIO_FROM_NUMBER) throw new HttpError(503, "SMS 2FA is unavailable.");
+  return twilio(sid, token).messages.create({
+    from: process.env.TWILIO_FROM_NUMBER,
+    to,
+    body: `Taptap Foodtrip verification code: ${code}. It expires in 10 minutes.`
+  });
+};
+
+app.get(route("/2fa/status"), authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await twoFactorStatus(database(), req.user, Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER), secretValue(twoFactorKey), req.authToken));
+}));
+app.post(route("/2fa/setup/totp"), authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await beginTotpSetup(database(), req.user, secretValue(twoFactorKey)));
+}));
+app.post(route("/2fa/sms/send"), authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await sendSmsCode(database(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
+}));
+app.post(route("/2fa/setup/verify"), authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await finishEnrollment(database(), req.user, req.body.method, req.body.code, secretValue(twoFactorKey), req.authToken));
+}));
+app.post(route("/2fa/challenge"), authenticateBootstrap, asyncRoute(async (req, res) => {
+  res.json(await verifyChallenge(database(), req.user, req.body, secretValue(twoFactorKey), req.authToken));
+}));
 
 app.post(route("/assistant"), authenticate, async (req, res) => {
   try {
@@ -189,6 +242,25 @@ app.post(route("/notifications/sms"), authenticate, requireRoles("owner", "staff
   }
 });
 
+app.post(route("/notifications"), authenticate, asyncRoute(async (req, res) => {
+  res.status(201).json(await createNotification(database(), req.user, req.body));
+}));
+app.post(route("/notifications/read-all"), authenticate, asyncRoute(async (req, res) => {
+  await markAllNotificationsRead(database(), req.user.uid);
+  res.json({ updated: true });
+}));
+app.post(route("/notifications/cleanup"), authenticate, asyncRoute(async (req, res) => {
+  res.json({ deleted: await cleanupExpiredNotifications(database(), req.user.uid) });
+}));
+app.delete(route("/notifications"), authenticate, asyncRoute(async (req, res) => {
+  await clearNotifications(database(), req.user.uid);
+  res.json({ cleared: true });
+}));
+app.delete(route("/notifications/:notificationId"), authenticate, asyncRoute(async (req, res) => {
+  await dismissNotification(database(), req.user.uid, req.params.notificationId);
+  res.json({ dismissed: true });
+}));
+
 app.get(route("/orders"), authenticate, asyncRoute(async (req, res) => {
   res.json({ orders: await listOrdersForUser(database(), req.user) });
 }));
@@ -231,9 +303,35 @@ app.post(route("/admin/roles"), authenticate, requireRoles("owner"), async (req,
   return res.json({ updated: true });
 });
 
+app.get(route("/admin/users"), authenticate, requireRoles("owner"), asyncRoute(async (_req, res) => {
+  const [authResult, profilesSnapshot, twoFactorSnapshot] = await Promise.all([
+    getAuth().listUsers(1000),
+    database().ref("users").once("value"),
+    database().ref("twoFactor").once("value")
+  ]);
+  const profiles = profilesSnapshot.val() || {};
+  const security = twoFactorSnapshot.val() || {};
+  res.json({ users: authResult.users.map((record) => {
+    const profile = profiles[record.uid] || {};
+    const status = security[record.uid] || {};
+    return { uid: record.uid, email: record.email || profile.email || "", name: profile.name || record.displayName || record.email || record.uid, role: record.customClaims?.role || profile.role || "customer", twoFactorEnabled: Boolean(status.enabled), twoFactorMethod: status.method || null, twoFactorLocked: Boolean(status.locked) };
+  }) });
+}));
+app.post(route("/admin/users/:uid/2fa/reset"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  await resetTwoFactor(database(), req.user, req.params.uid);
+  res.json({ reset: true });
+}));
+app.post(route("/admin/users/:uid/2fa/unlock"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  await unlockTwoFactor(database(), req.user, req.params.uid);
+  res.json({ unlocked: true });
+}));
+app.post(route("/admin/users/:uid/message"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  res.status(201).json(await createNotification(database(), req.user, { targetUserId: req.params.uid, title: req.body.title || "Message from administrator", message: req.body.message, type: "admin" }));
+}));
+
 export const api = onRequest({
   region: "asia-southeast1",
   timeoutSeconds: 60,
   memory: "512MiB",
-  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken]
+  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey]
 }, app);

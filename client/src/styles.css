@@ -1,23 +1,43 @@
+/* erick: mas mainit at malinaw ang palette para polished ang customer UI. */
 :root {
-  --ink: #1d1b18;
-  --muted: #746e65;
-  --paper: #f6f2eb;
-  --red: #d93624;
-  --red-dark: #a92618;
-  --gold: #efbd53;
-  --green: #2b714d;
-  --line: #e5ded3;
+  --ink: #201914;
+  --muted: #70685d;
+  --paper: #fbf4e8;
+  --paper-soft: #fffaf3;
+  --red: #e33d2e;
+  --red-dark: #a9281b;
+  --red-soft: #fff0eb;
+  --gold: #f2bc48;
+  --green: #287551;
+  --line: #eadfce;
+  --shadow-soft: 0 18px 48px rgba(45, 30, 18, .1);
   --display: Georgia, "Times New Roman", serif;
 }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, system-ui, sans-serif; }
 button { font: inherit; }
+/* erick: sinunod ng Bootstrap danger buttons ang bagong red palette. */
+.btn-danger {
+  --bs-btn-bg: var(--red);
+  --bs-btn-border-color: var(--red);
+  --bs-btn-hover-bg: var(--red-dark);
+  --bs-btn-hover-border-color: var(--red-dark);
+  --bs-btn-active-bg: var(--red-dark);
+  --bs-btn-active-border-color: var(--red-dark);
+}
+.btn-outline-danger {
+  --bs-btn-color: var(--red);
+  --bs-btn-border-color: rgba(227, 61, 46, .5);
+  --bs-btn-hover-bg: var(--red);
+  --bs-btn-hover-border-color: var(--red);
+}
 .loading-screen { min-height: 100vh; display: grid; place-items: center; font: 700 26px var(--display); }
 .eyebrow { margin: 0; font-size: 10px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
 
-.brand-lockup { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-align: left; }
-.brand-lockup > span { width: 40px; height: 40px; display: grid; place-items: center; color: white; background: var(--red); border-radius: 50% 50% 50% 12px; font: italic 800 24px var(--display); }
+.brand-lockup { display: inline-flex; align-items: center; gap: 10px; padding: 0; color: inherit; text-align: left; }
+.brand-mark { width: 44px; height: 44px; flex: 0 0 44px; display: grid; place-items: center; overflow: hidden; background: white; border: 2px solid rgba(217,54,36,.18); border-radius: 50%; box-shadow: 0 8px 20px rgba(38,29,19,.1); }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .brand-lockup div { display: grid; }
 .brand-lockup strong { font: 800 21px/1 var(--display); }
 .brand-lockup small { margin-top: 4px; color: var(--red); font-size: 7px; font-weight: 900; letter-spacing: .25em; }
@@ -25,7 +45,8 @@ button { font: inherit; }
 .login-screen { min-height: 100vh; display: grid; grid-template-columns: 1.08fr .92fr; background: white; }
 .login-visual { display: flex; flex-direction: column; justify-content: space-between; padding: 55px; color: white; background: linear-gradient(90deg,rgba(10,9,8,.95),rgba(10,9,8,.5)), url("/assets/hero-food.png") center/cover; }
 .login-visual .brand-lockup small { color: #f3a296; }
-.login-visual h1, .integrated-hero h1 { margin: 20px 0; font: 700 clamp(52px,6vw,88px)/.96 var(--display); letter-spacing: -.05em; }
+/* erick: zero letter-spacing para mas readable ang malaking title sa mobile. */
+.login-visual h1, .integrated-hero h1 { margin: 20px 0; font: 700 clamp(52px,6vw,88px)/.96 var(--display); letter-spacing: 0; }
 .login-visual h1 em, .integrated-hero h1 em, .section-title h2 em { color: #ef8f7f; font-weight: 400; }
 .login-visual p:last-child { max-width: 560px; color: rgba(255,255,255,.72); line-height: 1.7; }
 .login-form-wrap { display: grid; place-items: center; padding: 35px; }
@@ -68,20 +89,110 @@ button { font: inherit; }
 .role-tabs button { padding: 8px 3px; border: 0; color: var(--muted); background: transparent; border-radius: 7px; font-size: 9px; font-weight: 800; text-transform: capitalize; }
 .role-tabs button.active { color: white; background: var(--ink); }
 
-.app-header { position: sticky; z-index: 1000; top: 0; min-height: 76px; display: flex; align-items: center; gap: 35px; padding: 12px 4vw; background: rgba(255,255,255,.95); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); }
+/* erick: grid ang customer header para may sariling puwesto ang menu, logo, at actions. */
+.app-header { position: sticky; z-index: 1000; top: 0; min-height: 76px; display: flex; align-items: center; gap: 35px; padding: 12px 4vw; background: rgba(255,250,243,.95); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); }
+.app-header.customer-header { min-height: 88px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 18px; padding: 13px clamp(14px,4vw,34px); color: white; background: linear-gradient(135deg,var(--red-dark),var(--red) 54%,#f26d35); border-bottom-color: rgba(118,31,19,.45); box-shadow: 0 12px 28px rgba(112, 38, 20, .2); }
+.customer-header .brand-lockup { color: white; }
+.customer-header .brand-lockup small { color: #fff0bd; }
+.customer-header .brand-mark { width: 56px; height: 56px; flex-basis: 56px; border-color: rgba(255,255,255,.75); box-shadow: 0 10px 24px rgba(79,15,8,.24); }
+.customer-header .brand-lockup { min-width: 0; justify-self: start; }
+.customer-header .brand-lockup strong { font-size: 29px; line-height: .94; }
+.customer-header .brand-lockup small { font-size: 8px; }
+.customer-header .notification-button { color: var(--red); border-color: rgba(255,255,255,.55); background: white; }
+.customer-header .user-chip > span { color: var(--red); background: white; }
+.customer-header .user-chip strong { color: white; }
+.customer-header .user-chip small { color: rgba(255,255,255,.78); }
+.customer-header .btn-danger { color: var(--red); border-color: white; background: white; }
+.customer-header .btn-danger:hover { color: var(--red-dark); border-color: #fff7f5; background: #fff7f5; }
 .app-header nav { display: flex; gap: 8px; margin-right: auto; }
 .app-header nav button { padding: 8px 11px; color: var(--muted); border: 0; background: transparent; border-radius: 8px; font-size: 10px; font-weight: 750; white-space: nowrap; }
 .app-header nav button:hover { color: var(--ink); background: var(--paper); }
 .app-header nav button.active { color: white; background: var(--ink); }
 .role-navigation { max-width: min(63vw,980px); overflow-x: auto; scrollbar-width: thin; }
-.header-actions { display: flex; align-items: center; gap: 12px; }
-.notification-button { position: relative; padding: 7px 10px; color: var(--ink); border: 1px solid var(--line); background: white; border-radius: 9px; font-size: 9px; font-weight: 800; }
+/* erick: mas malaking touch target ang drawer button para hindi dikit sa logo. */
+.customer-menu-toggle { position: relative; z-index: 1060; width: 50px; height: 50px; display: grid; place-items: center; margin: 0; padding: 0; color: var(--red); border: 1px solid rgba(255,255,255,.68); background: white; border-radius: 14px; box-shadow: 0 10px 22px rgba(79,15,8,.18); transition: transform .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease; }
+.customer-menu-toggle:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(79,15,8,.24); }
+.customer-menu-toggle.active { color: white; border-color: rgba(255,255,255,.28); background: rgba(120,26,16,.72); }
+/* erick: drawer ang customer pages para mobile-friendly ang navigation. */
+.customer-menu-backdrop { position: fixed; z-index: 1040; inset: 88px 0 0; border: 0; background: rgba(32,25,20,.3); backdrop-filter: blur(3px); animation: backdrop-in .18s ease both; }
+.customer-menu-drawer { position: fixed; z-index: 1050; top: 88px; left: 0; width: min(360px,92vw); height: calc(100dvh - 88px); display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 22px; background: linear-gradient(180deg,#fffaf3 0%,#ffffff 46%); border-right: 1px solid var(--line); box-shadow: 22px 0 70px rgba(29,27,24,.2); transform: translateX(-104%); opacity: .98; pointer-events: none; transition: transform .26s cubic-bezier(.2,.7,.2,1), opacity .22s ease; }
+.customer-menu-drawer.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+.customer-menu-title { padding: 0 8px 18px; border-bottom: 1px solid var(--line); color: var(--ink); }
+.customer-menu-title .eyebrow { font-size: 12px; }
+.customer-menu-title strong { display: block; margin-top: 6px; font: 700 30px/1.08 var(--display); }
+.customer-menu-drawer button { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; color: var(--muted); text-align: left; border: 1px solid transparent; background: transparent; border-radius: 8px; font-size: 15px; font-weight: 850; transition: transform .18s ease, color .18s ease, background .18s ease, border-color .18s ease; }
+.customer-menu-drawer button:hover { color: var(--ink); background: var(--red-soft); transform: translateX(2px); }
+.customer-menu-drawer button.active { color: white; border-color: var(--ink); background: var(--ink); box-shadow: 0 10px 24px rgba(32,25,20,.16); }
+.customer-menu-drawer button.active::after { content: ""; width: 7px; height: 7px; flex: 0 0 7px; background: var(--gold); border-radius: 50%; }
+.header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.customer-header .header-actions { justify-self: end; margin-left: 0; }
+/* erick: square icon buttons para kasya ang header actions sa maliit na screen. */
+.notification-button { position: relative; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; color: var(--ink); border: 1px solid var(--line); background: white; border-radius: 10px; font-size: 9px; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease; }
+.notification-button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(45,30,18,.12); }
 .notification-button .bell-icon { font-size: 15px; line-height: 1; }
 .notification-button b { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; color: white; background: var(--red); border: 2px solid white; border-radius: 10px; font-size: 7px; }
 .user-chip { display: flex; align-items: center; gap: 8px; }
 .user-chip > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 50%; font-size: 9px; font-weight: 800; }
 .user-chip strong, .user-chip small { display: block; }
 .user-chip strong { font-size: 9px; }.user-chip small { color: var(--muted); font-size: 8px; text-transform: capitalize; }
+/* erick: icon + text ang logout sa desktop, icon lang sa mobile. */
+.logout-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+.storefront-page { min-height: calc(100vh - 76px); padding: 24px clamp(16px,3vw,42px) 48px; background: var(--paper); }
+.storefront-shell { width: min(1500px,100%); display: grid; grid-template-columns: minmax(0,1fr) minmax(300px,340px); gap: 24px; align-items: start; margin: 0 auto; }
+.store-cart-column { position: sticky; top: 100px; display: grid; gap: 14px; }
+/* erick: mas malinaw ang logo placement sa maliit na brand card sa tabi ng cart. */
+.storefront-brand-card { display: flex; align-items: center; gap: 13px; padding: 16px; background: linear-gradient(135deg,#fff,#fff7ee); border: 1px solid var(--line); border-left: 4px solid var(--red); border-radius: 8px; box-shadow: 0 10px 28px rgba(38,29,19,.05); }
+.storefront-brand-card .brand-mark { width: 52px; height: 52px; flex-basis: 52px; }
+.storefront-brand-card strong { display: block; margin-top: 5px; font: 700 17px/1.22 var(--display); }
+.checkout-brand-card { align-items: flex-start; }
+/* erick: wrapping grid ito para mawala ang horizontal scroll sa category bar. */
+.category-rail { display: grid; grid-template-columns: repeat(auto-fit,minmax(92px,1fr)); gap: 7px; margin-bottom: 14px; padding: 7px; overflow: visible; background: white; border: 1px solid var(--line); border-radius: 8px; }
+.category-rail button { min-width: 0; min-height: 42px; padding: 9px 10px; color: var(--muted); text-align: center; border: 1px solid transparent; background: transparent; border-radius: 7px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.category-rail button:hover { color: var(--ink); background: var(--paper); }
+.category-rail button.active { color: white; border-color: var(--ink); background: var(--ink); }
+.storefront-menu-panel { min-width: 0; }
+.storefront-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 18px; padding: 3px 0 16px; border-bottom: 1px solid var(--line); }
+.storefront-toolbar h1 { margin: 7px 0 6px; font: 700 42px/1.05 var(--display); }
+.storefront-toolbar p:not(.eyebrow) { max-width: 520px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.storefront-toolbar > span { flex: 0 0 auto; padding: 7px 10px; color: var(--green); background: #e6f4eb; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.menu-list { display: grid; gap: 12px; }
+.menu-list-card { display: grid; grid-template-columns: 104px minmax(0,1fr) minmax(108px,auto); align-items: center; gap: 16px; padding: 12px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 26px rgba(38,29,19,.05); }
+.menu-list-card .menu-photo { width: 104px; height: 92px; border-radius: 8px; }
+.menu-item-copy { min-width: 0; display: grid; gap: 8px; }
+.menu-item-copy h3 { margin: 0; font: 700 20px/1.15 var(--display); }
+.menu-item-copy p { max-width: 560px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.menu-item-copy small { color: #998f83; font-size: 8px; }
+.menu-item-action { display: grid; justify-items: end; gap: 6px; text-align: right; }
+.menu-item-action strong { font-size: 13px; }
+.stock-note { color: var(--green); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.stock-note.low { color: var(--red); }
+.add-item-button { width: 34px; height: 34px; display: grid; place-items: center; color: var(--green); border: 0; background: #e6f4eb; border-radius: 8px; font-size: 22px; font-weight: 900; line-height: 1; }
+.add-item-button:hover { color: white; background: var(--green); }
+.add-item-button:disabled { color: #aaa096; background: var(--paper); cursor: not-allowed; }
+/* erick: pinalaki ang cart text at spacing para mas madaling basahin. */
+.store-cart-panel { display: grid; gap: 16px; padding: 22px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-soft); animation: panel-rise .28s ease both; }
+.cart-panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.cart-panel-heading .eyebrow { font-size: 12px; }
+.cart-panel-heading h2 { margin: 7px 0 0; font: 700 38px/1 var(--display); }
+.cart-panel-heading > span { padding: 7px 11px; color: var(--green); background: #e5f5ea; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.cart-summary-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 2px; }
+.empty-cart-note { padding: 28px 14px; color: var(--muted); background: white; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font-size: 12px; }
+.cart-summary-item { display: grid; grid-template-columns: 34px minmax(0,1fr) auto 36px; align-items: center; gap: 11px; min-height: 58px; padding: 10px; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 8px; animation: cart-item-in .22s ease both; transition: transform .18s ease, background .18s ease, border-color .18s ease; }
+.cart-summary-item:hover { background: white; border-color: rgba(227,61,46,.18); transform: translateY(-1px); }
+.cart-summary-item > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: linear-gradient(135deg,var(--red),#ef6b38); border-radius: 9px; font-size: 13px; font-weight: 900; }
+.cart-summary-item strong,.cart-summary-item small { display: block; }
+.cart-summary-item strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.cart-summary-item small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.cart-summary-item b { font-size: 13px; white-space: nowrap; }
+/* erick: hiwalay na trash button para madaling mag-delete ng maling cart item. */
+.cart-remove-button { width: 34px; height: 34px; display: grid; place-items: center; color: var(--red); border: 1px solid rgba(227,61,46,.18); background: var(--red-soft); border-radius: 9px; transition: transform .18s ease, color .18s ease, background .18s ease, border-color .18s ease; }
+.cart-remove-button:hover { color: white; border-color: var(--red); background: var(--red); transform: translateY(-1px) rotate(-3deg); }
+.cart-remove-button:focus-visible { outline: 3px solid rgba(227,61,46,.24); outline-offset: 2px; }
+.store-cart-totals { display: grid; gap: 8px; padding-top: 4px; }
+.store-cart-totals div { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
+.store-cart-totals div:last-child { margin-top: 4px; padding-top: 12px; color: var(--ink); border-top: 1px solid var(--line); }
+.store-cart-totals strong { color: inherit; font-size: 15px; }
 
 .integrated-hero { min-height: 570px; display: flex; align-items: center; padding: 70px max(5vw,30px); color: white; background: linear-gradient(90deg,rgba(9,8,7,.95),rgba(9,8,7,.72) 42%,rgba(9,8,7,.12)), url("/assets/hero-food.png") center/cover; }
 .integrated-hero > div { max-width: 720px; }
@@ -97,8 +208,23 @@ button { font: inherit; }
 .menu-card h3 { margin: 0; font: 700 21px var(--display); }
 .menu-card p { min-height: 42px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .menu-card small { color: #998f83; font-size: 8px; }
-/* erick: inangat sa 92px para hindi mag-overlap sa AI button (na nasa 24px). */
-.floating-checkout { position: fixed; z-index: 900; right: 24px; bottom: 92px; padding: 13px 20px; box-shadow: 0 12px 28px rgba(180,40,23,.32); }
+.floating-checkout { display: none; position: fixed; z-index: 900; right: 24px; bottom: 92px; padding: 13px 20px; box-shadow: 0 12px 28px rgba(180,40,23,.32); }
+
+/* erick: subtle animations lang para buhay ang drawer at cart pero hindi distracting. */
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes panel-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cart-item-in {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 .modal.d-block { display: block; background: rgba(20,17,13,.6); backdrop-filter: blur(4px); }
 .payment-option { width: 100%; padding: 15px; text-align: left; border: 1px solid var(--line); background: white; border-radius: 12px; }
@@ -140,6 +266,30 @@ button { font: inherit; }
 .custom-map-marker span { width: 34px; height: 34px; display: grid; place-items: center; color: white; border: 4px solid white; border-radius: 50%; box-shadow: 0 4px 15px rgba(0,0,0,.25); font-size: 10px; font-weight: 900; }
 .camera-modal { z-index: 1100; }
 
+.order-history-page { padding: 28px clamp(16px,3vw,42px) 52px; }
+.order-history-layout { width: min(1380px,100%); display: grid; grid-template-columns: minmax(0,1fr) 290px; gap: 24px; align-items: start; margin: 0 auto; }
+.order-history-main { min-width: 0; }
+.order-summary-panel { position: sticky; top: 100px; display: grid; gap: 5px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 34px rgba(38,29,19,.07); }
+.order-summary-panel h3 { margin: 0 0 8px; font: 700 21px var(--display); }
+.summary-metric { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.summary-metric:last-child { border-bottom: 0; }
+.summary-metric span { color: var(--muted); font-size: 10px; }
+.summary-metric strong { font-size: 15px; text-align: right; }
+.order-table-card { overflow: hidden; margin-bottom: 24px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(38,29,19,.05); }
+.order-table-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.order-table-heading h3 { margin: 0; font: 700 20px var(--display); }
+.order-table-heading span { min-width: 28px; height: 28px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 8px; font-size: 10px; font-weight: 900; }
+.order-table { width: 100%; }
+.order-table-head,.order-table-row { display: grid; grid-template-columns: minmax(220px,1.35fr) 108px 128px minmax(170px,1fr) 108px 86px; align-items: center; gap: 14px; }
+.order-table-head { padding: 12px 20px; color: #9a9288; background: #fbfaf8; border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.order-table-row { padding: 14px 20px; border-bottom: 1px solid var(--line); font-size: 10px; }
+.order-table-row:last-child { border-bottom: 0; }
+.order-line-item { min-width: 0; }
+.order-line-item small,.order-line-item strong { display: block; }
+.order-line-item small { color: var(--muted); font-size: 8px; }
+.order-line-item strong { margin-top: 4px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.order-delivery-cell { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.order-total-cell { font-weight: 900; }
 .order-card { display: flex; justify-content: space-between; gap: 25px; margin-bottom: 12px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 14px; }
 .order-card h3 { margin: 6px 0; font: 700 18px var(--display); }.order-card p,.order-card small { margin: 0; color: var(--muted); font-size: 9px; }.order-card .text-end strong,.order-card .text-end button { display: block; margin-left: auto; }.order-card .text-end strong { margin-top: 9px; }
 .customer-page { min-height: calc(100vh - 76px); }
@@ -149,8 +299,8 @@ button { font: inherit; }
 .profile-preferences label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .profile-preferences input { accent-color: var(--red); }
 .receipt-grid { display: grid; gap: 12px; }
-.receipt-card { display: grid; grid-template-columns: 50px minmax(0,1fr) auto; align-items: center; gap: 16px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 15px; }
-.receipt-brand { width: 48px; height: 48px; display: grid; place-items: center; color: white; background: var(--red); border-radius: 50% 50% 50% 12px; font: italic 800 25px var(--display); }
+.receipt-card { display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 16px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 8px; }
+.brand-mark.receipt-brand { width: 50px; height: 50px; flex-basis: 50px; border-color: rgba(217,54,36,.2); box-shadow: none; }
 .receipt-card h3 { margin: 4px 0; font: 700 18px var(--display); }.receipt-card p { margin: 0 0 5px; color: var(--muted); font-size: 10px; }.receipt-card small,.receipt-card span { color: var(--muted); font-size: 8px; }
 .receipt-total { display: grid; justify-items: end; gap: 9px; }.receipt-total strong { font: 700 21px var(--display); }
 .review-form { position: sticky; top: 100px; }
@@ -238,20 +388,113 @@ button { font: inherit; }
 .notification-icon { width: 38px; height: 38px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 11px; font-size: 10px; font-weight: 900; }.notification-icon.order,.notification-icon.sale { background: var(--red); }.notification-icon.chat { background: #3e6e9b; }.notification-icon.delivery { background: var(--green); }.notification-icon.review { color: var(--ink); background: var(--gold); }
 .notification-list strong,.notification-list time { display: block; }.notification-list strong { font-size: 10px; }.notification-list p { margin: 4px 0; color: var(--muted); font-size: 9px; line-height: 1.5; }.notification-list time { color: #aaa096; font-size: 7px; }
 
+@media (max-width: 1180px) {
+  .storefront-shell { grid-template-columns: 1fr; }
+  .store-cart-column { position: static; }
+  .cart-summary-list { max-height: none; }
+  .order-history-layout { grid-template-columns: 1fr; }
+  .order-summary-panel { position: static; grid-template-columns: repeat(4,1fr); }
+  .order-summary-panel h3 { grid-column: 1 / -1; }
+}
+
 @media (max-width: 900px) {
   .login-screen { grid-template-columns: 1fr; }.login-visual { min-height: 45vh; padding: 30px; }.login-visual .brand-lockup { margin-bottom: 90px; }
   .app-header { flex-wrap: wrap; gap: 12px; }.app-header .role-navigation { order: 3; width: 100%; max-width: none; margin: 0; padding-top: 4px; }.header-actions { margin-left: auto; }.user-chip div { display: none; }
+  /* erick: tablet spacing para hindi masyadong dikit ang customer header. */
+  .app-header.customer-header { gap: 14px; }
   .section-title,.dashboard-heading { align-items: flex-start; flex-direction: column; }
   .module-heading { flex-direction: column; }
   .support-layout { grid-template-columns: 1fr; }.support-conversations { max-height: 210px; border-right: 0; border-bottom: 1px solid var(--line); }
   .service-grid { grid-template-columns: 1fr 1fr; }
+  .storefront-page,.order-history-page { padding-inline: 16px; }
+  .storefront-brand-card { align-items: flex-start; }
+  .storefront-toolbar { align-items: flex-start; flex-direction: column; }
+  .menu-list-card { grid-template-columns: 92px minmax(0,1fr); align-items: start; }
+  .menu-list-card .menu-photo { width: 92px; height: 92px; }
+  .menu-item-action { grid-column: 1 / -1; grid-template-columns: 1fr auto 38px; align-items: center; justify-items: stretch; text-align: left; }
+  .menu-item-action strong { font-size: 14px; }
+  .menu-item-action .stock-note { justify-self: end; }
+  .add-item-button { justify-self: end; }
+  .order-summary-panel { grid-template-columns: 1fr 1fr; }
+  .order-table-head,.order-table-row { grid-template-columns: minmax(200px,1.4fr) 96px 118px minmax(150px,1fr) 96px 78px; gap: 10px; }
+  .order-table-head,.order-table-row { min-width: 780px; }
+  .order-table { overflow-x: auto; }
 }
 @media (max-width: 560px) {
   .security-card { padding: 25px 18px; }.security-methods { grid-template-columns: 1fr; }.otp-inputs { gap: 5px; }.otp-inputs input { height: 48px; font-size: 20px; }.backup-code-grid { grid-template-columns: 1fr; }
   .login-form-wrap { padding: 15px; }.login-card { padding: 25px 20px; }.role-tabs { grid-template-columns: 1fr 1fr; }
   .app-header { padding: 10px 14px; }.app-header .brand-lockup div { display: none; }.header-actions .btn-link { font-size: 0; }.header-actions .btn-link:after { content: "Exit"; font-size: 10px; }
+  /* erick: mobile header grid ito para hindi magpatong ang X, logo, at buttons. */
+  .app-header.customer-header { min-height: 74px; grid-template-columns: 48px minmax(0,1fr) auto; gap: 10px; padding: 10px 12px; }
+  .customer-menu-toggle { width: 46px; height: 46px; border-radius: 12px; }
+  .customer-header .brand-lockup { justify-self: center; gap: 8px; }
+  .customer-header .brand-lockup div { display: grid; }
+  .customer-header .brand-lockup strong { font-size: 24px; }
+  .customer-header .brand-mark { width: 46px; height: 46px; flex-basis: 46px; }
+  .customer-menu-backdrop { inset: 74px 0 0; }
+  .customer-menu-drawer { top: 74px; width: min(360px,94vw); height: calc(100dvh - 74px); padding: 20px 18px; }
+  .customer-menu-title strong { font-size: 29px; }
+  .customer-menu-drawer button { min-height: 54px; font-size: 16px; }
   .integrated-hero { min-height: 600px; padding: 45px 20px; }.integrated-hero h1 { font-size: 50px; }
   .section-title h2,.dashboard-heading h2 { font-size: 38px; }.service-grid { grid-template-columns: 1fr; }
   .order-card { flex-direction: column; }.order-card .text-end { text-align: left !important; }.order-card .text-end strong,.order-card .text-end button { margin-left: 0; }
   .receipt-card { grid-template-columns: 42px 1fr; }.receipt-total { grid-column: 1 / -1; justify-items: stretch; }.receipt-total strong { text-align: right; }
+  .brand-lockup .brand-mark { width: 40px; height: 40px; flex-basis: 40px; }
+  .customer-header .brand-lockup .brand-mark { width: 46px; height: 46px; flex-basis: 46px; }
+  .header-actions { gap: 7px; }
+  .header-actions .btn-sm { padding: 6px 8px; font-size: 9px; }
+  .logout-button span { display: none; }
+  .notification-button { width: 36px; height: 36px; padding: 0; }
+  .storefront-page { padding: 16px 12px 116px; }
+  .storefront-brand-card { padding: 12px; }
+  .category-rail { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; margin-bottom: 12px; padding: 6px; }
+  .category-rail button { min-height: 39px; padding: 8px 6px; font-size: 10px; }
+  .storefront-toolbar h1 { font-size: 34px; }
+  .menu-list-card { grid-template-columns: 78px minmax(0,1fr); gap: 12px; padding: 10px; }
+  .menu-list-card .menu-photo { width: 78px; height: 78px; }
+  .menu-item-copy h3 { font-size: 17px; }
+  .menu-item-copy p { font-size: 10px; }
+  .menu-item-action { grid-template-columns: 1fr; justify-items: stretch; gap: 7px; }
+  .menu-item-action .stock-note { justify-self: start; }
+  .add-item-button { width: 100%; height: 38px; }
+  /* erick: compact cart layout para kasya ang price at trash icon sa phone. */
+  .store-cart-panel { padding: 16px; }
+  .cart-panel-heading h2 { font-size: 34px; }
+  .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) auto 36px; gap: 9px; padding: 10px 8px; }
+  .cart-summary-item strong { font-size: 13px; }
+  .cart-summary-item small { font-size: 10px; }
+  .floating-checkout { left: 12px; right: 12px; bottom: 86px; display: block; width: calc(100% - 24px); }
+  .order-history-page { padding: 18px 12px 36px; }
+  .order-summary-panel { grid-template-columns: 1fr; padding: 16px; }
+  .order-table-card { overflow: visible; }
+  .order-table { overflow: visible; }
+  .order-table-head { display: none; }
+  .order-table-row { min-width: 0; display: grid; grid-template-columns: 1fr; gap: 9px; padding: 15px; }
+  .order-table-row > div { display: grid; grid-template-columns: 88px minmax(0,1fr); align-items: start; gap: 10px; }
+  .order-table-row > div::before { content: attr(data-label); color: var(--muted); font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+  .order-line-item small,.order-line-item strong { grid-column: 2; }
+  .order-line-item::before { grid-row: 1 / span 2; }
+  .order-line-item strong,.order-delivery-cell { white-space: normal; }
+  .order-total-cell { font-size: 13px; }
+  .brand-mark.receipt-brand { width: 42px; height: 42px; flex-basis: 42px; }
+}
+
+@media (max-width: 430px) {
+  /* erick: sa extra-small phones, itinatago ang extra text para walang overlap. */
+  .customer-header .brand-lockup div { display: none; }
+  .customer-header .user-chip { display: none; }
+  .customer-header .brand-mark { width: 44px; height: 44px; flex-basis: 44px; }
+  .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) 36px; }
+  .cart-summary-item b { grid-column: 2; justify-self: start; }
+  .cart-remove-button { grid-column: 3; grid-row: 1 / span 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* erick: respetado ang reduced motion setting ng user. */
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
 }

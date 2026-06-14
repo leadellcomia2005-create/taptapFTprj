@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
+import { Bell, LogOut, Menu, Trash2, X } from "lucide-react";
 import CameraProof from "./components/CameraProof";
 import DeliveryMap from "./components/DeliveryMap";
 import SalesChart from "./components/SalesChart";
@@ -97,6 +99,14 @@ const defaultViewForRole = (role) => ({
   rider: "rider-orders"
 }[role] || "store");
 
+function BrandMark({ className = "" }) {
+  return (
+    <span className={`brand-mark ${className}`.trim()}>
+      <img src="/assets/taptap-logo.png" alt="TapTap FoodTrip logo" />
+    </span>
+  );
+}
+
 function ServiceBadge({ name, active, note }) {
   return (
     <div className="service-badge">
@@ -187,7 +197,7 @@ function LoginPanel({ onLoggedIn }) {
   return (
     <div className="login-screen">
       <div className="login-visual">
-        <div className="brand-lockup"><span>T</span><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
+        <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
         <div>
           <p className="eyebrow">Integrated operations platform</p>
           <h1>One system.<br />Every <em>foodtrip.</em></h1>
@@ -523,25 +533,52 @@ function TwoFactorPanel({ user, onComplete }) {
   );
 }
 
-function AppHeader({ user, cartCount, activeView, unreadCount, onCart, onNavigate, onNotifications }) {
+function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications }) {
   const navigation = roleNavigation[user.role] || [];
   const homeView = defaultViewForRole(user.role);
+  const customerNavigation = user.role === "customer";
+  // erick: drawer state ito para hiwalay ang customer menu sa masikip na mobile header.
+  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
+  useEffect(() => setCustomerMenuOpen(false), [activeView, user.role]);
+  const navigateFromHeader = (nextView) => {
+    onNavigate(nextView);
+    setCustomerMenuOpen(false);
+  };
+
   return (
-    <header className="app-header">
-      <button className="brand-lockup border-0 bg-transparent" onClick={() => onNavigate(homeView)}>
-        <span>T</span><div><strong>Taptap</strong><small>FOODTRIP</small></div>
+    <header className={`app-header ${customerNavigation ? "customer-header" : ""}`}>
+      {customerNavigation && (
+        /* erick: icon button ang menu para hindi na mag-overlap ang X at logo sa maliit na screen. */
+        <button className={`customer-menu-toggle ${customerMenuOpen ? "active" : ""}`} aria-expanded={customerMenuOpen} aria-label={customerMenuOpen ? "Close customer menu" : "Open customer menu"} onClick={() => setCustomerMenuOpen((current) => !current)}>
+          {customerMenuOpen ? <X size={24} strokeWidth={2.7} aria-hidden="true" /> : <Menu size={24} strokeWidth={2.7} aria-hidden="true" />}
+        </button>
+      )}
+      <button className="brand-lockup border-0 bg-transparent" onClick={() => navigateFromHeader(homeView)}>
+        <BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div>
       </button>
-      <nav className="role-navigation" aria-label={`${user.role} navigation`}>
-        {navigation.map(([view, label]) => (
-          <button className={activeView === view ? "active" : ""} key={view} onClick={() => onNavigate(view)}>{label}</button>
-        ))}
-      </nav>
+      {customerNavigation ? (
+        <>
+          {customerMenuOpen && <button className="customer-menu-backdrop" aria-label="Close customer menu" onClick={() => setCustomerMenuOpen(false)} />}
+          <nav className={`customer-menu-drawer ${customerMenuOpen ? "open" : ""}`} aria-label="Customer navigation">
+            <div className="customer-menu-title"><p className="eyebrow text-danger">Customer menu</p><strong>Foodtrip pages</strong></div>
+            {navigation.map(([view, label]) => (
+              <button className={activeView === view ? "active" : ""} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+            ))}
+          </nav>
+        </>
+      ) : (
+        <nav className="role-navigation" aria-label={`${user.role} navigation`}>
+          {navigation.map(([view, label]) => (
+            <button className={activeView === view ? "active" : ""} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+          ))}
+        </nav>
+      )}
       <div className="header-actions">
-        {user.role === "customer" && <button className="btn btn-outline-dark btn-sm" onClick={onCart}>Cart ({cartCount})</button>}
-        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><span className="bell-icon" aria-hidden="true">&#128276;</span>{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
+        {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}
+        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
-        <button className="btn btn-danger btn-sm" onClick={logout}>Log out</button>
+        <button className="btn btn-danger btn-sm logout-button" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
       </div>
     </header>
   );
@@ -579,53 +616,113 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
   const [category, setCategory] = useState("All");
   const categories = ["All", ...new Set(menu.map((item) => item.category))];
   const visible = category === "All" ? menu : menu.filter((item) => item.category === category);
+  const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const deliveryFee = cart.length > 0 ? 49 : 0;
   // erick: i-cap ang add-to-cart sa available stock (gaya ng POS) para hindi lumampas.
   const add = (product) => setCart((current) => {
+    const availableStock = Number(product.stock ?? 0);
     const existing = current.find((item) => item.id === product.id);
     if (existing) {
-      if (existing.qty >= product.stock) return current;
-      return current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1, stock: product.stock } : item);
+      if (existing.qty >= availableStock) return current;
+      return current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1, stock: availableStock } : item);
     }
-    if (product.stock < 1) return current;
-    return [...current, { ...product, qty: 1 }];
+    if (availableStock < 1) return current;
+    return [...current, { ...product, stock: availableStock, qty: 1 }];
   });
+  // erick: buong item ang tinatanggal kapag nagkamali ang customer sa cart.
+  const remove = (productId) => setCart((current) => current.filter((item) => item.id !== productId));
 
   return (
-    <>
-      <section className="integrated-hero">
-        <div>
-          <p className="eyebrow">Lutong Pinoy, powered by real-time operations</p>
-          <h1>Your next foodtrip<br />starts <em>here.</em></h1>
-          <p>Live menu availability, secure checkout, AI assistance and delivery tracking from kitchen to doorstep.</p>
-          <button className="btn btn-danger btn-lg" onClick={() => document.getElementById("live-menu").scrollIntoView({ behavior: "smooth" })}>Order now</button>
-        </div>
-      </section>
-      <section className="container py-5" id="live-menu">
-        <div className="section-title">
-          <div><p className="eyebrow text-danger">Firebase live menu</p><h2>Cravings, <em>sorted.</em></h2></div>
-          <p>Stock and availability synchronize through Firebase Realtime Database.</p>
-        </div>
-        <div className="category-pills mb-4">
-          {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}
-        </div>
-        <div className="row g-4">
-          {visible.map((product) => (
-            <div className="col-md-6 col-xl-4" key={product.id}>
-              <article className="menu-card">
-                <div className="menu-photo" style={{ backgroundPosition: product.imagePosition }} />
-                <div className="p-4">
-                  <div className="d-flex justify-content-between gap-3"><h3>{product.name}</h3><strong>{currency(product.price)}</strong></div>
-                  <p>{product.description}</p>
-                  <small>Allergens: {product.allergens?.join(", ") || "none listed"}</small>
-                  <button className="btn btn-danger w-100 mt-3" disabled={product.stock === 0} onClick={() => add(product)}>Add to cart · {product.stock} available</button>
-                </div>
-              </article>
+    <main className="storefront-page" id="live-menu">
+      <section className="storefront-shell">
+        <section className="storefront-menu-panel" aria-label="Live menu">
+          <div className="storefront-toolbar">
+            <div>
+              <p className="eyebrow text-danger">Firebase live menu</p>
+              <h1>Choose your foodtrip</h1>
+              <p>Stock and availability synchronize through Firebase Realtime Database.</p>
             </div>
-          ))}
-        </div>
-        {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={onCheckout}>Checkout {cart.reduce((sum, item) => sum + item.qty, 0)} item(s)</button>}
+            <span>{visible.length} item{visible.length === 1 ? "" : "s"}</span>
+          </div>
+
+          <div className="category-rail category-topbar" aria-label="Food categories">
+            {categories.map((item) => (
+              <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+
+          <div className="menu-list">
+            {visible.map((product) => {
+              const stock = Number(product.stock ?? 0);
+              return (
+                <article className="menu-list-card" key={product.id}>
+                  <div className="menu-photo" style={{ backgroundPosition: product.imagePosition }} />
+                  <div className="menu-item-copy">
+                    <div>
+                      <h3>{product.name}</h3>
+                      <p>{product.description}</p>
+                    </div>
+                    <small>Allergens: {product.allergens?.join(", ") || "none listed"}</small>
+                  </div>
+                  <div className="menu-item-action">
+                    <strong>{currency(product.price)}</strong>
+                    <span className={stock <= 7 ? "stock-note low" : "stock-note"}>{stock} available</span>
+                    <button className="add-item-button" disabled={stock === 0} onClick={() => add(product)} aria-label={`Add ${product.name} to cart`}>+</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <aside className="store-cart-column">
+          <div className="store-cart-panel" aria-label="Current order">
+            <div className="cart-panel-heading">
+              <div>
+                <p className="eyebrow text-danger">Your order</p>
+                <h2>{cartCount} item{cartCount === 1 ? "" : "s"}</h2>
+              </div>
+              <span>{cart.length ? "Ready" : "Empty"}</span>
+            </div>
+            <div className="cart-summary-list">
+              {cart.length === 0 && <div className="empty-cart-note">Add menu items to start an order.</div>}
+              {cart.map((item) => (
+                <div className="cart-summary-item" key={item.id}>
+                  <span>{item.qty}</span>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <small>{currency(item.price)} each</small>
+                  </div>
+                  <b>{currency(item.price * item.qty)}</b>
+                  {/* erick: trash icon ang delete action para madaling makita sa cart row. */}
+                  <button className="cart-remove-button" type="button" aria-label={`Remove ${item.name} from cart`} onClick={() => remove(item.id)}>
+                    <Trash2 size={16} strokeWidth={2.4} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="store-cart-totals">
+              <div><span>Subtotal</span><strong>{currency(cartSubtotal)}</strong></div>
+              <div><span>Delivery</span><strong>{cart.length ? currency(deliveryFee) : "-"}</strong></div>
+              <div><span>Total</span><strong>{currency(cartSubtotal + deliveryFee)}</strong></div>
+            </div>
+            <button className="btn btn-danger w-100" disabled={!cart.length} onClick={onCheckout}>Checkout</button>
+          </div>
+
+          <div className="storefront-brand-card checkout-brand-card">
+            <BrandMark />
+            <div>
+              <p className="eyebrow text-danger">TapTap FoodTrip</p>
+              <strong>Fresh orders, fast checkout</strong>
+            </div>
+          </div>
+        </aside>
       </section>
-    </>
+      {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={onCheckout}>Checkout {cartCount} item{cartCount === 1 ? "" : "s"}</button>}
+    </main>
   );
 }
 
@@ -696,15 +793,66 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
 }
 
 function OrdersView({ orders, onTrack }) {
+  const activeOrders = orders.filter((order) => order.status !== "delivered");
+  const pastOrders = orders.filter((order) => order.status === "delivered");
+  const totalSpent = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const latestOrder = orders[0];
+  const renderOrderTable = (title, list, emptyText) => (
+    <section className="order-table-card">
+      <div className="order-table-heading">
+        <h3>{title}</h3>
+        <span>{list.length}</span>
+      </div>
+      <div className="order-table">
+        <div className="order-table-head">
+          <span>Order</span>
+          <span>Date</span>
+          <span>Status</span>
+          <span>Delivery</span>
+          <span>Total</span>
+          <span>Action</span>
+        </div>
+        {list.length === 0 && <div className="empty-state compact">{emptyText}</div>}
+        {list.map((order) => (
+          <article className="order-table-row" key={order.id}>
+            <div className="order-line-item" data-label="Order">
+              <small>{order.id}</small>
+              <strong>{order.items?.map((item) => `${item.qty} x ${item.name}`).join(", ") || "Order items"}</strong>
+            </div>
+            <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
+            <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
+            <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}</div>
+            <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
+            <div data-label="Action"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button></div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+
   return (
-    <main className="container py-5">
-      <div className="section-title"><div><p className="eyebrow text-danger">Realtime Database</p><h2>Order history</h2></div><p>Review previous and active purchases with live delivery status.</p></div>
-      {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : orders.map((order) => (
-        <article className="order-card" key={order.id}>
-          <div><small>{order.id}</small><h3>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</h3><p>{order.address}</p></div>
-          <div className="text-end"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span><strong>{currency(order.total)}</strong><button className="btn btn-link btn-sm" onClick={() => onTrack(order)}>Track live</button></div>
-        </article>
-      ))}
+    <main className="container-fluid customer-page order-history-page">
+      <div className="order-history-layout">
+        <section className="order-history-main">
+          <div className="section-title">
+            <div><p className="eyebrow text-danger">Realtime Database</p><h2>Order history</h2></div>
+            <p>Review previous and active purchases with live delivery status.</p>
+          </div>
+          {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : (
+            <>
+              {renderOrderTable("Active orders", activeOrders, "No active orders right now.")}
+              {renderOrderTable("Past orders", pastOrders, "Completed orders will appear here.")}
+            </>
+          )}
+        </section>
+        <aside className="order-summary-panel">
+          <h3>Summary</h3>
+          <div className="summary-metric"><span>Active orders</span><strong>{activeOrders.length}</strong></div>
+          <div className="summary-metric"><span>Completed orders</span><strong>{pastOrders.length}</strong></div>
+          <div className="summary-metric"><span>Total spend</span><strong>{currency(totalSpent)}</strong></div>
+          <div className="summary-metric"><span>Latest update</span><strong>{latestOrder ? statusLabel(latestOrder.status) : "-"}</strong></div>
+        </aside>
+      </div>
     </main>
   );
 }
@@ -756,7 +904,7 @@ function ReceiptsView({ orders }) {
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
-      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><div className="receipt-brand">T</div><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
+      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
     </main>
   );
 }
@@ -1451,7 +1599,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
   if (user === undefined) return <div className="loading-screen">Loading Taptap Foodtrip...</div>;
   if (!user) return <LoginPanel />;
   if (user.emailVerified !== true) {
@@ -1479,7 +1626,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader user={currentUser} cartCount={cartCount} activeView={view} unreadCount={unreadCount} onCart={() => setCheckoutOpen(true)} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
+      <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} />}
       {user.role === "customer" && view === "orders" && <OrdersView orders={orders} onTrack={setTrackingOrder} />}
       {user.role === "customer" && view === "receipts" && <ReceiptsView orders={orders} />}

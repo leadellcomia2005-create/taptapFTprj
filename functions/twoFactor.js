@@ -80,9 +80,17 @@ function totp(secret, counter) {
 }
 
 function verifyTotp(secret, code, now = Date.now()) {
-  if (!/^\d{6}$/.test(String(code || ""))) return false;
+  return matchingTotpCounter(secret, code, now) !== null;
+}
+
+function matchingTotpCounter(secret, code, now = Date.now()) {
+  if (!/^\d{6}$/.test(String(code || ""))) return null;
   const counter = Math.floor(now / 1000 / 30);
-  return [-1, 0, 1].some((window) => timingSafeEqual(Buffer.from(totp(secret, counter + window)), Buffer.from(String(code))));
+  for (const window of [-1, 0, 1]) {
+    const candidate = counter + window;
+    if (timingSafeEqual(Buffer.from(totp(secret, candidate)), Buffer.from(String(code)))) return candidate;
+  }
+  return null;
 }
 
 function hashCode(code, salt = randomBytes(16).toString("base64")) {
@@ -162,8 +170,8 @@ async function recordFailure(db, user, method, idToken) {
   throw new HttpError(locked ? 423 : 401, locked ? "Account locked after three failed 2FA attempts." : "The verification code is invalid or expired.");
 }
 
-async function completeSuccess(db, user, method) {
-  await db.ref(`twoFactor/${user.uid}`).update({ failedAttempts: 0, locked: false, lockedAt: null, lastVerifiedAt: Date.now() });
+async function completeSuccess(db, user, method, values = {}) {
+  await db.ref(`twoFactor/${user.uid}`).update({ failedAttempts: 0, locked: false, lockedAt: null, lastVerifiedAt: Date.now(), ...values });
   await audit(db, user.uid, "success", { method });
   return issueSessionToken(db, user);
 }
@@ -278,14 +286,17 @@ export async function verifyChallenge(db, user, input, encryptionKey, idToken) {
     if (!transaction.committed || !matched) return recordFailure(db, user, "backup", idToken);
     return { customToken: await completeSuccess(db, user, "backup") };
   }
+  const totpCounter = config.method === "totp"
+    ? matchingTotpCounter(decrypt(config.totpSecret, encryptionKey), input.code)
+    : null;
   const valid = config.method === "totp"
-    ? verifyTotp(decrypt(config.totpSecret, encryptionKey), input.code)
+    ? totpCounter !== null && totpCounter > Number(config.lastTotpCounter ?? -1)
     : config.method === "sms"
       ? config.pendingSms?.purpose === "challenge" && Number(config.pendingSms.expiresAt) >= Date.now() && verifyHash(input.code, config.pendingSms)
       : config.pendingEmail?.purpose === "challenge" && Number(config.pendingEmail.expiresAt) >= Date.now() && verifyHash(input.code, config.pendingEmail);
   if (!valid) return recordFailure(db, user, config.method, idToken);
   await db.ref(`twoFactor/${user.uid}`).update({ pendingSms: null, pendingEmail: null });
-  return { customToken: await completeSuccess(db, user, config.method) };
+  return { customToken: await completeSuccess(db, user, config.method, totpCounter !== null ? { lastTotpCounter: totpCounter } : {}) };
 }
 
 export async function resetTwoFactor(db, actor, userId) {

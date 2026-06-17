@@ -58,6 +58,7 @@ export async function createOrderRecord(db, user, input) {
   const total = subtotal + fee;
   const customerId = isWalkIn ? "walk-in" : user.uid;
   const customerName = isWalkIn ? "Walk-in Customer" : profile.name || user.name || user.email;
+  const onlinePayment = !isWalkIn && input.paymentMethod === "gcash";
   const orderId = db.ref("orders").push().key;
   const [staffUserIds, ownerUserIds] = await Promise.all([
     userIdsForRoles(db, ["staff"]),
@@ -76,7 +77,11 @@ export async function createOrderRecord(db, user, input) {
     total,
     items,
     createdAt,
-    status: "received",
+    status: onlinePayment ? "pending-payment" : "received",
+    paymentStatus: onlinePayment ? "pending" : input.paymentMethod === "cod" ? "cod-pending" : "paid",
+    paymentProvider: onlinePayment ? "paymongo" : input.paymentMethod,
+    paymentRequiredAt: onlinePayment ? createdAt : null,
+    paymentConfirmedAt: onlinePayment ? null : createdAt,
     source: isWalkIn ? "walk-in-pos" : "online"
   };
   if (!isWalkIn && (!order.address || !order.phone)) throw new HttpError(400, "A phone number and delivery address are required.");
@@ -115,18 +120,18 @@ export async function createOrderRecord(db, user, input) {
       createdAt
     },
     ...notificationUpdates(db, customerId === "walk-in" ? [] : [customerId], {
-      title: "Order confirmed",
-      message: `Order ${orderId} was received.`,
+      title: onlinePayment ? "Payment pending" : "Order confirmed",
+      message: onlinePayment ? `Order ${orderId} is waiting for GCash payment confirmation.` : `Order ${orderId} was received.`,
       type: "order",
       orderId
     }),
-    ...notificationUpdates(db, staffUserIds, {
+    ...notificationUpdates(db, onlinePayment ? [] : staffUserIds, {
       title: "New order received",
       message: `${orderId} from ${customerName} is waiting in the queue.`,
       type: "order",
       orderId
     }),
-    ...notificationUpdates(db, ownerUserIds, {
+    ...notificationUpdates(db, onlinePayment ? [] : ownerUserIds, {
       title: "New sale recorded",
       message: `${orderId} added ${total} PHP to the live sales ledger.`,
       type: "sale",

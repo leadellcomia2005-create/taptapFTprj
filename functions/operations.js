@@ -152,6 +152,7 @@ export async function createOrderRecord(db, user, input) {
   });
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
   const isWalkIn = user.role !== "customer";
+  const onlinePayment = !isWalkIn && input.paymentMethod === "gcash";
   const orderId = db.ref("orders").push().key;
   const [staffIds, ownerIds] = await Promise.all([userIdsForRoles(db, ["staff"]), userIdsForRoles(db, ["owner"])]);
   const createdAt = Date.now();
@@ -167,7 +168,11 @@ export async function createOrderRecord(db, user, input) {
     total: subtotal + (isWalkIn ? 0 : 49),
     items,
     createdAt,
-    status: "received",
+    status: onlinePayment ? "pending-payment" : "received",
+    paymentStatus: onlinePayment ? "pending" : input.paymentMethod === "cod" ? "cod-pending" : "paid",
+    paymentProvider: onlinePayment ? "paymongo" : input.paymentMethod,
+    paymentRequiredAt: onlinePayment ? createdAt : null,
+    paymentConfirmedAt: onlinePayment ? null : createdAt,
     source: isWalkIn ? "walk-in-pos" : "online"
   };
   if (!isWalkIn && (!order.address || !order.phone)) throw new HttpError(400, "A phone number and delivery address are required.");
@@ -194,9 +199,9 @@ export async function createOrderRecord(db, user, input) {
   const updates = {
     [`orders/${orderId}`]: order,
     [`auditLogs/AUD-${createdAt}-${orderId}`]: { action: "order_created", orderId, actorId: user.uid, actorRole: user.role, total: order.total, createdAt },
-    ...notificationUpdates(db, isWalkIn ? [] : [order.customerId], "Order confirmed", `Order ${orderId} was received.`, { type: "order", orderId }),
-    ...notificationUpdates(db, staffIds, "New order received", `${orderId} from ${order.customerName} is waiting in the queue.`, { type: "order", orderId }),
-    ...notificationUpdates(db, ownerIds, "New sale recorded", `${orderId} added ${order.total} PHP to the live sales ledger.`, { type: "sale", orderId })
+    ...notificationUpdates(db, isWalkIn ? [] : [order.customerId], onlinePayment ? "Payment pending" : "Order confirmed", onlinePayment ? `Order ${orderId} is waiting for GCash payment confirmation.` : `Order ${orderId} was received.`, { type: "order", orderId }),
+    ...notificationUpdates(db, onlinePayment ? [] : staffIds, "New order received", `${orderId} from ${order.customerName} is waiting in the queue.`, { type: "order", orderId }),
+    ...notificationUpdates(db, onlinePayment ? [] : ownerIds, "New sale recorded", `${orderId} added ${order.total} PHP to the live sales ledger.`, { type: "sale", orderId })
   };
   for (const item of items) updates[`public/menu/${item.id}/stock`] = Number(committedInventory[item.id]?.stock ?? 0);
 

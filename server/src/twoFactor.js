@@ -109,12 +109,17 @@ function totp(secret, counter) {
 }
 
 export function verifyTotp(secret, code, now = Date.now()) {
-  if (!/^\d{6}$/.test(String(code || ""))) return false;
+  return matchingTotpCounter(secret, code, now) !== null;
+}
+
+function matchingTotpCounter(secret, code, now = Date.now()) {
+  if (!/^\d{6}$/.test(String(code || ""))) return null;
   const counter = Math.floor(now / 1000 / totpPeriodSeconds);
-  return [-1, 0, 1].some((window) => timingSafeEqual(
-    Buffer.from(totp(secret, counter + window)),
-    Buffer.from(String(code))
-  ));
+  for (const window of [-1, 0, 1]) {
+    const candidate = counter + window;
+    if (timingSafeEqual(Buffer.from(totp(secret, candidate)), Buffer.from(String(code)))) return candidate;
+  }
+  return null;
 }
 
 function hashCode(code, salt = randomBytes(16).toString("base64")) {
@@ -228,12 +233,13 @@ async function issueSessionToken(db, user) {
   return getAuth().createCustomToken(user.uid, { mfaSession: true, role });
 }
 
-async function completeSuccess(db, user, method) {
+async function completeSuccess(db, user, method, values = {}) {
   await db.ref(`twoFactor/${user.uid}`).update({
     failedAttempts: 0,
     locked: false,
     lockedAt: null,
-    lastVerifiedAt: Date.now()
+    lastVerifiedAt: Date.now(),
+    ...values
   });
   await audit(db, user.uid, "success", { method });
   return issueSessionToken(db, user);
@@ -428,8 +434,10 @@ export async function verifyChallenge(db, user, input = {}, idToken) {
   }
 
   let valid = false;
+  let totpCounter = null;
   if (config.method === "totp") {
-    valid = verifyTotp(decrypt(config.totpSecret), input.code);
+    totpCounter = matchingTotpCounter(decrypt(config.totpSecret), input.code);
+    valid = totpCounter !== null && totpCounter > Number(config.lastTotpCounter ?? -1);
   } else if (config.method === "sms") {
     valid = config.pendingSms?.purpose === "challenge" &&
       Number(config.pendingSms.expiresAt) >= Date.now() &&
@@ -441,7 +449,7 @@ export async function verifyChallenge(db, user, input = {}, idToken) {
   }
   if (!valid) return recordFailure(db, user, config.method, idToken);
   await db.ref(`twoFactor/${user.uid}`).update({ pendingSms: null, pendingEmail: null });
-  return { customToken: await completeSuccess(db, user, config.method) };
+  return { customToken: await completeSuccess(db, user, config.method, totpCounter !== null ? { lastTotpCounter: totpCounter } : {}) };
 }
 
 export async function resetTwoFactor(db, actor, userId) {

@@ -192,8 +192,15 @@ app.post("/api/payments/checkout", authenticate, asyncRoute(async (req, res) => 
   if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await db().ref(`orders/${req.body.orderId}`).once("value")).val();
   if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
-  const result = await createPayMongoCheckout({ ...order, orderId: req.body.orderId, successUrl: req.body.successUrl, cancelUrl: req.body.cancelUrl });
+  if (order.paymentMethod !== "gcash") throw new HttpError(409, "Only GCash orders use online checkout.");
+  if (order.paymentStatus === "paid") throw new HttpError(409, "This order is already paid.");
+  const result = await createPayMongoCheckout({ ...order, orderId: req.body.orderId });
   if (!result) throw new HttpError(503, "PayMongo is not configured.");
+  await db().ref(`orders/${req.body.orderId}`).update({
+    paymentProvider: "paymongo",
+    providerSessionId: result.id,
+    checkoutCreatedAt: Date.now()
+  });
   res.json(result);
 }));
 

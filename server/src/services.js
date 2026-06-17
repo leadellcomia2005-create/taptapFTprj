@@ -66,8 +66,25 @@ export async function generateInsights({ sales, inventory }) {
   return response.output_text;
 }
 
+export function checkoutReturnUrls(orderId) {
+  const [origin] = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  let base = "http://localhost:5173";
+  try {
+    base = new URL(origin).origin;
+  } catch {}
+  const encodedOrderId = encodeURIComponent(orderId);
+  return {
+    successUrl: `${base}/?payment=success&orderId=${encodedOrderId}`,
+    cancelUrl: `${base}/?payment=cancelled&orderId=${encodedOrderId}`
+  };
+}
+
 export async function createPayMongoCheckout(order) {
   if (!has("PAYMONGO_SECRET_KEY")) return null;
+  const returnUrls = checkoutReturnUrls(order.orderId);
   const authorization = Buffer.from(`${process.env.PAYMONGO_SECRET_KEY}:`).toString("base64");
   const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
     method: "POST",
@@ -84,15 +101,23 @@ export async function createPayMongoCheckout(order) {
             phone: order.phone
           },
           description: `Taptap Foodtrip ${order.orderId}`,
-          line_items: order.items.map((item) => ({
-            currency: "PHP",
-            amount: Math.round(item.price * 100),
-            name: item.name,
-            quantity: item.qty
-          })),
+          line_items: [
+            ...order.items.map((item) => ({
+              currency: "PHP",
+              amount: Math.round(item.price * 100),
+              name: item.name,
+              quantity: item.qty
+            })),
+            ...(Number(order.deliveryFee || 0) > 0 ? [{
+              currency: "PHP",
+              amount: Math.round(Number(order.deliveryFee) * 100),
+              name: "Delivery fee",
+              quantity: 1
+            }] : [])
+          ],
           payment_method_types: ["gcash"],
-          success_url: order.successUrl,
-          cancel_url: order.cancelUrl,
+          success_url: returnUrls.successUrl,
+          cancel_url: returnUrls.cancelUrl,
           reference_number: order.orderId,
           send_email_receipt: true,
           show_description: true,

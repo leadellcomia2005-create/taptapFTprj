@@ -4,7 +4,7 @@ import { Bell, LogOut, Menu, Trash2, X } from "lucide-react";
 import CameraProof from "./components/CameraProof";
 import DeliveryMap from "./components/DeliveryMap";
 import SalesChart from "./components/SalesChart";
-import { demoAccounts, demoSales, fallbackMenu } from "./data/menu";
+import { demoAccounts, fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
 import {
   adjustInventory,
@@ -41,6 +41,7 @@ import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from ".
 
 const currency = (value) => `₱${Number(value || 0).toLocaleString("en-PH")}`;
 const statusLabel = (value) => ({
+  "pending-payment": "Payment pending",
   received: "Received",
   preparing: "Preparing",
   ready: "Ready",
@@ -120,8 +121,8 @@ function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
     { id: "auth", label: "Authentication user", detail: "Waiting to create the secure email/password identity.", status: "pending" },
-    { id: "profile", label: "Customer profile", detail: "Waiting to save the profile in Realtime Database.", status: "pending" },
-    { id: "verification", label: "Verification email", detail: "Waiting to request the email from Firebase.", status: "pending" },
+    { id: "profile", label: "Customer profile", detail: "Waiting to save your profile.", status: "pending" },
+    { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
     { id: "session", label: "Registration session", detail: "Waiting to close the temporary registration session.", status: "pending" }
   ];
   const [role, setRole] = useState("customer");
@@ -232,7 +233,7 @@ function LoginPanel({ onLoggedIn }) {
           {registering && (
             <div className="firebase-registration-flow" aria-live="polite">
               <div className="registration-flow-heading">
-                <div><strong>Live Firebase activity</strong><small>Project: taptapftprj-leadell-2026</small></div>
+                <div><strong>Creating your account</strong><small>Setting up your secure customer profile.</small></div>
                 <span>{registrationResult ? "Complete" : busy ? "Working" : "Ready"}</span>
               </div>
               {registrationSteps.map((step) => (
@@ -244,8 +245,7 @@ function LoginPanel({ onLoggedIn }) {
               {registrationResult && (
                 <div className="registration-result">
                   <strong>Customer account created</strong>
-                  <span>UID: <code>{registrationResult.uid}</code></span>
-                  <span>Database: <code>{registrationResult.profilePath}</code></span>
+                  <span>Your account is ready. Please check your email to verify it.</span>
                   <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
                 </div>
               )}
@@ -562,14 +562,14 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
           <nav className={`customer-menu-drawer ${customerMenuOpen ? "open" : ""}`} aria-label="Customer navigation">
             <div className="customer-menu-title"><p className="eyebrow text-danger">Customer menu</p><strong>Foodtrip pages</strong></div>
             {navigation.map(([view, label]) => (
-              <button className={activeView === view ? "active" : ""} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+              <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
             ))}
           </nav>
         </>
       ) : (
         <nav className="role-navigation" aria-label={`${user.role} navigation`}>
           {navigation.map(([view, label]) => (
-            <button className={activeView === view ? "active" : ""} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+            <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
           ))}
         </nav>
       )}
@@ -599,7 +599,7 @@ function NotificationCenter({ notifications, onClose }) {
     <>
       <button className="notification-backdrop" aria-label="Close notifications" onClick={onClose} />
       <aside className="notification-center">
-        <header><div><p className="eyebrow text-danger">Your realtime updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}>X</button></div></header>
+        <header><div><p className="eyebrow text-danger">Your updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></div></header>
         <div className="notification-list">
           {notifications.length === 0 && <div className="empty-chat">No notifications yet.</div>}
           {notifications.map((notification) => {
@@ -612,7 +612,7 @@ function NotificationCenter({ notifications, onClose }) {
   );
 }
 
-function Storefront({ menu, cart, setCart, onCheckout }) {
+function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
   const categories = ["All", ...new Set(menu.map((item) => item.category))];
   const visible = category === "All" ? menu : menu.filter((item) => item.category === category);
@@ -624,7 +624,10 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
     const availableStock = Number(product.stock ?? 0);
     const existing = current.find((item) => item.id === product.id);
     if (existing) {
-      if (existing.qty >= availableStock) return current;
+      if (existing.qty >= availableStock) {
+        notify?.(`Only ${availableStock} ${product.name} left.`);
+        return current;
+      }
       return current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1, stock: availableStock } : item);
     }
     if (availableStock < 1) return current;
@@ -639,16 +642,16 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
         <section className="storefront-menu-panel" aria-label="Live menu">
           <div className="storefront-toolbar">
             <div>
-              <p className="eyebrow text-danger">Firebase live menu</p>
+              <p className="eyebrow text-danger">Today's menu</p>
               <h1>Choose your foodtrip</h1>
-              <p>Stock and availability synchronize through Firebase Realtime Database.</p>
+              <p>Menu availability updates live while you build your order.</p>
             </div>
             <span>{visible.length} item{visible.length === 1 ? "" : "s"}</span>
           </div>
 
           <div className="category-rail category-topbar" aria-label="Food categories">
             {categories.map((item) => (
-              <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>
+              <button key={item} className={category === item ? "active" : ""} aria-pressed={category === item} onClick={() => setCategory(item)}>
                 {item}
               </button>
             ))}
@@ -728,10 +731,17 @@ function Storefront({ menu, cart, setCart, onCheckout }) {
 
 function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, notify }) {
   const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
-  const [phone, setPhone] = useState(profile?.phone || "+639171234567");
-  const [address, setAddress] = useState(profile?.address || "BF Resort Village, Las Pinas City");
+  const [phone, setPhone] = useState(profile?.phone || "");
+  const [address, setAddress] = useState(profile?.address || "");
   const [busy, setBusy] = useState(false);
   const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0) + 49;
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
 
   const place = async () => {
     if (!phone.trim() || !address.trim()) {
@@ -753,7 +763,7 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
       const orderId = await createOrder(orderPayload);
       if (payment === "gcash") {
         try {
-          const result = await api.createPayment({ orderId, successUrl: window.location.href, cancelUrl: window.location.href });
+          const result = await api.createPayment({ orderId });
           if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
           else notify(`Order ${orderId} created. PayMongo is awaiting credentials.`);
         } catch (paymentError) {
@@ -771,17 +781,17 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
   };
 
   return (
-    <div className="modal d-block">
+    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content">
-          <div className="modal-header"><h5 className="modal-title">Secure checkout</h5><button className="btn-close" onClick={onClose} /></div>
+        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+          <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
           <div className="modal-body">
             {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
             <label className="form-label mt-3">Mobile number<input className="form-control" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
             <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
             <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "via PayMongo" : "Not configured"}</small></button></div>
-              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "via PayMongo" : "Not configured"}</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
             </div>
             <div className="checkout-total"><span>Total including delivery</span><strong>{currency(total)}</strong></div>
           </div>
@@ -795,7 +805,7 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
 function OrdersView({ orders, onTrack }) {
   const activeOrders = orders.filter((order) => order.status !== "delivered");
   const pastOrders = orders.filter((order) => order.status === "delivered");
-  const totalSpent = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const totalSpent = orders.filter((order) => order.paymentStatus !== "pending").reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
   const renderOrderTable = (title, list, emptyText) => (
     <section className="order-table-card">
@@ -835,7 +845,7 @@ function OrdersView({ orders, onTrack }) {
       <div className="order-history-layout">
         <section className="order-history-main">
           <div className="section-title">
-            <div><p className="eyebrow text-danger">Realtime Database</p><h2>Order history</h2></div>
+            <div><p className="eyebrow text-danger">Your orders</p><h2>Order history</h2></div>
             <p>Review previous and active purchases with live delivery status.</p>
           </div>
           {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : (
@@ -929,7 +939,7 @@ function ReviewsView({ user, orders, reviews, notify }) {
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
       <div className="row g-4">
-        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} · {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
+        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} · {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
         <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} · {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
       </div>
     </main>
@@ -1117,7 +1127,18 @@ function SettingsModule({ title, serviceStatus, staff = false, notify }) {
 
 function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
-  const totalSales = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const revenueOrders = orders.filter((order) => order.paymentStatus !== "pending" && order.status !== "pending-payment");
+  const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const salesTrend = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    day.setDate(day.getDate() - (6 - index));
+    const start = day.getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    return revenueOrders
+      .filter((order) => Number(order.createdAt || 0) >= start && Number(order.createdAt || 0) < end)
+      .reduce((sum, order) => sum + Number(order.total || 0), 0);
+  });
   const [insight, setInsight] = useState("Generate a live OpenAI sales and inventory summary.");
   const [salesGoal, setSalesGoal] = useState(100000);
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff" });
@@ -1193,8 +1214,8 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       <div className="row g-3">
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
-        <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => order.status !== "delivered").length}</strong><span>Live order workload</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><SalesChart values={demoSales.map((value, index) => value + (index === 6 ? totalSales : 0))} /></div></div>
+        <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => order.status !== "delivered" && order.status !== "pending-payment").length}</strong><span>Live order workload</span></div></div>
+        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><SalesChart values={salesTrend} /></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Strategy controls</h3><label className="form-label">Sales goal threshold<input className="form-control" type="number" value={salesGoal} onChange={(event) => setSalesGoal(Number(event.target.value))} /></label><label className="form-label">Active promotion<select className="form-select"><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={() => notify("Sales strategy saved.")}>Save strategy</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
       </div>
@@ -1207,7 +1228,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
     </main>
   );
   if (section === "owner-users") return (
-    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Firebase Authentication</p><h2>Users & Roles</h2></div></div><div className="row g-3">
+    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div><div className="row g-3">
       <div className="col-12"><div className="dashboard-card"><h3>Project users and 2FA security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No Firebase users were returned.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${account.twoFactorMethod} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset 2FA</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign Firebase role</h3><p className="module-note">Enter a Firebase Authentication UID. Custom claims are updated securely by the Node.js API.</p><label className="form-label">User UID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
@@ -1219,14 +1240,14 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Platform administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
   return (
     <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={downloadReport}>Export PDF with jsPDF</button></div>
+      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={downloadReport}>Export sales PDF</button></div>
       <div className="row g-3">
-        <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Firebase transactions</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Recipe mapped</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Services online</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Credential dependent</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance · Chart.js</h3><SalesChart values={demoSales.map((value, index) => value + (index === 6 ? totalSales : 0))} /></div></div>
-        <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">OpenAI operations insight</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>Generate AI summary</button></div></div>
+        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><SalesChart values={salesTrend} /></div></div>
+        <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">AI operations insight</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>Generate AI summary</button></div></div>
         <div className="col-lg-7"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="col-lg-5"><div className="dashboard-card"><h3>Low-stock alerts</h3>{inventory.filter((item) => item.stock <= item.reorderPoint).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}{inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}</div></div>
       </div>
@@ -1237,6 +1258,10 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
 function OrderManagement({ orders, canAdvance, notify }) {
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const advance = async (order) => {
+    if (!flow.includes(order.status)) {
+      notify("This order is waiting for payment confirmation.");
+      return;
+    }
     const next = flow[Math.min(flow.indexOf(order.status) + 1, flow.length - 1)];
     await updateOrder(order.id, { status: next, updatedAt: Date.now() });
     api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
@@ -1249,7 +1274,7 @@ function OrderManagement({ orders, canAdvance, notify }) {
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ") || "—"}</span>{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}</td><td>{order.paymentMethod}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}</td></tr>)}</tbody>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ") || "—"}</span>{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}</td><td>{order.paymentMethod}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}</td></tr>)}</tbody>
         </table>
       </div>
     </div>
@@ -1301,7 +1326,7 @@ function StaffWorkspace({ section, user, orders, inventory, shiftLogs, messages,
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
   const activeOrders = orders.filter((order) => order.status !== "delivered");
-  const todaySales = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const todaySales = orders.filter((order) => order.paymentStatus !== "pending" && order.status !== "pending-payment").reduce((sum, order) => sum + Number(order.total || 0), 0);
   const lowStock = inventory.filter((item) => item.stock <= item.reorderPoint);
   return (
     <main className="container-fluid dashboard-page py-4">
@@ -1425,16 +1450,23 @@ function RiderWorkspace({ section, user, orders, notify }) {
 function TrackingView({ order, onClose }) {
   const [rider, setRider] = useState(null);
   useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+  useEffect(() => {
     if (!order?.riderId) return undefined;
     joinOrderRoom(order.id).catch(() => {});
     return subscribeRiderLocation(order.id, setRider);
   }, [order]);
   if (!order) return null;
   return (
-    <div className="modal d-block">
+    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-xl modal-dialog-centered">
-        <div className="modal-content">
-          <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title">{statusLabel(order.status)}</h5></div><button className="btn-close" onClick={onClose} /></div>
+        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
+          <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
           <div className="modal-body p-0"><DeliveryMap rider={rider} /></div>
         </div>
       </div>
@@ -1485,8 +1517,8 @@ function Assistant({ user, menu }) {
   };
   return (
     <>
-      <button className="assistant-launcher" onClick={() => setOpen(!open)}>AI</button>
-      {open && <aside className="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>AI answers + live staff support</small></div><button onClick={() => setOpen(false)}>×</button></header><div className="assistant-messages">{messages.map((message, index) => <div key={index} className={message.from}><span>{message.text}</span>{message.source && <small>{message.source}</small>}</div>)}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask AI or contact staff..." /><button>Send</button></form></aside>}
+      <button className="assistant-launcher" aria-label={open ? "Close AI assistant" : "Open AI assistant"} aria-expanded={open} aria-controls="assistant-panel" onClick={() => setOpen(!open)}>AI</button>
+      {open && <aside className="assistant-panel" id="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>AI answers + live staff support</small></div><button aria-label="Close AI assistant" onClick={() => setOpen(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => <div key={index} className={message.from}><span>{message.text}</span>{message.source && <small>{message.source}</small>}</div>)}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask AI or contact staff..." /><button>Send</button></form></aside>}
     </>
   );
 }
@@ -1627,7 +1659,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
-      {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} />}
+      {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && <OrdersView orders={orders} onTrack={setTrackingOrder} />}
       {user.role === "customer" && view === "receipts" && <ReceiptsView orders={orders} />}
       {user.role === "customer" && view === "feedback" && <ReviewsView user={currentUser} orders={orders} reviews={reviews} notify={setNotice} />}
@@ -1637,7 +1669,7 @@ export default function App() {
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
-      {notice && <div className="app-toast">{notice}</div>}
+      {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}
     </div>
   );
 }

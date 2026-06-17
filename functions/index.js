@@ -51,7 +51,19 @@ const gmailUser = defineSecret("GMAIL_USER");
 const gmailAppPassword = defineSecret("GMAIL_APP_PASSWORD");
 const app = express();
 
-app.use(cors({ origin: true }));
+const allowedOrigins = () => (process.env.CLIENT_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins().includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 
 const route = (path) => [path, `/api${path}`];
@@ -62,6 +74,18 @@ const secretValue = (secret) => {
     return "";
   }
 };
+
+function checkoutReturnUrls(orderId) {
+  let base = "http://localhost:5173";
+  try {
+    base = new URL(allowedOrigins()[0] || base).origin;
+  } catch {}
+  const encodedOrderId = encodeURIComponent(orderId);
+  return {
+    successUrl: `${base}/?payment=success&orderId=${encodedOrderId}`,
+    cancelUrl: `${base}/?payment=cancelled&orderId=${encodedOrderId}`
+  };
+}
 
 async function verifyUserToken(token) {
   const decoded = await getAuth().verifyIdToken(token);
@@ -227,6 +251,9 @@ app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) 
   if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await database().ref(`orders/${req.body.orderId}`).once("value")).val();
   if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
+  if (order.paymentMethod !== "gcash") throw new HttpError(409, "Only GCash orders use online checkout.");
+  if (order.paymentStatus === "paid") throw new HttpError(409, "This order is already paid.");
+  const returnUrls = checkoutReturnUrls(req.body.orderId);
   const authorization = Buffer.from(`${key}:`).toString("base64");
   const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
     method: "POST",
@@ -236,10 +263,13 @@ app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) 
         attributes: {
           billing: { email: order.customerEmail, name: order.customerName, phone: order.phone },
           description: `Taptap Foodtrip ${req.body.orderId}`,
-          line_items: order.items.map((item) => ({ currency: "PHP", amount: Math.round(item.price * 100), name: item.name, quantity: item.qty })),
+          line_items: [
+            ...order.items.map((item) => ({ currency: "PHP", amount: Math.round(item.price * 100), name: item.name, quantity: item.qty })),
+            ...(Number(order.deliveryFee || 0) > 0 ? [{ currency: "PHP", amount: Math.round(Number(order.deliveryFee) * 100), name: "Delivery fee", quantity: 1 }] : [])
+          ],
           payment_method_types: ["gcash"],
-          success_url: req.body.successUrl,
-          cancel_url: req.body.cancelUrl,
+          success_url: returnUrls.successUrl,
+          cancel_url: returnUrls.cancelUrl,
           reference_number: req.body.orderId,
           send_email_receipt: true,
           show_description: true,
@@ -250,6 +280,11 @@ app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) 
   });
   const payload = await response.json();
   if (!response.ok) throw new HttpError(502, payload.errors?.[0]?.detail || "PayMongo request failed.");
+  await database().ref(`orders/${req.body.orderId}`).update({
+    paymentProvider: "paymongo",
+    providerSessionId: payload.data.id,
+    checkoutCreatedAt: Date.now()
+  });
   res.json({ id: payload.data.id, checkoutUrl: payload.data.attributes.checkout_url });
 }));
 

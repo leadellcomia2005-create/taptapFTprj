@@ -244,7 +244,7 @@ export async function registerCustomer(name, email, password, onProgress = () =>
       throw error;
     }
 
-    onProgress("profile", "active", "Saving the customer profile to Realtime Database...");
+    onProgress("profile", "active", "Saving the customer profile...");
     try {
       await set(ref(registrationDb, `users/${user.uid}`), {
         name,
@@ -416,6 +416,7 @@ export async function submitReview(order, user, rating, comment) {
     rating: Number(rating),
     comment,
     items: order.items?.map((item) => item.name) || [],
+    moderationStatus: "pending",
     createdAt: Date.now()
   };
   if (firebaseEnabled) await set(ref(db, `reviews/${order.id}`), review);
@@ -546,16 +547,30 @@ export async function createOrder(order) {
   }
   const data = readDemoData();
   const id = `TAP-${Date.now().toString().slice(-8)}`;
-  data.orders[id] = { ...order, createdAt: Date.now(), status: "received" };
+  const onlinePayment = order.paymentMethod === "gcash";
+  data.orders[id] = {
+    ...order,
+    createdAt: Date.now(),
+    status: onlinePayment ? "pending-payment" : "received",
+    paymentStatus: onlinePayment ? "pending" : order.paymentMethod === "cod" ? "cod-pending" : "paid",
+    paymentProvider: onlinePayment ? "paymongo" : order.paymentMethod,
+    paymentRequiredAt: onlinePayment ? Date.now() : null,
+    paymentConfirmedAt: onlinePayment ? null : Date.now()
+  };
   for (const item of order.items) {
     data.inventory[item.id] = { stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) - item.qty) };
   }
   writeDemoData(data);
-  await Promise.all([
-    createNotification({ targetUserId: order.customerId, title: "Order confirmed", message: `Order ${id} was received.`, type: "order", orderId: id }),
-    createNotification({ targetUserId: "demo-staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
-    createNotification({ targetUserId: "demo-owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
-  ]);
+  const notifications = [
+    createNotification({ targetUserId: order.customerId, title: onlinePayment ? "Payment pending" : "Order confirmed", message: onlinePayment ? `Order ${id} is waiting for GCash payment confirmation.` : `Order ${id} was received.`, type: "order", orderId: id })
+  ];
+  if (!onlinePayment) {
+    notifications.push(
+      createNotification({ targetUserId: "demo-staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
+      createNotification({ targetUserId: "demo-owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
+    );
+  }
+  await Promise.all(notifications);
   return id;
 }
 

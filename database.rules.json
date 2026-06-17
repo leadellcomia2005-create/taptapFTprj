@@ -68,8 +68,8 @@
       ".indexOn": ["customerId"],
       "$orderId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
-        ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && newData.child('customerId').val() == auth.uid && root.child('orders').child($orderId).child('customerId').val() == auth.uid",
-        ".validate": "newData.hasChildren(['orderId', 'customerId', 'customerName', 'rating', 'createdAt']) && newData.child('rating').isNumber() && newData.child('rating').val() >= 1 && newData.child('rating').val() <= 5"
+        ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && !data.exists() && newData.child('customerId').val() == auth.uid && newData.child('orderId').val() == $orderId && root.child('orders').child($orderId).child('customerId').val() == auth.uid && root.child('orders').child($orderId).child('status').val() == 'delivered'",
+        ".validate": "newData.hasChildren(['orderId', 'customerId', 'customerName', 'rating', 'comment', 'moderationStatus', 'createdAt']) && newData.child('rating').isNumber() && newData.child('rating').val() >= 1 && newData.child('rating').val() <= 5 && newData.child('comment').isString() && newData.child('comment').val().length <= 1000 && newData.child('moderationStatus').val() == 'pending' && newData.child('createdAt').isNumber()"
       }
     },
     "notifications": {

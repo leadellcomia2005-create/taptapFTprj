@@ -17,19 +17,45 @@ const descriptions = {
 };
 
 const imagePositions = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"];
+const photoRules = [
+  ["sisig-alacarte", "sisig-ala-carte"],
+  ["skinless-longganisa", "skinless"],
+  ["lechon-kawali", "lechon"],
+  ["chicken-wings", "chicken-wings"],
+  ["chicken-fillet", "chicken-fillet"],
+  ["longganisa", "longganisa"],
+  ["hungarian", "hungarian"],
+  ["porkchop", "porkchop"],
+  ["papaitan", "beef-papaitan"],
+  ["tocino", "tocino"],
+  ["bangus", "bangus"],
+  ["chibu", "chibu"],
+  ["squid", "squid"],
+  ["sisig", "sisig"],
+  ["tapa", "tapa"]
+];
 
-const item = (id, name, category, price, index, options = {}) => ({
-  id,
-  name,
-  category,
-  price,
-  imagePosition: imagePositions[index % imagePositions.length],
-  description: descriptions[category],
-  allergens: [],
-  stock: stockByCategory[category] || 30,
-  featured: category === "Favorite Meal" && index < 6,
-  ...options
-});
+const photoFor = (id) => {
+  const match = photoRules.find(([prefix]) => id === prefix || id.startsWith(`${prefix}-`));
+  return match ? `/assets/menu/${match[1]}.png` : undefined;
+};
+
+const item = (id, name, category, price, index, options = {}) => {
+  const image = photoFor(id);
+  return {
+    id,
+    name,
+    category,
+    price,
+    ...(image ? { image } : {}),
+    imagePosition: imagePositions[index % imagePositions.length],
+    description: descriptions[category],
+    allergens: [],
+    stock: stockByCategory[category] || 30,
+    featured: category === "Favorite Meal" && index < 6,
+    ...options
+  };
+};
 
 export const fallbackMenu = [
   item("porkchop-meal", "Porkchop", "Favorite Meal", 99, 0),

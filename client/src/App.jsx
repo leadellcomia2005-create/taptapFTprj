@@ -49,6 +49,14 @@ const statusLabel = (value) => ({
   arrived: "Arrived",
   delivered: "Delivered"
 }[value] || value);
+const menuPhotoStyle = (product) => product.image
+  ? {
+      backgroundImage: `url(${product.image})`,
+      backgroundPosition: "center",
+      backgroundRepeat: "no-repeat",
+      backgroundSize: "contain"
+    }
+  : { backgroundPosition: product.imagePosition };
 
 const relativeTime = (timestamp) => {
   const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
@@ -663,7 +671,7 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
               const stock = Number(product.stock ?? 0);
               return (
                 <article className="menu-list-card" key={product.id}>
-                  <div className="menu-photo" style={{ backgroundPosition: product.imagePosition }} />
+                  <div className="menu-photo" style={menuPhotoStyle(product)} />
                   <div className="menu-item-copy">
                     <div>
                       <h3>{product.name}</h3>
@@ -1315,7 +1323,7 @@ function StaffWorkspace({ section, user, orders, inventory, shiftLogs, messages,
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Fast counter entry</p><h2>Walk-in POS</h2></div></div>
       <div className="row g-3">
-        <div className="col-xl-8"><div className="row g-3">{inventory.map((product) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><div className="menu-photo" style={{ backgroundPosition: product.imagePosition }} /><strong>{product.name}</strong><span>{currency(product.price)} · {product.stock} available</span></button></div>)}</div></div>
+        <div className="col-xl-8"><div className="row g-3">{inventory.map((product) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><div className="menu-photo" style={menuPhotoStyle(product)} /><strong>{product.name}</strong><span>{currency(product.price)} · {product.stock} available</span></button></div>)}</div></div>
         <div className="col-xl-4"><div className="dashboard-card sticky-pos"><div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>{posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}{posCart.map((item) => <div className="pos-cart-item" key={item.id}><div><strong>{item.name}</strong><small>{currency(item.price)} each</small></div><div className="pos-quantity"><button onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>−</button><span>{item.qty}</span><button disabled={item.qty >= item.stock} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button></div><strong>{currency(item.qty * item.price)}</strong><button className="pos-remove" onClick={() => remove(item.id)}>Remove</button></div>)}<div className="checkout-total"><span>Total ({posCart.reduce((sum, item) => sum + item.qty, 0)} items)</span><strong>{currency(posTotal)}</strong></div><button className="btn btn-danger w-100" disabled={!posCart.length} onClick={complete}>Accept payment and print receipt</button></div></div>
       </div>
     </main>

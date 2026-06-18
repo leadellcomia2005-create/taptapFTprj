@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { applicationDefault, cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getDatabase } from "firebase-admin/database";
+import { fallbackMenu } from "../../client/src/data/menu.js";
 
 dotenv.config({ override: true });
 
@@ -20,14 +21,7 @@ initializeApp({
 const auth = getAuth();
 const database = getDatabase();
 
-const menu = {
-  sisig: { id: "sisig", name: "Sizzling Pork Sisig", category: "Rice Meals", price: 189, imagePosition: "0% 0%", description: "Crispy pork, onions, chili, calamansi and creamy egg.", allergens: ["egg", "soy"], stock: 18, featured: true },
-  inasal: { id: "inasal", name: "Chicken Inasal Meal", category: "Rice Meals", price: 179, imagePosition: "50% 0%", description: "Smoky grilled chicken, garlic rice and house atchara.", allergens: ["soy"], stock: 24, featured: true },
-  liempo: { id: "liempo", name: "Crispy Liempo Bowl", category: "Rice Meals", price: 199, imagePosition: "100% 0%", description: "Crackling pork belly, steamed rice and fresh greens.", allergens: [], stock: 9, featured: false },
-  pancit: { id: "pancit", name: "Pancit Canton", category: "Noodles", price: 159, imagePosition: "0% 100%", description: "Stir-fried noodles, vegetables, shrimp and quail egg.", allergens: ["shellfish", "egg", "soy", "gluten"], stock: 16, featured: true },
-  lumpia: { id: "lumpia", name: "Fresh Lumpia", category: "Merienda", price: 129, imagePosition: "50% 100%", description: "Fresh vegetable rolls with sweet garlic peanut sauce.", allergens: ["peanut"], stock: 7, featured: false },
-  halohalo: { id: "halohalo", name: "Classic Halo-Halo", category: "Desserts", price: 139, imagePosition: "100% 100%", description: "Shaved ice, ube, leche flan, jellies and milk.", allergens: ["dairy", "egg"], stock: 13, featured: true }
-};
+const menu = Object.fromEntries(fallbackMenu.map((item) => [item.id, item]));
 
 const accounts = [
   { email: "owner@taptap.ph", password: "Owner123!", name: "Leadell Comia", role: "owner" },

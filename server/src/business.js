@@ -50,6 +50,7 @@ export async function createOrderRecord(db, user, input) {
   const items = requestedItems.map(({ id, qty }) => {
     const product = menu[id];
     if (!product) throw new HttpError(400, `Product ${id} is unavailable.`);
+    if (user.role === "customer" && product.walkInOnly) throw new HttpError(403, `${product.name} is available for walk-in orders only.`);
     return { id, name: product.name, price: Number(product.price), qty };
   });
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);

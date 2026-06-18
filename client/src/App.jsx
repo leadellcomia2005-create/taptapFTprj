@@ -614,8 +614,9 @@ function NotificationCenter({ notifications, onClose }) {
 
 function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
-  const categories = ["All", ...new Set(menu.map((item) => item.category))];
-  const visible = category === "All" ? menu : menu.filter((item) => item.category === category);
+  const customerMenu = menu.filter((item) => !item.walkInOnly);
+  const categories = ["All", ...new Set(customerMenu.map((item) => item.category))];
+  const visible = category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category);
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
   const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryFee = cart.length > 0 ? 49 : 0;
@@ -1667,7 +1668,7 @@ export default function App() {
       {user.role !== "customer" && workspace}
       {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
-      {user.role === "customer" && <Assistant user={currentUser} menu={menu} />}
+      {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}
     </div>

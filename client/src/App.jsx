@@ -69,6 +69,180 @@ const staffPosCategories = [
   { id: "addons", label: "Add-ons", matches: (item) => ["walkinaddon", "addon", "addons"].includes(normalizeMenuCategory(item.category)) }
 ];
 
+const dayMs = 24 * 60 * 60 * 1000;
+const pad2 = (value) => String(value).padStart(2, "0");
+const localDateInputValue = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const reportDateRange = (value) => {
+  const [year, month, day] = String(value || localDateInputValue()).split("-").map(Number);
+  const start = new Date(year, month - 1, day).getTime();
+  return { start, end: start + dayMs };
+};
+const inRange = (timestamp, range) => Number(timestamp || 0) >= range.start && Number(timestamp || 0) < range.end;
+const reportMoney = (value) => `PHP ${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const sumByTotal = (orders) => orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+const orderPaymentLabel = (order) => {
+  const method = String(order.paymentMethod || "unknown").toUpperCase();
+  const paid = isRevenueOrder(order) ? "counted" : "pending";
+  return `${method} (${paid})`;
+};
+const isRevenueOrder = (order) => {
+  if (!order || order.paymentStatus === "pending" || order.status === "pending-payment") return false;
+  if (order.paymentStatus === "paid") return true;
+  if (order.paymentMethod === "cash") return true;
+  if (order.paymentMethod === "cod") return order.status === "delivered" || Boolean(order.deliveredAt);
+  return false;
+};
+const isOutstandingCod = (order) => order?.paymentMethod === "cod" && !isRevenueOrder(order);
+const topSellingItems = (orders) => {
+  const items = new Map();
+  for (const order of orders) {
+    for (const item of order.items || []) {
+      const current = items.get(item.name) || { name: item.name, qty: 0, sales: 0 };
+      const qty = Number(item.qty || 0);
+      current.qty += qty;
+      current.sales += qty * Number(item.price || 0);
+      items.set(item.name, current);
+    }
+  }
+  return [...items.values()].sort((a, b) => b.qty - a.qty || b.sales - a.sales).slice(0, 8);
+};
+const htmlEscape = (value = "") => String(value)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#39;");
+const orderItemText = (order) => (order.items || []).map((item) => `${item.qty} x ${item.name}`).join(", ") || "No items";
+const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
+  const range = reportDateRange(reportDate);
+  const dailyOrders = orders.filter((order) => inRange(order.createdAt, range));
+  const revenueOrders = dailyOrders.filter(isRevenueOrder);
+  const pendingOrders = dailyOrders.filter((order) => !isRevenueOrder(order));
+  const codExposureOrders = dailyOrders.filter(isOutstandingCod);
+  const deliveredOrders = dailyOrders.filter((order) => order.status === "delivered");
+  const closedShifts = shiftLogs.filter((log) => inRange(log.endedAt || log.createdAt, range));
+  const lowStockItems = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0));
+  const paymentBreakdown = {
+    cash: sumByTotal(revenueOrders.filter((order) => order.paymentMethod === "cash")),
+    cod: sumByTotal(revenueOrders.filter((order) => order.paymentMethod === "cod")),
+    online: sumByTotal(revenueOrders.filter((order) => order.paymentMethod === "gcash")),
+    pending: sumByTotal(pendingOrders),
+    codExposure: sumByTotal(codExposureOrders)
+  };
+  return {
+    reportDate,
+    dateLabel: new Date(range.start).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }),
+    generatedAt: new Date().toLocaleString("en-PH"),
+    dailyOrders,
+    revenueOrders,
+    pendingOrders,
+    deliveredOrders,
+    codExposureOrders,
+    closedShifts,
+    lowStockItems,
+    topItems: topSellingItems(revenueOrders),
+    grossSales: sumByTotal(revenueOrders),
+    paymentBreakdown
+  };
+};
+const printableRows = (rows, columns, emptyText) => rows.length
+  ? rows.map((row) => `<tr>${columns.map((column) => `<td>${htmlEscape(column.value(row))}</td>`).join("")}</tr>`).join("")
+  : `<tr><td colspan="${columns.length}">${htmlEscape(emptyText)}</td></tr>`;
+const printableOwnerReportHtml = (report) => {
+  const orderColumns = [
+    { label: "Order", value: (order) => order.id },
+    { label: "Customer", value: (order) => order.customerName || "Customer" },
+    { label: "Items", value: orderItemText },
+    { label: "Payment", value: orderPaymentLabel },
+    { label: "Status", value: (order) => statusLabel(order.status) },
+    { label: "Total", value: (order) => reportMoney(order.total) }
+  ];
+  const itemColumns = [
+    { label: "Item", value: (item) => item.name },
+    { label: "Qty sold", value: (item) => item.qty },
+    { label: "Sales", value: (item) => reportMoney(item.sales) }
+  ];
+  const shiftColumns = [
+    { label: "Staff", value: (log) => log.staffName || "Staff" },
+    { label: "Closed", value: (log) => new Date(log.endedAt || log.createdAt).toLocaleString("en-PH") },
+    { label: "Orders", value: (log) => log.orderCount || 0 },
+    { label: "Expected", value: (log) => reportMoney(log.expectedCash) },
+    { label: "Actual", value: (log) => reportMoney(log.actualCash) },
+    { label: "Variance", value: (log) => reportMoney(log.variance) }
+  ];
+  const stockColumns = [
+    { label: "Item", value: (item) => item.name },
+    { label: "Stock", value: (item) => item.stock },
+    { label: "Reorder point", value: (item) => item.reorderPoint }
+  ];
+  const table = (title, columns, rows, emptyText) => `
+    <section>
+      <h2>${htmlEscape(title)}</h2>
+      <table>
+        <thead><tr>${columns.map((column) => `<th>${htmlEscape(column.label)}</th>`).join("")}</tr></thead>
+        <tbody>${printableRows(rows, columns, emptyText)}</tbody>
+      </table>
+    </section>`;
+  return `<!doctype html>
+<html>
+<head>
+  <title>TapTap Owner Daily Report - ${htmlEscape(report.dateLabel)}</title>
+  <style>
+    body { margin: 32px; color: #201914; font-family: Arial, sans-serif; }
+    header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #e33d2e; padding-bottom: 16px; }
+    h1 { margin: 0 0 6px; font-size: 28px; }
+    h2 { margin: 26px 0 10px; font-size: 17px; }
+    p { margin: 3px 0; color: #70685d; font-size: 12px; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 22px 0; }
+    .box { border: 1px solid #eadfce; border-radius: 8px; padding: 12px; }
+    .box span { display: block; color: #70685d; font-size: 10px; text-transform: uppercase; }
+    .box strong { display: block; margin-top: 6px; font-size: 17px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { padding: 8px; border: 1px solid #eadfce; text-align: left; vertical-align: top; }
+    th { background: #fbf4e8; text-transform: uppercase; font-size: 9px; letter-spacing: .05em; }
+    @media print { body { margin: 18mm; } .summary { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>TapTap Foodtrip Owner Daily Report</h1>
+      <p>Report date: ${htmlEscape(report.dateLabel)}</p>
+      <p>Generated: ${htmlEscape(report.generatedAt)}</p>
+    </div>
+    <div>
+      <p>Prepared for owner role</p>
+      <p>Sales count only paid cash, paid online, and delivered COD.</p>
+    </div>
+  </header>
+  <div class="summary">
+    <div class="box"><span>Gross paid sales</span><strong>${htmlEscape(reportMoney(report.grossSales))}</strong></div>
+    <div class="box"><span>Total orders</span><strong>${report.dailyOrders.length}</strong></div>
+    <div class="box"><span>Completed orders</span><strong>${report.deliveredOrders.length}</strong></div>
+    <div class="box"><span>Pending or unpaid</span><strong>${report.pendingOrders.length}</strong></div>
+    <div class="box"><span>Cash</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.cash))}</strong></div>
+    <div class="box"><span>Delivered COD</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.cod))}</strong></div>
+    <div class="box"><span>Online/GCash</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.online))}</strong></div>
+    <div class="box"><span>Open COD exposure</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.codExposure))}</strong></div>
+  </div>
+  ${table("Top selling items", itemColumns, report.topItems, "No paid sales for this day.")}
+  ${table("Daily order ledger", orderColumns, report.dailyOrders, "No orders for this day.")}
+  ${table("Closed shift reconciliation", shiftColumns, report.closedShifts, "No closed shifts for this day.")}
+  ${table("Low stock snapshot", stockColumns, report.lowStockItems, "No low stock items.")}
+</body>
+</html>`;
+};
+const printOwnerDailyReport = (report) => {
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(printableOwnerReportHtml(report));
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => printWindow.print(), 350);
+  return true;
+};
+
 const relativeTime = (timestamp) => {
   const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
   if (seconds < 60) return "just now";
@@ -825,7 +999,7 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
 function OrdersView({ orders, onTrack }) {
   const activeOrders = orders.filter((order) => order.status !== "delivered");
   const pastOrders = orders.filter((order) => order.status === "delivered");
-  const totalSpent = orders.filter((order) => order.paymentStatus !== "pending").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const totalSpent = orders.filter(isRevenueOrder).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
   const renderOrderTable = (title, list, emptyText) => (
     <section className="order-table-card">
@@ -1011,19 +1185,23 @@ function InventoryModule({ inventory, user, notify }) {
 function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
   const [openingCash, setOpeningCash] = useState(2000);
   const [actualCash, setActualCash] = useState(0);
-  const cashSales = orders.filter((order) => ["cash", "cod"].includes(order.paymentMethod)).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const [shiftStartedAt] = useState(() => Date.now() - 8 * 60 * 60 * 1000);
+  const shiftOrders = orders.filter((order) => Number(order.createdAt || 0) >= shiftStartedAt && Number(order.createdAt || 0) <= Date.now());
+  const cashSales = shiftOrders
+    .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && isRevenueOrder(order)))
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
   const expectedCash = Number(openingCash || 0) + cashSales;
   const variance = Number(actualCash || 0) - expectedCash;
   const closeShift = async () => {
     const id = await saveShiftLog({
-      startedAt: Date.now() - 8 * 60 * 60 * 1000,
+      startedAt: shiftStartedAt,
       endedAt: Date.now(),
       openingCash: Number(openingCash),
       cashSales,
       expectedCash,
       actualCash: Number(actualCash),
       variance,
-      orderCount: orders.length
+      orderCount: shiftOrders.length
     }, user);
     notify(`Shift ${id} closed and sent for owner reconciliation.`);
   };
@@ -1033,6 +1211,7 @@ function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
         <div className="dashboard-card">
           <p className="eyebrow text-danger">End-of-shift reconciliation</p>
           <h3>Close current shift</h3>
+          <p className="module-note">Counting {shiftOrders.length} order(s) since {new Date(shiftStartedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}.</p>
           <label className="form-label">Opening cash<input className="form-control" type="number" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
           <label className="form-label">Actual cash counted<input className="form-control" type="number" value={actualCash} onChange={(event) => setActualCash(event.target.value)} /></label>
           <dl className="reconciliation-list">
@@ -1147,7 +1326,7 @@ function SettingsModule({ title, serviceStatus, staff = false, notify }) {
 
 function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
-  const revenueOrders = orders.filter((order) => order.paymentStatus !== "pending" && order.status !== "pending-payment");
+  const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const salesTrend = Array.from({ length: 7 }, (_, index) => {
     const day = new Date();
@@ -1164,6 +1343,8 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff" });
   const [managedUsers, setManagedUsers] = useState([]);
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
+  const [reportDate, setReportDate] = useState(localDateInputValue());
+  const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
   const refreshUsers = useCallback(async () => {
     try {
       const result = await api.listUsers();
@@ -1175,19 +1356,9 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   useEffect(() => {
     if (section === "owner-users") refreshUsers();
   }, [refreshUsers, section]);
-  const downloadReport = async () => {
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF();
-    pdf.setFontSize(20);
-    pdf.text("Taptap Foodtrip Sales Report", 16, 20);
-    pdf.setFontSize(11);
-    pdf.text(`Generated: ${new Date().toLocaleString("en-PH")}`, 16, 30);
-    pdf.text(`Orders: ${orders.length}`, 16, 42);
-    pdf.text(`Gross sales: ${currency(totalSales)}`, 16, 50);
-    orders.slice(0, 15).forEach((order, index) => {
-      pdf.text(`${order.id}  ${order.customerName}  ${currency(order.total)}  ${statusLabel(order.status)}`, 16, 64 + index * 8);
-    });
-    pdf.save("taptap-sales-report.pdf");
+  const printDailyReport = () => {
+    const opened = printOwnerDailyReport(dailyReport);
+    notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
   };
   const generateInsight = async () => {
     try {
@@ -1230,7 +1401,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   };
   if (section === "owner-sales") return (
     <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Sales strategy and analytics</p><h2>Sales & Orders</h2></div><button className="btn btn-outline-dark" onClick={downloadReport}>Export sales PDF</button></div>
+      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Sales strategy and analytics</p><h2>Sales & Orders</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
       <div className="row g-3">
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
@@ -1243,8 +1414,29 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   );
   if (section === "owner-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Stock governance</p><h2>Inventory</h2></div></div><InventoryModule inventory={inventory} user={user} notify={notify} /></main>;
   if (section === "owner-reports") return (
-    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Automated reporting</p><h2>Reports & Reconciliation</h2></div><button className="btn btn-danger" onClick={downloadReport}>Generate daily sales report</button></div>
-      <div className="row g-3"><div className="col-md-4"><div className="metric-card"><small>Completed orders</small><strong>{orders.filter((order) => order.status === "delivered").length}</strong><span>Ready for reconciliation</span></div></div><div className="col-md-4"><div className="metric-card"><small>COD exposure</small><strong>{currency(orders.filter((order) => order.paymentMethod === "cod" && order.status !== "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0))}</strong><span>Outstanding rider cash</span></div></div><div className="col-md-4"><div className="metric-card"><small>Closed shifts</small><strong>{shiftLogs.length}</strong><span>Staff cash logs</span></div></div><div className="col-12"><ShiftLogsModule orders={orders} logs={shiftLogs} user={user} notify={notify} readOnly /></div></div>
+    <main className="container-fluid dashboard-page py-4">
+      <div className="dashboard-heading">
+        <div><p className="eyebrow text-danger">Automated reporting</p><h2>Reports & Reconciliation</h2></div>
+        <div className="report-actions">
+          <label className="report-date-field">Report date<input className="form-control" type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} /></label>
+          <button className="btn btn-danger" onClick={printDailyReport}>Print owner report</button>
+        </div>
+      </div>
+      <div className="row g-3">
+        <div className="col-md-3"><div className="metric-card"><small>Gross paid sales</small><strong>{currency(dailyReport.grossSales)}</strong><span>{dailyReport.dateLabel}</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Total orders</small><strong>{dailyReport.dailyOrders.length}</strong><span>Created that day</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Pending or unpaid</small><strong>{dailyReport.pendingOrders.length}</strong><span>Not counted as sales</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>COD exposure</small><strong>{currency(dailyReport.paymentBreakdown.codExposure)}</strong><span>Open COD for the day</span></div></div>
+        <div className="col-lg-4"><div className="dashboard-card report-breakdown-card"><h3>Payment breakdown</h3><dl className="reconciliation-list">
+          <div><dt>Cash</dt><dd>{currency(dailyReport.paymentBreakdown.cash)}</dd></div>
+          <div><dt>Delivered COD</dt><dd>{currency(dailyReport.paymentBreakdown.cod)}</dd></div>
+          <div><dt>Online / GCash</dt><dd>{currency(dailyReport.paymentBreakdown.online)}</dd></div>
+          <div><dt>Pending unpaid</dt><dd>{currency(dailyReport.paymentBreakdown.pending)}</dd></div>
+        </dl></div></div>
+        <div className="col-lg-8"><div className="dashboard-card"><h3>Top selling items</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Item</th><th>Qty sold</th><th>Sales</th></tr></thead><tbody>{dailyReport.topItems.length === 0 && <tr><td colSpan="3" className="text-center text-secondary py-4">No paid sales for this day.</td></tr>}{dailyReport.topItems.map((item) => <tr key={item.name}><td>{item.name}</td><td>{item.qty}</td><td>{currency(item.sales)}</td></tr>)}</tbody></table></div></div></div>
+        <div className="col-12"><div className="dashboard-card"><h3>Daily order ledger</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Status</th><th>Sales counted</th><th>Total</th></tr></thead><tbody>{dailyReport.dailyOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders for this day.</td></tr>}{dailyReport.dailyOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{orderItemText(order)}</span></td><td>{orderPaymentLabel(order)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{isRevenueOrder(order) ? "Yes" : "No"}</td><td>{currency(order.total)}</td></tr>)}</tbody></table></div></div></div>
+        <div className="col-12"><ShiftLogsModule orders={orders} logs={dailyReport.closedShifts} user={user} notify={notify} readOnly /></div>
+      </div>
     </main>
   );
   if (section === "owner-users") return (
@@ -1260,7 +1452,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Platform administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
   return (
     <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={downloadReport}>Export sales PDF</button></div>
+      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
       <div className="row g-3">
         <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
@@ -1367,7 +1559,8 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
   const activeOrders = orders.filter((order) => order.status !== "delivered");
-  const todaySales = orders.filter((order) => order.paymentStatus !== "pending" && order.status !== "pending-payment").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const todayRange = reportDateRange(localDateInputValue());
+  const todaySales = orders.filter((order) => inRange(order.createdAt, todayRange) && isRevenueOrder(order)).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const lowStock = inventory.filter((item) => item.stock <= item.reorderPoint);
   return (
     <main className="container-fluid dashboard-page py-4">

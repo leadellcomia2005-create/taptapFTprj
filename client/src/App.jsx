@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, LogOut, Menu, Trash2, X } from "lucide-react";
+import { Bell, Bike, Camera, CheckCircle2, Clock, LogOut, MapPin, Menu, Navigation, Package as PackageIcon, Phone, Route, Trash2, Wallet, X } from "lucide-react";
 import CameraProof from "./components/CameraProof";
 import DeliveryMap from "./components/DeliveryMap";
 import SalesChart from "./components/SalesChart";
@@ -1418,38 +1418,174 @@ function RiderWorkspace({ section, user, orders, notify }) {
     notify("Delivery completed with photo evidence.");
   };
 
+  const firstName = (user.name || "Rider").split(" ")[0];
+  const activeDeliveries = assignedOrders.filter((order) => order.status !== "delivered");
+  const completedDeliveries = assignedOrders.filter((order) => order.status === "delivered");
+  const codOrders = assignedOrders.filter((order) => order.paymentMethod === "cod");
+  const collectedCod = codOrders.filter((order) => order.status === "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const outstandingCod = codOrders.filter((order) => order.status !== "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const assignedValue = assignedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
+  const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
+  const addressLabel = (value) => value || "Counter pickup";
+
   const googleMapsUrl = active
     ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(active.address)}&travelmode=driving`
     : "#";
 
   if (section === "rider-cod") {
-    const codOrders = assignedOrders.filter((order) => order.paymentMethod === "cod");
-    const collected = codOrders.filter((order) => order.status === "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
-    const outstanding = codOrders.filter((order) => order.status !== "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
     return (
-      <main className="container-fluid dashboard-page py-4">
-        <div className="dashboard-heading"><div><p className="eyebrow text-danger">Rider financials</p><h2>COD Ledger</h2></div></div>
-        <div className="row g-3">
-          <div className="col-md-4"><div className="metric-card"><small>Cash collected</small><strong>{currency(collected)}</strong><span>Delivered COD orders</span></div></div>
-          <div className="col-md-4"><div className="metric-card"><small>Cash outstanding</small><strong>{currency(outstanding)}</strong><span>Active COD deliveries</span></div></div>
-          <div className="col-md-4"><div className="metric-card"><small>COD assignments</small><strong>{codOrders.length}</strong><span>Current rider ledger</span></div></div>
-          <div className="col-12"><div className="dashboard-card"><div className="table-responsive"><table className="table"><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Cash due</th></tr></thead><tbody>{codOrders.length === 0 && <tr><td colSpan="4" className="text-center text-secondary py-4">No COD orders assigned.</td></tr>}{codOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{statusLabel(order.status)}</td><td>{currency(order.total)}</td></tr>)}</tbody></table></div></div></div>
-        </div>
+      <main className="rider-page dashboard-page">
+        <section className="rider-hero rider-ledger-hero">
+          <div className="rider-hero-top">
+            <div className="rider-avatar"><Wallet size={26} strokeWidth={2.4} aria-hidden="true" /></div>
+            <div>
+              <p className="eyebrow">Rider financials</p>
+              <h1>COD Ledger</h1>
+              <span><CheckCircle2 size={14} aria-hidden="true" /> {completedDeliveries.length} completed drops</span>
+            </div>
+          </div>
+          <div className="rider-earnings">
+            <small>Cash to remit</small>
+            <strong>{currency(outstandingCod)}</strong>
+            <span>{currency(collectedCod)} collected from completed COD orders</span>
+          </div>
+          <div className="rider-hero-metrics">
+            <div><small>COD orders</small><strong>{codOrders.length}</strong></div>
+            <div><small>Collected</small><strong>{currency(collectedCod)}</strong></div>
+            <div><small>Assigned value</small><strong>{currency(assignedValue)}</strong></div>
+          </div>
+        </section>
+
+        <section className="rider-ledger-list" aria-label="COD order ledger">
+          <div className="rider-section-heading">
+            <div><p className="eyebrow text-danger">Cash delivery list</p><h2>Payment handoff</h2></div>
+            <span>{codOrders.filter((order) => order.status !== "delivered").length} open</span>
+          </div>
+          {codOrders.length === 0 && <div className="empty-state compact">No COD orders assigned.</div>}
+          {codOrders.map((order) => (
+            <article className="rider-ledger-row" key={order.id}>
+              <div className="rider-order-avatar"><Wallet size={18} aria-hidden="true" /></div>
+              <div>
+                <strong>{order.id}</strong>
+                <small>{order.customerName}</small>
+                <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
+              </div>
+              <div className="rider-ledger-total">
+                <strong>{currency(order.total)}</strong>
+                <span className={`status status-${order.status}`}>{statusLabel(order.status)}</span>
+              </div>
+            </article>
+          ))}
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Delivery Rider</p><h2>Assigned Orders</h2></div><button className={`btn ${online ? "btn-success" : "btn-outline-success"}`} onClick={toggleOnline}>{online ? "Online · sharing GPS" : "Go online"}</button></div>
-      <div className="row g-3">
-        <div className="col-xl-4"><div className="dashboard-card assigned-list"><h3>Your deliveries</h3>{assignedOrders.length === 0 && <div className="empty-chat">No orders assigned yet.</div>}{assignedOrders.map((order) => <button className={active?.id === order.id ? "active" : ""} key={order.id} onClick={() => setSelectedId(order.id)}><span><strong>{order.id}</strong><small>{order.customerName} · {order.address}</small></span><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></button>)}
-          {availableOrders.length > 0 && <><h3 className="mt-4">Ready for assignment</h3>{availableOrders.map((order) => <div className="available-order" key={order.id}><span><strong>{order.id}</strong><small>{order.address}</small></span><button className="btn btn-sm btn-outline-danger" onClick={() => claimOrder(order)}>Accept</button></div>)}</>}
-        </div></div>
-        <div className="col-xl-8"><div className="dashboard-card">
-          <h3>{active ? `${active.id} · ${statusLabel(active.status)}` : "Select an assigned delivery"}</h3>
-          {active ? <div className="row g-3"><div className="col-lg-6"><p><strong>{active.customerName}</strong><br />{active.address}</p><p>{active.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><p><strong>Payment:</strong> {active.paymentMethod?.toUpperCase()} · {currency(active.total)}</p><div className="d-grid gap-2"><button className="btn btn-danger" disabled={active.status !== "ready"} onClick={pickup}>Pick up order</button><a className="btn btn-outline-dark" href={googleMapsUrl} target="_blank" rel="noreferrer">Open Google Maps navigation</a><button className="btn btn-warning" disabled={active.status !== "out-for-delivery"} onClick={markArrived}>Mark arrived</button><button className="btn btn-success" disabled={active.status !== "arrived"} onClick={() => setCameraOpen(true)}>Deliver with camera proof</button></div></div><div className="col-lg-6"><div className="rider-map"><DeliveryMap rider={location} /></div></div></div> : <div className="empty-state compact">Assigned delivery details will appear here.</div>}
-        </div></div>
+    <main className="rider-page dashboard-page">
+      <section className="rider-hero">
+        <div className="rider-hero-top">
+          <div className="rider-avatar"><Bike size={27} strokeWidth={2.4} aria-hidden="true" /></div>
+          <div>
+            <p className="eyebrow">Delivery rider</p>
+            <h1>Hi, {firstName}</h1>
+            <span><MapPin size={14} aria-hidden="true" /> {location ? "GPS locked" : "GPS standby"}</span>
+          </div>
+          <button className={`rider-online-toggle ${online ? "online" : ""}`} onClick={toggleOnline}>
+            <span />
+            {online ? "Online" : "Go online"}
+          </button>
+        </div>
+        <div className="rider-earnings">
+          <small>Cash to collect</small>
+          <strong>{currency(outstandingCod)}</strong>
+          <span>{activeDeliveries.length} active deliveries today</span>
+        </div>
+        <div className="rider-hero-metrics">
+          <div><small>Assigned</small><strong>{assignedOrders.length}</strong></div>
+          <div><small>Open jobs</small><strong>{availableOrders.length}</strong></div>
+          <div><small>Completed</small><strong>{completedDeliveries.length}</strong></div>
+        </div>
+      </section>
+
+      <div className="rider-shell">
+        <section className="rider-order-feed" aria-label="Rider orders">
+          <div className="rider-section-heading">
+            <div><p className="eyebrow text-danger">Driver queue</p><h2>Your deliveries</h2></div>
+            <span>{activeDeliveries.length} active</span>
+          </div>
+          {assignedOrders.length === 0 && <div className="empty-state compact">No orders assigned yet.</div>}
+          {assignedOrders.map((order) => (
+            <button className={`rider-order-card ${active?.id === order.id ? "active" : ""}`} key={order.id} onClick={() => setSelectedId(order.id)}>
+              <span className="rider-order-avatar"><PackageIcon size={18} aria-hidden="true" /></span>
+              <span className="rider-order-copy">
+                <span><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></span>
+                <small>{order.customerName}</small>
+                <em><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</em>
+              </span>
+              <span className="rider-order-total">{currency(order.total)}</span>
+            </button>
+          ))}
+
+          {availableOrders.length > 0 && (
+            <>
+              <div className="rider-section-heading compact">
+                <div><p className="eyebrow text-danger">Ready for assignment</p><h2>New jobs</h2></div>
+                <span>{availableOrders.length} ready</span>
+              </div>
+              {availableOrders.map((order) => (
+                <article className="rider-job-card" key={order.id}>
+                  <div className="rider-order-avatar"><Clock size={18} aria-hidden="true" /></div>
+                  <div>
+                    <strong>{order.id}</strong>
+                    <small>{orderItems(order)}</small>
+                    <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
+                  </div>
+                  <button onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> Accept</button>
+                </article>
+              ))}
+            </>
+          )}
+        </section>
+
+        <section className="rider-active-panel" aria-label="Active delivery">
+          <div className="rider-active-header">
+            <div><p className="eyebrow text-danger">Current route</p><h2>{active ? active.id : "No active order"}</h2></div>
+            {active && <span className={`status status-${active.status}`}>{statusLabel(active.status)}</span>}
+          </div>
+          {active ? (
+            <>
+              <div className="rider-route-card">
+                <div>
+                  <span className="rider-route-dot pickup"><Route size={15} aria-hidden="true" /></span>
+                  <p><small>Pickup</small><strong>TapTap FoodTrip</strong></p>
+                </div>
+                <i />
+                <div>
+                  <span className="rider-route-dot drop"><MapPin size={15} aria-hidden="true" /></span>
+                  <p><small>Drop off</small><strong>{addressLabel(active.address)}</strong></p>
+                </div>
+              </div>
+
+              <div className="rider-active-details">
+                <div><small>Customer</small><strong>{active.customerName}</strong></div>
+                <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
+                <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
+              </div>
+
+              <div className="rider-map-panel"><DeliveryMap rider={location} /></div>
+
+              <div className="rider-action-grid">
+                <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>
+                <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
+                {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}
+                <button className="rider-action warning" disabled={active.status !== "out-for-delivery"} onClick={markArrived}><MapPin size={17} aria-hidden="true" /> Arrived</button>
+                <button className="rider-action success" disabled={active.status !== "arrived"} onClick={() => setCameraOpen(true)}><Camera size={17} aria-hidden="true" /> Proof</button>
+              </div>
+            </>
+          ) : <div className="empty-state compact">Assigned delivery details will appear here.</div>}
+        </section>
       </div>
       {cameraOpen && <CameraProof onCapture={capture} onClose={() => setCameraOpen(false)} />}
     </main>

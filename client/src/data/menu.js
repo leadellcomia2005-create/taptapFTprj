@@ -18,7 +18,9 @@ const descriptions = {
 
 const imagePositions = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"];
 const photoRules = [
+  ["egg-rice-unli-soup", "egg-rice-soup"],
   ["sisig-alacarte", "sisig-ala-carte"],
+  ["boneless-chicken", "boneless-chicken"],
   ["skinless-longganisa", "skinless"],
   ["lechon-kawali", "lechon"],
   ["chicken-wings", "chicken-wings"],
@@ -26,9 +28,13 @@ const photoRules = [
   ["longganisa", "longganisa"],
   ["hungarian", "hungarian"],
   ["porkchop", "porkchop"],
+  ["bottled-water", "bottled-water"],
+  ["softdrinks", "softdrinks"],
+  ["dinuguan", "dinuguan"],
   ["papaitan", "beef-papaitan"],
   ["tocino", "tocino"],
   ["bangus", "bangus"],
+  ["hotdog", "hotdog"],
   ["chibu", "chibu"],
   ["squid", "squid"],
   ["sisig", "sisig"],

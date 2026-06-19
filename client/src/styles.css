@@ -270,6 +270,15 @@ button { font: inherit; }
 .ai-insight p:not(.eyebrow) { min-height: 190px; color: rgba(255,255,255,.68); font-size: 11px; line-height: 1.75; }
 .status { display: inline-flex; padding: 5px 8px; border-radius: 20px; font-size: 8px; font-weight: 800; white-space: nowrap; }
 .status-pending-payment { color: #916019; background: #fff1d6; }.status-received { color: #23659e; background: #e8f2fb; }.status-preparing { color: #916019; background: #fff1d6; }.status-ready,.status-delivered { color: var(--green); background: #e6f4eb; }.status-out-for-delivery { color: var(--red); background: #f9e5e1; }.status-arrived { color: #75530e; background: #fff0bd; }
+.pos-menu-tools { padding: 10px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(38,29,19,.05); }
+.pos-category-rail { display: grid; grid-template-columns: repeat(7,minmax(94px,1fr)); gap: 8px; }
+.pos-category-rail button { min-width: 0; min-height: 56px; display: grid; align-content: center; gap: 4px; padding: 10px 12px; color: var(--ink); text-align: left; border: 1px solid transparent; background: var(--paper-soft); border-radius: 8px; }
+.pos-category-rail button:hover { border-color: var(--line); background: var(--paper); }
+.pos-category-rail button.active { color: white; border-color: var(--ink); background: var(--ink); }
+.pos-category-rail strong,.pos-category-rail span { display: block; }
+.pos-category-rail strong { overflow: hidden; font-size: 11px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.pos-category-rail span { color: var(--muted); font-size: 8px; font-weight: 800; }
+.pos-category-rail button.active span { color: rgba(255,255,255,.7); }
 .pos-product { width: 100%; overflow: hidden; padding: 0 0 13px; text-align: left; border: 1px solid var(--line); background: white; border-radius: 13px; }
 .pos-product:disabled { opacity: .5; cursor: not-allowed; }
 .pos-product .menu-photo { height: 130px; }
@@ -486,6 +495,8 @@ button { font: inherit; }
   .chart-card > canvas { max-height: 280px; }
   .ai-insight p:not(.eyebrow) { min-height: auto; }
   .sticky-pos { position: static; top: auto; }
+  .pos-category-rail { display: flex; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+  .pos-category-rail button { flex: 0 0 118px; }
   .pos-product .menu-photo { height: 116px; }
   .support-chat { min-height: auto; }
   .support-layout { min-height: 0; border-radius: 10px; }
@@ -550,6 +561,10 @@ button { font: inherit; }
   .support-message-list > div:not(.empty-chat) { width: 100%; max-width: none; border-radius: 10px; }
   .support-compose { flex-direction: column; }
   .support-compose .btn { min-height: 42px; }
+  .pos-menu-tools { margin-inline: -2px; padding: 8px; }
+  .pos-category-rail { gap: 6px; }
+  .pos-category-rail button { flex-basis: 104px; min-height: 52px; padding: 9px 10px; }
+  .pos-category-rail strong { font-size: 10px; }
   .pos-product { border-radius: 10px; }
   .pos-product .menu-photo { height: 96px; }
   .pos-product strong { font-size: 14px; }

@@ -162,6 +162,36 @@ const sendTwoFactorSms = async (to, code) => {
 };
 
 let gmailTransport;
+
+function money(value) {
+  return `PHP ${Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+function displayLabel(value) {
+  return String(value || "").replaceAll("-", " ");
+}
+
+function orderDate(value) {
+  return new Date(Number(value || Date.now())).toLocaleString("en-PH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Manila"
+  });
+}
+
 const sendTwoFactorEmail = async (to, code) => {
   const user = secretValue(gmailUser);
   const password = secretValue(gmailAppPassword);
@@ -174,6 +204,76 @@ const sendTwoFactorEmail = async (to, code) => {
     text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes.`,
     html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 10 minutes.</p>`
   });
+};
+
+const sendOrderReceiptEmail = async (order = {}) => {
+  const user = secretValue(gmailUser);
+  const password = secretValue(gmailAppPassword);
+  if (!user || !password || !order.customerEmail || order.source === "walk-in-pos") return { sent: false };
+
+  gmailTransport ||= nodemailer.createTransport({ service: "gmail", auth: { user, pass: password } });
+  const orderId = order.id || order.orderId || "order";
+  const items = Array.isArray(order.items) ? order.items : [];
+  const itemLines = items.map((item) => {
+    const qty = Number(item.qty || 0);
+    const lineTotal = Number(item.price || 0) * qty;
+    return `- ${qty} x ${item.name} @ ${money(item.price)} = ${money(lineTotal)}`;
+  });
+  const htmlRows = items.map((item) => {
+    const qty = Number(item.qty || 0);
+    const lineTotal = Number(item.price || 0) * qty;
+    return `<tr><td style="padding:8px 0;border-bottom:1px solid #eee">${escapeHtml(item.name)}</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:center">${qty}</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right">${money(item.price)}</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right">${money(lineTotal)}</td></tr>`;
+  }).join("");
+  const paymentStatus = displayLabel(order.paymentStatus || order.status);
+  const paymentMethod = displayLabel(order.paymentMethod || "payment").toUpperCase();
+
+  const text = [
+    "Taptap Foodtrip digital receipt",
+    "",
+    `Order: ${orderId}`,
+    `Date: ${orderDate(order.createdAt)}`,
+    `Customer: ${order.customerName || "Customer"}`,
+    `Payment: ${paymentMethod} - ${paymentStatus}`,
+    `Address: ${order.address || "Counter"}`,
+    "",
+    "Items:",
+    ...itemLines,
+    "",
+    `Subtotal: ${money(order.subtotal)}`,
+    `Delivery fee: ${money(order.deliveryFee)}`,
+    `Total: ${money(order.total)}`,
+    "",
+    "Thank you for ordering from Taptap Foodtrip."
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f1f1f;line-height:1.5;max-width:640px;margin:auto">
+      <h1 style="color:#c81d25;margin-bottom:4px">Taptap Foodtrip</h1>
+      <p style="margin-top:0;color:#555">Digital receipt</p>
+      <p><strong>Order:</strong> ${escapeHtml(orderId)}<br>
+      <strong>Date:</strong> ${escapeHtml(orderDate(order.createdAt))}<br>
+      <strong>Customer:</strong> ${escapeHtml(order.customerName || "Customer")}<br>
+      <strong>Payment:</strong> ${escapeHtml(paymentMethod)} - ${escapeHtml(paymentStatus)}<br>
+      <strong>Address:</strong> ${escapeHtml(order.address || "Counter")}</p>
+      <table style="width:100%;border-collapse:collapse;margin:20px 0">
+        <thead><tr><th style="text-align:left;padding-bottom:8px">Item</th><th style="text-align:center;padding-bottom:8px">Qty</th><th style="text-align:right;padding-bottom:8px">Price</th><th style="text-align:right;padding-bottom:8px">Total</th></tr></thead>
+        <tbody>${htmlRows}</tbody>
+      </table>
+      <p style="text-align:right;margin:0">Subtotal: <strong>${money(order.subtotal)}</strong></p>
+      <p style="text-align:right;margin:0">Delivery fee: <strong>${money(order.deliveryFee)}</strong></p>
+      <p style="text-align:right;font-size:20px;margin-top:8px">Total: <strong>${money(order.total)}</strong></p>
+      <p style="margin-top:24px;color:#555">Thank you for ordering from Taptap Foodtrip.</p>
+    </div>
+  `;
+
+  await gmailTransport.sendMail({
+    from: `"Taptap Foodtrip" <${user}>`,
+    to: order.customerEmail,
+    subject: `Your Taptap Foodtrip receipt for ${orderId}`,
+    text,
+    html
+  });
+  return { sent: true };
 };
 
 app.get(route("/2fa/status"), authenticateBootstrap, asyncRoute(async (req, res) => {
@@ -333,7 +433,11 @@ app.get(route("/orders"), authenticate, asyncRoute(async (req, res) => {
 
 app.post(route("/orders"), authenticate, asyncRoute(async (req, res) => {
   const result = await createOrderRecord(database(), req.user, req.body);
-  res.status(201).json(result);
+  const receiptEmail = await sendOrderReceiptEmail({ id: result.id, ...result.order }).catch((error) => {
+    console.warn("Receipt email failed:", error.message);
+    return { sent: false };
+  });
+  res.status(201).json({ ...result, receiptEmail });
 }));
 
 app.patch(route("/orders/:orderId"), authenticate, asyncRoute(async (req, res) => {

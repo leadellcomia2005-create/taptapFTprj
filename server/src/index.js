@@ -33,6 +33,7 @@ import {
   createPayMongoCheckout,
   detectDialogflowIntent,
   generateInsights,
+  sendOrderReceiptEmail,
   sendTwoFactorEmail,
   sendTwoFactorSms,
   sendTwilioSms,
@@ -241,8 +242,12 @@ app.get("/api/orders", authenticate, asyncRoute(async (req, res) => {
 
 app.post("/api/orders", authenticate, asyncRoute(async (req, res) => {
   const result = await createOrderRecord(db(), req.user, req.body);
+  const receiptEmail = await sendOrderReceiptEmail({ id: result.id, ...result.order }).catch((error) => {
+    console.warn("Receipt email failed:", error.message);
+    return { sent: false };
+  });
   io.to("role:owner").to("role:staff").to(`user:${req.user.uid}`).emit("order:created", result);
-  res.status(201).json(result);
+  res.status(201).json({ ...result, receiptEmail });
 }));
 
 app.patch("/api/orders/:orderId", authenticate, asyncRoute(async (req, res) => {

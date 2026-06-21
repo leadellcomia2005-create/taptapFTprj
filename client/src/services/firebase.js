@@ -184,7 +184,7 @@ export async function login(email, password, requestedRole, demoAccounts) {
   const match = Object.entries(demoAccounts).find(
     ([role, account]) => role === requestedRole && account.email === email && account.password === password
   );
-  if (!match) throw new Error("Invalid demo account or role.");
+  if (!match) throw new Error("Invalid preview account or role.");
   const [role, account] = match;
   const user = { uid: `demo-${role}`, email, name: account.name, role };
   demoUser = user;
@@ -232,12 +232,12 @@ export async function registerCustomer(name, email, password, onProgress = () =>
   if (firebaseEnabled) {
     await authPersistenceReady;
     let user;
-    onProgress("auth", "active", "Creating the email/password identity...");
+    onProgress("auth", "active", "Creating your secure login...");
     try {
       const credential = await createUserWithEmailAndPassword(registrationAuth, email, password);
       user = credential.user;
       await updateProfile(user, { displayName: name });
-      onProgress("auth", "success", `Authentication user created with UID ${user.uid}.`);
+      onProgress("auth", "success", "Secure login created.");
     } catch (error) {
       if (user) await deleteUser(user).catch(() => {});
       onProgress("auth", "error", friendlyAuthError(error));
@@ -252,10 +252,10 @@ export async function registerCustomer(name, email, password, onProgress = () =>
         role: "customer",
         createdAt: Date.now()
       });
-      onProgress("profile", "success", `Profile saved at users/${user.uid}.`);
+      onProgress("profile", "success", "Customer profile saved.");
     } catch (error) {
       await deleteUser(user).catch(() => {});
-      onProgress("profile", "error", "The profile could not be saved, so the incomplete Authentication user was removed.");
+      onProgress("profile", "error", "The profile could not be saved, so the incomplete account was removed.");
       throw error;
     }
 
@@ -264,12 +264,12 @@ export async function registerCustomer(name, email, password, onProgress = () =>
     try {
       await sendEmailVerification(user);
       verificationSent = true;
-      onProgress("verification", "success", "Firebase accepted the verification email request.");
+      onProgress("verification", "success", "Verification email requested.");
     } catch {
-      onProgress("verification", "warning", "The account is ready, but Firebase could not send the verification email. It can be resent after sign-in.");
+      onProgress("verification", "warning", "The account is ready, but the verification email could not be sent. It can be resent after sign-in.");
     }
 
-    onProgress("session", "active", "Closing the temporary registration session...");
+    onProgress("session", "active", "Finishing registration...");
     await signOut(registrationAuth);
     onProgress("session", "success", "Registration finished. The customer can now sign in.");
     return {
@@ -287,15 +287,15 @@ export async function registerCustomer(name, email, password, onProgress = () =>
 
 export function friendlyAuthError(error) {
   const messages = {
-    "auth/email-already-in-use": "This email already has a Firebase account. Use sign in or reset the password.",
+    "auth/email-already-in-use": "This email already has an account. Use sign in or reset the password.",
     "auth/invalid-email": "Enter a valid email address.",
     "auth/weak-password": "Use a stronger password with at least 8 characters.",
-    "auth/network-request-failed": "Firebase could not be reached. Check the internet connection and try again.",
-    "auth/operation-not-allowed": "Email/Password registration is disabled in Firebase Authentication.",
+    "auth/network-request-failed": "The account service could not be reached. Check the internet connection and try again.",
+    "auth/operation-not-allowed": "Email and password registration is not available right now.",
     "auth/invalid-credential": "The email or password is incorrect.",
     "auth/invalid-login-credentials": "The email or password is incorrect."
   };
-  return messages[error?.code] || error?.message || "Firebase could not complete the request.";
+  return messages[error?.code] || error?.message || "The account request could not be completed.";
 }
 
 export async function logout() {
@@ -308,7 +308,7 @@ export async function logout() {
 }
 
 export async function resetPassword(email) {
-  if (!firebaseEnabled) throw new Error("Firebase must be configured to send reset emails.");
+  if (!firebaseEnabled) throw new Error("Password reset email is not ready yet.");
   return sendPasswordResetEmail(auth, email);
 }
 

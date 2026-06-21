@@ -6,7 +6,7 @@ let socket;
 export async function getSocket() {
   if (socket) return socket;
   const token = await getAuthToken();
-  if (!token) throw new Error("Sign in before connecting to realtime services.");
+  if (!token) throw new Error("Sign in before live updates can start.");
   socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:8080", {
     transports: ["websocket", "polling"],
     auth: { token },

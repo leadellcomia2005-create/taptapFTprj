@@ -153,7 +153,7 @@ app.get(route("/status"), (_req, res) => {
 const sendTwoFactorSms = async (to, code) => {
   const sid = secretValue(twilioSid);
   const token = secretValue(twilioToken);
-  if (!sid || !token || !process.env.TWILIO_FROM_NUMBER) throw new HttpError(503, "SMS 2FA is unavailable.");
+  if (!sid || !token || !process.env.TWILIO_FROM_NUMBER) throw new HttpError(503, "SMS verification is not ready yet.");
   return twilio(sid, token).messages.create({
     from: process.env.TWILIO_FROM_NUMBER,
     to,
@@ -195,7 +195,7 @@ function orderDate(value) {
 const sendTwoFactorEmail = async (to, code) => {
   const user = secretValue(gmailUser);
   const password = secretValue(gmailAppPassword);
-  if (!user || !password || !to) throw new HttpError(503, "Email OTP is unavailable.");
+  if (!user || !password || !to) throw new HttpError(503, "Email code is not ready yet.");
   gmailTransport ||= nodemailer.createTransport({ service: "gmail", auth: { user, pass: password } });
   return gmailTransport.sendMail({
     from: `"Taptap Foodtrip" <${user}>`,
@@ -308,7 +308,7 @@ app.post(route("/assistant"), authenticate, async (req, res) => {
       });
       dialogflowResult = response.queryResult;
       if (dialogflowResult?.fulfillmentText && dialogflowResult.intent?.displayName !== "Default Fallback Intent" && dialogflowResult.intentDetectionConfidence >= 0.55) {
-        return res.json({ text: dialogflowResult.fulfillmentText, source: "Dialogflow", intent: dialogflowResult.intent.displayName });
+        return res.json({ text: dialogflowResult.fulfillmentText, source: "assistant", intent: dialogflowResult.intent.displayName });
       }
     }
 
@@ -320,9 +320,9 @@ app.post(route("/assistant"), authenticate, async (req, res) => {
         instructions: "You are the concise Taptap Foodtrip assistant. Use only supplied menu and order context. Never invent stock or order status.",
         input: `Context:\n${JSON.stringify(req.body.context || {})}\n\nCustomer message: ${req.body.message}`
       });
-      return res.json({ text: response.output_text, source: "OpenAI" });
+      return res.json({ text: response.output_text, source: "assistant" });
     }
-    return res.json({ text: dialogflowResult?.fulfillmentText || "AI services need project credentials.", source: "demo" });
+    return res.json({ text: dialogflowResult?.fulfillmentText || "Live assistant answers are not ready yet.", source: "assistant" });
   } catch (error) {
     return res.status(502).json({ error: error.message });
   }
@@ -331,7 +331,7 @@ app.post(route("/assistant"), authenticate, async (req, res) => {
 app.post(route("/insights"), authenticate, async (req, res) => {
   if (req.user.role !== "owner") return res.status(403).json({ error: "Owner access required." });
   const apiKey = secretValue(openaiKey);
-  if (!apiKey) return res.status(503).json({ error: "OpenAI is not configured." });
+  if (!apiKey) return res.status(503).json({ error: "Business insight is not ready yet." });
   try {
     const client = new OpenAI({ apiKey });
     const response = await client.responses.create({
@@ -347,7 +347,7 @@ app.post(route("/insights"), authenticate, async (req, res) => {
 
 app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) => {
   const key = secretValue(paymongoKey);
-  if (!key) return res.status(503).json({ error: "PayMongo is not configured." });
+  if (!key) return res.status(503).json({ error: "Online payment is not ready yet." });
   if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await database().ref(`orders/${req.body.orderId}`).once("value")).val();
   if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
@@ -379,7 +379,7 @@ app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) 
     })
   });
   const payload = await response.json();
-  if (!response.ok) throw new HttpError(502, payload.errors?.[0]?.detail || "PayMongo request failed.");
+  if (!response.ok) throw new HttpError(502, payload.errors?.[0]?.detail || "Online payment request failed.");
   await database().ref(`orders/${req.body.orderId}`).update({
     paymentProvider: "paymongo",
     providerSessionId: payload.data.id,
@@ -466,7 +466,7 @@ app.post(route("/shift-logs"), authenticate, requireRoles("owner", "staff"), asy
 }));
 
 app.post(route("/admin/roles"), authenticate, requireRoles("owner"), async (req, res) => {
-  if (!validRecordId(req.body.uid)) return res.status(400).json({ error: "Invalid user UID." });
+  if (!validRecordId(req.body.uid)) return res.status(400).json({ error: "Invalid account ID." });
   if (!["owner", "staff", "rider", "customer"].includes(req.body.role)) return res.status(400).json({ error: "Unsupported role." });
   await getAuth().setCustomUserClaims(req.body.uid, { role: req.body.role });
   await database().ref(`users/${req.body.uid}/role`).set(req.body.role);

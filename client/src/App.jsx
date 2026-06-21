@@ -106,6 +106,60 @@ const topSellingItems = (orders) => {
   }
   return [...items.values()].sort((a, b) => b.qty - a.qty || b.sales - a.sales).slice(0, 8);
 };
+const peakSalesHour = (orders) => {
+  const hours = new Map();
+  for (const order of orders) {
+    const hour = new Date(Number(order.createdAt || 0)).getHours();
+    hours.set(hour, (hours.get(hour) || 0) + 1);
+  }
+  const [hour, count] = [...hours.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0] || [];
+  if (hour === undefined) return null;
+  const start = new Date();
+  start.setHours(hour, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(hour + 1, 0, 0, 0);
+  return {
+    count,
+    label: `${start.toLocaleTimeString("en-PH", { hour: "numeric" })}-${end.toLocaleTimeString("en-PH", { hour: "numeric" })}`
+  };
+};
+const buildLocalDecisionSupport = (orders, inventory) => {
+  const todayRange = reportDateRange(localDateInputValue());
+  const todayOrders = orders.filter((order) => inRange(order.createdAt, todayRange) && isRevenueOrder(order));
+  const weekRange = { start: todayRange.start - 6 * dayMs, end: todayRange.end };
+  const weekOrders = orders.filter((order) => inRange(order.createdAt, weekRange) && isRevenueOrder(order));
+  const allRevenueOrders = orders.filter(isRevenueOrder);
+  const scopedOrders = todayOrders.length ? todayOrders : weekOrders.length ? weekOrders : allRevenueOrders;
+  const scope = todayOrders.length ? "today" : weekOrders.length ? "in the last 7 days" : "across paid orders";
+  const topItems = topSellingItems(scopedOrders);
+  const lowStock = [...inventory]
+    .filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0))
+    .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0) || String(a.name).localeCompare(String(b.name)));
+  const soldNames = new Set(scopedOrders.flatMap((order) => (order.items || []).map((item) => item.name)));
+  const slowMover = [...inventory]
+    .filter((item) => Number(item.stock || 0) > 0 && !soldNames.has(item.name))
+    .sort((a, b) => Number(b.stock || 0) - Number(a.stock || 0) || String(a.name).localeCompare(String(b.name)))[0];
+  const lowStockText = lowStock.length
+    ? `Low stock: ${lowStock.slice(0, 3).map((item) => `${item.name} (${item.stock} left)`).join(", ")}.`
+    : "Stock: all tracked items are above reorder point.";
+
+  if (!topItems.length) {
+    return `No paid sales ${scope} yet. ${lowStockText} Action: keep inventory counts updated and generate this again after orders are completed.`;
+  }
+
+  const best = topItems[0];
+  const peak = peakSalesHour(scopedOrders);
+  const slowText = slowMover ? `${slowMover.name} has stock but no paid sales ${scope}.` : "No clear slow mover from the current paid orders.";
+  const action = lowStock.some((item) => item.name === best.name)
+    ? `Prioritize restocking ${best.name} before promoting it again.`
+    : lowStock.length
+      ? `Restock ${lowStock[0].name} first, then keep ${best.name} visible as the lead offer.`
+      : slowMover
+        ? `Feature ${best.name} and test a small bundle with ${slowMover.name}.`
+        : `Prepare extra ${best.name} portions before ${peak?.label || "the next rush"}.`;
+
+  return `Best seller ${scope}: ${best.name} with ${best.qty} sold (${currency(best.sales)}). Peak hour: ${peak ? `${peak.label} from ${peak.count} paid order(s)` : "not enough timing data"}. Slow mover: ${slowText} ${lowStockText} Action: ${action}`;
+};
 const htmlEscape = (value = "") => String(value)
   .replaceAll("&", "&amp;")
   .replaceAll("<", "&lt;")
@@ -293,6 +347,29 @@ const defaultViewForRole = (role) => ({
   rider: "rider-orders"
 }[role] || "store");
 
+const serviceDisplayNames = {
+  firebase: "Secure login",
+  socket: "Live updates",
+  openai: "Business insight",
+  dialogflow: "Assistant answers",
+  paymongo: "Online payment",
+  twilio: "SMS updates",
+  emailOtp: "Email codes",
+  twoFactor: "Account security"
+};
+
+const securityMethodLabels = {
+  totp: "Security app",
+  email: "Email code",
+  sms: "SMS code"
+};
+
+const assistantSourceLabel = (source) => {
+  const value = String(source || "").toLowerCase();
+  if (!value || ["assistant", "demo", "openai", "dialogflow", "dialogflow fallback"].includes(value)) return "";
+  return source;
+};
+
 function BrandMark({ className = "" }) {
   return (
     <span className={`brand-mark ${className}`.trim()}>
@@ -302,10 +379,11 @@ function BrandMark({ className = "" }) {
 }
 
 function ServiceBadge({ name, active, note }) {
+  const displayName = serviceDisplayNames[name] || name.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
   return (
     <div className="service-badge">
       <span className={`service-dot ${active ? "active" : ""}`} />
-      <div><strong>{name}</strong><small>{note || (active ? "Configured" : "Demo fallback")}</small></div>
+      <div><strong>{displayName}</strong><small>{note || (active ? "Ready" : "Needs setup")}</small></div>
     </div>
   );
 }
@@ -313,10 +391,10 @@ function ServiceBadge({ name, active, note }) {
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
-    { id: "auth", label: "Authentication user", detail: "Waiting to create the secure email/password identity.", status: "pending" },
+    { id: "auth", label: "Account sign-in", detail: "Waiting to create your secure login.", status: "pending" },
     { id: "profile", label: "Customer profile", detail: "Waiting to save your profile.", status: "pending" },
     { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
-    { id: "session", label: "Registration session", detail: "Waiting to close the temporary registration session.", status: "pending" }
+    { id: "session", label: "Final setup", detail: "Waiting to finish your account setup.", status: "pending" }
   ];
   const [role, setRole] = useState("customer");
   const [registering, setRegistering] = useState(registrationRequested);
@@ -402,7 +480,7 @@ function LoginPanel({ onLoggedIn }) {
         <form className="login-card" onSubmit={submit}>
           <p className="eyebrow text-danger">Secure access</p>
           <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-          <p className="text-secondary small">{firebaseEnabled ? "Firebase Authentication is active." : "Firebase is not configured. Demo authentication is active."}</p>
+          <p className="text-secondary small">{firebaseEnabled ? "Secure login is ready." : "Preview sign-in is available."}</p>
           {!registering && (
             <div className="role-tabs">
               {["customer", "owner", "staff", "rider"].map((item) => (
@@ -446,7 +524,7 @@ function LoginPanel({ onLoggedIn }) {
           )}
           {error && <div className="alert alert-danger py-2 small">{error}</div>}
           <button className="btn btn-danger w-100" disabled={busy}>
-            {busy ? "Registering in Firebase..." : registering ? "Register with Firebase" : `Sign in as ${role}`}
+            {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
           </button>
           {/* erick: dating plain links, ginawang outline buttons para clickable. */}
           <div className="d-flex justify-content-between gap-2 mt-3">
@@ -512,7 +590,7 @@ function EmailVerificationPanel({ user, onVerified }) {
     try {
       const result = await resendVerificationEmail();
       setMessage(result.alreadyVerified
-        ? "Firebase already shows this email as verified. Click check again to continue."
+        ? "Your email is verified. You can continue."
         : `A new verification link was sent to ${user.email}. Check Inbox and Spam.`);
     } catch (requestError) {
       setError(friendlyAuthError(requestError));
@@ -528,7 +606,7 @@ function EmailVerificationPanel({ user, onVerified }) {
     try {
       const result = await refreshEmailVerification();
       if (!result.verified) {
-        setError("Firebase still shows this email as unverified. Open the link in your email, then check again.");
+        setError("Your email is not verified yet. Please open the link in your email, then check again.");
         return;
       }
       onVerified(result.status);
@@ -544,14 +622,14 @@ function EmailVerificationPanel({ user, onVerified }) {
       <div className="security-card">
         <p className="eyebrow text-danger">First login verification</p>
         <h2>Verify your email</h2>
-        <p>Before setting up 2FA, open the Firebase verification link sent to <strong>{user.email}</strong>.</p>
+        <p>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>.</p>
         <div className="email-verification-actions">
           <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
           <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy)} onClick={resend}>
             {busy === "resend" ? "Sending..." : "Resend verification email"}
           </button>
           <button className="btn btn-danger w-100" disabled={Boolean(busy)} onClick={check}>
-            {busy === "check" ? "Checking Firebase..." : "I verified my email, check again"}
+            {busy === "check" ? "Checking your email..." : "I verified my email, check again"}
           </button>
         </div>
         {message && <div className="alert alert-success py-2 small mt-3">{message}</div>}
@@ -652,9 +730,9 @@ function TwoFactorPanel({ user, onComplete }) {
     return (
       <div className="security-screen"><div className="security-card">
         <p className="eyebrow text-danger">Account locked</p>
-        <h2>2FA verification is locked</h2>
+        <h2>Account security is locked</h2>
         <p>Three consecutive verification attempts failed. An owner must unlock this account from Users & Roles.</p>
-        <button className="btn btn-outline-danger" onClick={() => resetPassword(user.email).then(() => window.alert("Password reset email sent. After changing the password, sign in again to unlock 2FA.")).catch((requestError) => window.alert(requestError.message))}>Reset password to unlock</button>
+        <button className="btn btn-outline-danger" onClick={() => resetPassword(user.email).then(() => window.alert("Password reset email sent. After changing the password, sign in again to unlock security.")).catch((requestError) => window.alert(requestError.message))}>Reset password to unlock</button>
         <button className="btn btn-link text-danger" onClick={logout}>Return to sign in</button>
       </div></div>
     );
@@ -679,31 +757,31 @@ function TwoFactorPanel({ user, onComplete }) {
     <div className="security-screen">
       <form className="security-card" onSubmit={verify}>
         <p className="eyebrow text-danger">{setup ? "Required security setup" : "Second verification step"}</p>
-        <h2>{setup ? "Set up two-factor authentication" : "Verify your sign-in"}</h2>
+        <h2>{setup ? "Set up account security" : "Verify your sign-in"}</h2>
         <p>{setup
           ? customerAccount
-            ? "Choose email, an authenticator app, or SMS. Your verified email is the easiest option without another app."
-            : "Operational accounts must use an authenticator app before accessing protected POS tools."
-          : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "authenticator app"}.`}</p>
+            ? "Choose email, a security app, or SMS. Your verified email is the easiest option without another app."
+            : "Owner, staff, and rider accounts must use a security app before opening POS tools."
+          : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "security app"}.`}</p>
         {setup && (
           <div className="security-methods">
             <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-              <strong>Authenticator App</strong><small>Free, offline 30-second codes</small>
+              <strong>Security app</strong><small>Free, offline 30-second codes</small>
             </button>
             {customerAccount && (
               <>
                 <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>Email OTP</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Gmail sender setup required"}</small>
+                  <strong>Email code</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Email sending is not ready"}</small>
                 </button>
                 <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>SMS OTP</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Requires a phone number and Twilio"}</small>
+                  <strong>SMS code</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Phone number required"}</small>
                 </button>
               </>
             )}
           </div>
         )}
-        {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Generate authenticator QR code</button>}
-        {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Authenticator setup QR code" /><p>Manual key: <code>{setupData.manualKey}</code></p></div>}
+        {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Show security app setup code</button>}
+        {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Security app setup code" /><p>Setup key: <code>{setupData.manualKey}</code></p></div>}
         {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
         {method === "email" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.emailOtpAvailable} onClick={sendEmail}>Send 6-digit email code</button>}
         {!backupMode ? (
@@ -717,7 +795,7 @@ function TwoFactorPanel({ user, onComplete }) {
         {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
         {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
         <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
-          {busy ? "Verifying..." : setup ? "Verify and enable 2FA" : "Verify and open POS"}
+          {busy ? "Verifying..." : setup ? "Save security setup" : "Verify and open POS"}
         </button>
         {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
         <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
@@ -959,7 +1037,7 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
         try {
           const result = await api.createPayment({ orderId });
           if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
-          else notify(`Order ${orderId} created. PayMongo is awaiting credentials.`);
+          else notify(`Order ${orderId} created. Online payment setup is not ready yet.`);
         } catch (paymentError) {
           notify(`Order ${orderId} created. ${paymentError.message}`);
         }
@@ -984,7 +1062,7 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
             <label className="form-label mt-3">Mobile number<input className="form-control" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
             <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
             <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "via PayMongo" : "Not configured"}</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "Not ready"}</small></button></div>
               <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
             </div>
             <div className="checkout-total"><span>Total including delivery</span><strong>{currency(total)}</strong></div>
@@ -1280,7 +1358,7 @@ function SupportChat({ messages, user, notify }) {
   };
   return (
     <div className="dashboard-card support-chat">
-      <div className="module-heading"><div><p className="eyebrow text-danger">Firebase message history</p><h3>Customer and internal support</h3></div><span className="module-note">Use this channel for order questions and admin coordination.</span></div>
+      <div className="module-heading"><div><p className="eyebrow text-danger">Message history</p><h3>Customer and internal support</h3></div><span className="module-note">Use this channel for order questions and admin coordination.</span></div>
       <div className="support-layout">
         <aside className="support-conversations">
           <strong>Customer conversations</strong>
@@ -1291,7 +1369,7 @@ function SupportChat({ messages, user, notify }) {
           })}
         </aside>
         <div className="support-thread">
-          <header><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer chatbot conversation" : "Messages will appear here"}</small></header>
+          <header><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer conversation" : "Messages will appear here"}</small></header>
           <div className="support-message-list">
             {visibleMessages.length === 0 && <div className="empty-chat">No support messages yet.</div>}
             {visibleMessages.map((message) => <div className={message.senderId === user.uid ? "message-own" : "message-other"} key={message.id}><strong>{message.senderName} <small>{message.senderRole}</small></strong><p>{message.text}</p><time>{new Date(message.createdAt).toLocaleString("en-PH")}</time></div>)}
@@ -1315,11 +1393,11 @@ function SettingsModule({ title, serviceStatus, staff = false, notify }) {
   const toggle = (key) => setSettings((current) => ({ ...current, [key]: !current[key] }));
   return (
     <div className="row g-3">
-      <div className="col-xl-7"><div className="dashboard-card settings-card"><p className="eyebrow text-danger">Configuration</p><h3>{title}</h3>
+      <div className="col-xl-7"><div className="dashboard-card settings-card"><p className="eyebrow text-danger">Preferences</p><h3>{title}</h3>
         {Object.entries(settings).map(([key, enabled]) => <label className="setting-row" key={key}><span><strong>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</strong><small>{staff ? "Staff workstation preference" : "Business-wide operational setting"}</small></span><input type="checkbox" checked={enabled} onChange={() => toggle(key)} /></label>)}
-        <button className="btn btn-danger mt-3" onClick={() => notify("Settings saved for this development session.")}>Save settings</button>
+        <button className="btn btn-danger mt-3" onClick={() => notify("Settings saved for this session.")}>Save settings</button>
       </div></div>
-      <div className="col-xl-5"><div className="dashboard-card"><h3>Connected services</h3>{Object.entries(serviceStatus || {}).map(([name, active]) => <ServiceBadge key={name} name={name} active={active} />)}</div></div>
+      <div className="col-xl-5"><div className="dashboard-card"><h3>App features</h3>{Object.entries(serviceStatus || {}).map(([name, active]) => <ServiceBadge key={name} name={name} active={active} />)}</div></div>
     </div>
   );
 }
@@ -1338,7 +1416,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       .filter((order) => Number(order.createdAt || 0) >= start && Number(order.createdAt || 0) < end)
       .reduce((sum, order) => sum + Number(order.total || 0), 0);
   });
-  const [insight, setInsight] = useState("Generate a live OpenAI sales and inventory summary.");
+  const [insight, setInsight] = useState("Generate a free best-seller and stock recommendation.");
   const [salesGoal, setSalesGoal] = useState(100000);
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff" });
   const [managedUsers, setManagedUsers] = useState([]);
@@ -1361,11 +1439,16 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
     notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
   };
   const generateInsight = async () => {
+    if (!serviceStatus?.openai) {
+      setInsight(buildLocalDecisionSupport(orders, menu));
+      notify("Free recommendation generated from your local sales and inventory.");
+      return;
+    }
     try {
       const result = await api.insights(orders, menu);
       setInsight(result.text);
     } catch (error) {
-      setInsight(`Demo insight: Sisig demand is strongest after 6 PM. Reorder pork belly before the next evening shift. (${error.message})`);
+      setInsight(`${buildLocalDecisionSupport(orders, menu)} Online insight is not ready yet.`);
     }
   };
   const updateRole = async (event) => {
@@ -1383,7 +1466,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
     try {
       if (action === "reset") await api.resetUserTwoFactor(uid);
       else await api.unlockUserTwoFactor(uid);
-      notify(action === "reset" ? "2FA reset. The user must enroll again." : "The account was unlocked.");
+      notify(action === "reset" ? "Security setup reset. The user must enroll again." : "The account was unlocked.");
       await refreshUsers();
     } catch (error) {
       notify(error.message);
@@ -1441,15 +1524,15 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   );
   if (section === "owner-users") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div><div className="row g-3">
-      <div className="col-12"><div className="dashboard-card"><h3>Project users and 2FA security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No Firebase users were returned.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${account.twoFactorMethod} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset 2FA</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
-      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign Firebase role</h3><p className="module-note">Enter a Firebase Authentication UID. Custom claims are updated securely by the Node.js API.</p><label className="form-label">User UID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
+      <div className="col-12"><div className="dashboard-card"><h3>User accounts and security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
+      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign user role</h3><p className="module-note">Enter the user account ID and choose the role.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
     </div></main>
   );
   if (section === "owner-audit") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || "-"}</td><td>{entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-")}</td></tr>)}</tbody></table></div></div></main>
   );
-  if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Platform administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
+  if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
   return (
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
@@ -1457,9 +1540,9 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
         <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Recipe mapped</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Services online</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Credential dependent</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Some features need setup</span></div></div>
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><SalesChart values={salesTrend} /></div></div>
-        <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">AI operations insight</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>Generate AI summary</button></div></div>
+        <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button></div></div>
         <div className="col-lg-7"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="col-lg-5"><div className="dashboard-card"><h3>Low-stock alerts</h3>{inventory.filter((item) => item.stock <= item.reorderPoint).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}{inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}</div></div>
       </div>
@@ -1861,7 +1944,7 @@ function Assistant({ user, menu }) {
       ...newReplies.map((message) => ({
         from: "bot",
         text: message.text,
-        source: `Staff support · ${message.senderName}`
+        source: `Staff support - ${message.senderName}`
       }))
     ]);
   }, user.uid), [user.uid]);
@@ -1882,13 +1965,13 @@ function Assistant({ user, menu }) {
       setMessages((current) => [...current, { from: "bot", text: response.text, source: response.source }]);
     } catch {
       const popular = menu.filter((item) => item.featured).map((item) => item.name).join(", ");
-      setMessages((current) => [...current, { from: "bot", text: `Demo answer: Popular choices are ${popular}. Configure Dialogflow and OpenAI to enable live natural-language answers.`, source: "demo" }]);
+      setMessages((current) => [...current, { from: "bot", text: `Popular choices are ${popular}. Live assistant answers are not ready yet.`, source: "" }]);
     }
   };
   return (
     <>
-      <button className="assistant-launcher" aria-label={open ? "Close AI assistant" : "Open AI assistant"} aria-expanded={open} aria-controls="assistant-panel" onClick={() => setOpen(!open)}>AI</button>
-      {open && <aside className="assistant-panel" id="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>AI answers + live staff support</small></div><button aria-label="Close AI assistant" onClick={() => setOpen(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => <div key={index} className={message.from}><span>{message.text}</span>{message.source && <small>{message.source}</small>}</div>)}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask AI or contact staff..." /><button>Send</button></form></aside>}
+      <button className="assistant-launcher" aria-label={open ? "Close assistant" : "Open assistant"} aria-expanded={open} aria-controls="assistant-panel" onClick={() => setOpen(!open)}>AI</button>
+      {open && <aside className="assistant-panel" id="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>Live answers + staff support</small></div><button aria-label="Close assistant" onClick={() => setOpen(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => { const sourceLabel = assistantSourceLabel(message.source); return <div key={index} className={message.from}><span>{message.text}</span>{sourceLabel && <small>{sourceLabel}</small>}</div>; })}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask or contact staff..." /><button>Send</button></form></aside>}
     </>
   );
 }

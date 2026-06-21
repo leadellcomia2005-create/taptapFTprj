@@ -127,7 +127,7 @@ export async function createPayMongoCheckout(order) {
     })
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.errors?.[0]?.detail || "PayMongo checkout creation failed.");
+  if (!response.ok) throw new Error(payload.errors?.[0]?.detail || "Online checkout could not be created.");
   return {
     id: payload.data.id,
     checkoutUrl: payload.data.attributes.checkout_url
@@ -146,7 +146,7 @@ export async function sendTwilioSms({ to, orderId, status }) {
 
 export async function sendTwoFactorSms(to, code) {
   if (!serviceStatus().twilio || !to) {
-    throw new Error("SMS 2FA is unavailable because Twilio is not configured.");
+    throw new Error("SMS verification is not ready yet.");
   }
   const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   return client.messages.create({
@@ -200,7 +200,7 @@ function orderDate(value) {
 
 export async function sendTwoFactorEmail(to, code) {
   if (!serviceStatus().emailOtp || !to) {
-    throw new Error("Email OTP is unavailable because Gmail SMTP is not configured.");
+    throw new Error("Email code is not ready yet.");
   }
   return gmailClient().sendMail({
     from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,

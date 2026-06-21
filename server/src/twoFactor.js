@@ -30,7 +30,7 @@ function encryptionKey() {
     key = Buffer.alloc(0);
   }
   if (key.length !== 32) {
-    throw new HttpError(503, "Two-factor encryption is not configured. Set a 32-byte base64 TWO_FACTOR_ENCRYPTION_KEY.");
+    throw new HttpError(503, "Account security is not ready yet.");
   }
   return key;
 }
@@ -66,7 +66,7 @@ function base32Decode(value) {
   const bytes = [];
   for (const character of value.replace(/=+$/g, "").toUpperCase()) {
     const index = alphabet.indexOf(character);
-    if (index < 0) throw new HttpError(400, "Invalid authenticator secret.");
+    if (index < 0) throw new HttpError(400, "Invalid security app setup.");
     current = (current << 5) | index;
     bits += 5;
     if (bits >= 8) {
@@ -90,7 +90,7 @@ function encrypt(value) {
 }
 
 function decrypt(payload) {
-  if (!payload?.iv || !payload?.tag || !payload?.ciphertext) throw new HttpError(500, "Authenticator secret is unavailable.");
+  if (!payload?.iv || !payload?.tag || !payload?.ciphertext) throw new HttpError(500, "Security app setup is unavailable.");
   const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(payload.iv, "base64"));
   decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
   return Buffer.concat([
@@ -223,7 +223,7 @@ async function recordFailure(db, user, method, idToken) {
   await audit(db, user.uid, locked ? "lockout" : "failure", { method });
   if (locked) await getAuth().revokeRefreshTokens(user.uid);
   throw new HttpError(locked ? 423 : 401, locked
-    ? "Account locked after three failed 2FA attempts. Ask an owner to unlock it."
+    ? "Account locked after three failed security attempts. Ask an owner to unlock it."
     : "The verification code is invalid or expired.");
 }
 
@@ -306,10 +306,10 @@ export async function sendSmsCode(db, user, sendSms, purpose = "challenge") {
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
-  if (role !== "customer") throw new HttpError(403, "Operational accounts must use an authenticator app.");
+  if (role !== "customer") throw new HttpError(403, "Owner, staff, and rider accounts must use a security app.");
   if (!profile.phone) throw new HttpError(400, "Add a phone number to this account before choosing SMS.");
   if (purpose === "challenge" && (!config.enabled || config.method !== "sms")) {
-    throw new HttpError(409, "SMS is not the enrolled 2FA method.");
+    throw new HttpError(409, "SMS is not the selected security method.");
   }
   const code = String(randomInt(100000, 1000000));
   const record = hashCode(code);
@@ -327,10 +327,10 @@ export async function sendEmailCode(db, user, sendEmail, purpose = "challenge", 
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
-  if (role !== "customer") throw new HttpError(403, "Email OTP is available only to customer accounts.");
-  if (user.email_verified !== true || !user.email) throw new HttpError(403, "Verify your email address before using email OTP.");
+  if (role !== "customer") throw new HttpError(403, "Email code is available only to customer accounts.");
+  if (user.email_verified !== true || !user.email) throw new HttpError(403, "Verify your email address before using email code.");
   if (purpose === "challenge" && (!config.enabled || config.method !== "email")) {
-    throw new HttpError(409, "Email OTP is not the enrolled 2FA method.");
+    throw new HttpError(409, "Email code is not the selected security method.");
   }
 
   const previous = config.pendingEmail || {};
@@ -368,13 +368,13 @@ export async function finishEnrollment(db, user, method, code, idToken) {
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
   if (!allowedTwoFactorMethods(role).includes(method)) {
-    throw new HttpError(403, "Operational accounts must enroll with an authenticator app.");
+    throw new HttpError(403, "Owner, staff, and rider accounts must use a security app.");
   }
   let secret;
   let valid = false;
   if (method === "totp") {
     if (!config.pendingTotp || Number(config.pendingTotp.expiresAt) < Date.now()) {
-      throw new HttpError(410, "Authenticator setup expired. Generate a new QR code.");
+      throw new HttpError(410, "Security app setup expired. Show a new setup code.");
     }
     secret = decrypt(config.pendingTotp.secret);
     valid = verifyTotp(secret, code);
@@ -387,7 +387,7 @@ export async function finishEnrollment(db, user, method, code, idToken) {
       Number(config.pendingEmail.expiresAt) >= Date.now() &&
       verifyHash(code, config.pendingEmail);
   } else {
-    throw new HttpError(400, "Unsupported 2FA method.");
+    throw new HttpError(400, "Unsupported security method.");
   }
   if (!valid) return recordFailure(db, user, method, idToken);
 
@@ -412,8 +412,8 @@ export async function finishEnrollment(db, user, method, code, idToken) {
 
 export async function verifyChallenge(db, user, input = {}, idToken) {
   const config = await configurationFor(db, user.uid);
-  if (!config.enabled) throw new HttpError(409, "Two-factor authentication must be enrolled.");
-  if (config.locked) throw new HttpError(423, "Account locked after three failed 2FA attempts.");
+  if (!config.enabled) throw new HttpError(409, "Account security must be set up.");
+  if (config.locked) throw new HttpError(423, "Account locked after three failed security attempts.");
 
   if (input.backupCode) {
     const normalized = normalizeBackupCode(input.backupCode);
@@ -453,7 +453,7 @@ export async function verifyChallenge(db, user, input = {}, idToken) {
 }
 
 export async function resetTwoFactor(db, actor, userId) {
-  if (!validRecordId(userId)) throw new HttpError(400, "Invalid user UID.");
+  if (!validRecordId(userId)) throw new HttpError(400, "Invalid account ID.");
   await db.ref(`twoFactor/${userId}`).set({
     enabled: false,
     failedAttempts: 0,
@@ -466,7 +466,7 @@ export async function resetTwoFactor(db, actor, userId) {
 }
 
 export async function unlockTwoFactor(db, actor, userId) {
-  if (!validRecordId(userId)) throw new HttpError(400, "Invalid user UID.");
+  if (!validRecordId(userId)) throw new HttpError(400, "Invalid account ID.");
   await db.ref(`twoFactor/${userId}`).update({
     failedAttempts: 0,
     locked: false,

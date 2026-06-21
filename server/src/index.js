@@ -69,7 +69,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/api", rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: "draft-8" }));
 
 let firebaseAdminEnabled = false;
-let firebaseAdminError = "Firebase Admin credentials are not configured.";
+let firebaseAdminError = "Account service is not ready yet.";
 if (process.env.FIREBASE_DATABASE_URL) {
   try {
     const credential = process.env.GOOGLE_APPLICATION_CREDENTIALS
@@ -84,7 +84,7 @@ if (process.env.FIREBASE_DATABASE_URL) {
     firebaseAdminError = "";
   } catch (error) {
     firebaseAdminError = error.message;
-    console.warn("Firebase Admin is unavailable:", error.message);
+    console.warn("Account service is unavailable:", error.message);
   }
 }
 
@@ -99,7 +99,7 @@ async function verifyUserToken(token) {
 
 function requireFirebaseAdmin(_req, res, next) {
   if (!firebaseAdminEnabled) {
-    return res.status(503).json({ error: "Firebase Admin is unavailable. Configure server credentials before using protected operations." });
+    return res.status(503).json({ error: "Account service is unavailable. Please try again later." });
   }
   return next();
 }
@@ -123,7 +123,7 @@ async function authenticate(req, res, next) {
       return res.status(403).json({ error: "Verify your email address before accessing the POS.", code: "EMAIL_VERIFICATION_REQUIRED" });
     }
     if (req.user.mfaSession !== true) {
-      return res.status(403).json({ error: "Complete two-factor authentication before accessing the POS.", code: "TWO_FACTOR_REQUIRED" });
+      return res.status(403).json({ error: "Complete account security before accessing the POS.", code: "TWO_FACTOR_REQUIRED" });
     }
     return next();
   });
@@ -174,19 +174,19 @@ app.post("/api/2fa/challenge", authenticateBootstrap, requireVerifiedEmail, asyn
 app.post("/api/assistant", authenticate, asyncRoute(async (req, res) => {
   const detected = await detectDialogflowIntent(req.body);
   if (detected && detected.intent !== "Default Fallback Intent" && detected.confidence >= 0.55) {
-    return res.json({ text: detected.text, source: "Dialogflow", intent: detected.intent });
+    return res.json({ text: detected.text, source: "assistant", intent: detected.intent });
   }
   const generated = await askOpenAI(req.body);
-  if (generated) return res.json({ text: generated, source: "OpenAI" });
+  if (generated) return res.json({ text: generated, source: "assistant" });
   return res.json({
-    text: detected?.text || "The AI services are ready in code but need Dialogflow and OpenAI credentials.",
-    source: detected ? "Dialogflow fallback" : "demo"
+    text: detected?.text || "Live assistant answers are not ready yet.",
+    source: "assistant"
   });
 }));
 
 app.post("/api/insights", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
   const text = await generateInsights(req.body);
-  res.json({ text: text || "OpenAI is not configured. Add OPENAI_API_KEY to enable live operational insights." });
+  res.json({ text: text || "Business insight is not ready yet." });
 }));
 
 app.post("/api/payments/checkout", authenticate, asyncRoute(async (req, res) => {
@@ -196,7 +196,7 @@ app.post("/api/payments/checkout", authenticate, asyncRoute(async (req, res) => 
   if (order.paymentMethod !== "gcash") throw new HttpError(409, "Only GCash orders use online checkout.");
   if (order.paymentStatus === "paid") throw new HttpError(409, "This order is already paid.");
   const result = await createPayMongoCheckout({ ...order, orderId: req.body.orderId });
-  if (!result) throw new HttpError(503, "PayMongo is not configured.");
+  if (!result) throw new HttpError(503, "Online payment is not ready yet.");
   await db().ref(`orders/${req.body.orderId}`).update({
     paymentProvider: "paymongo",
     providerSessionId: result.id,
@@ -292,7 +292,7 @@ app.post("/api/shift-logs", authenticate, requireRoles("owner", "staff"), asyncR
 }));
 
 app.post("/api/admin/roles", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
-  if (!validRecordId(req.body.uid)) throw new HttpError(400, "Invalid user UID.");
+  if (!validRecordId(req.body.uid)) throw new HttpError(400, "Invalid account ID.");
   if (!["owner", "staff", "rider", "customer"].includes(req.body.role)) throw new HttpError(400, "Unsupported role.");
   await getAuth().setCustomUserClaims(req.body.uid, { role: req.body.role });
   await db().ref(`users/${req.body.uid}/role`).set(req.body.role);
@@ -349,11 +349,11 @@ const io = new SocketServer(server, {
 });
 
 io.use(async (socket, next) => {
-  if (!firebaseAdminEnabled) return next(new Error("Firebase Admin is unavailable."));
+  if (!firebaseAdminEnabled) return next(new Error("Account service is unavailable."));
   try {
     socket.user = await verifyUserToken(socket.handshake.auth?.token);
     if (!hasVerifiedEmail(socket.user)) throw new Error("Email verification required.");
-    if (socket.user.mfaSession !== true) throw new Error("Two-factor authentication required.");
+    if (socket.user.mfaSession !== true) throw new Error("Account security required.");
     return next();
   } catch {
     return next(new Error("Unauthorized"));
@@ -394,7 +394,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("order:status", (_payload, acknowledge = () => {}) => {
-    acknowledge({ ok: false, error: "Order status changes must use the authenticated API." });
+    acknowledge({ ok: false, error: "Please refresh and try updating the order again." });
   });
 });
 

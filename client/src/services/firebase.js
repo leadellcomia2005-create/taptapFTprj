@@ -101,6 +101,7 @@ function readDemoData() {
   const data = saved ? JSON.parse(saved) : {};
   return {
     orders: {},
+    menu: {},
     inventory: {},
     riderLocations: {},
     users: {},
@@ -441,8 +442,13 @@ export function subscribeMenu(fallback, callback) {
       callback(value ? Object.values(value) : fallback);
     });
   }
-  callback(fallback);
-  return () => {};
+  const emit = () => {
+    const menu = readDemoData().menu || {};
+    callback(fallback.map((item) => ({ ...item, ...(menu[item.id] || {}) })));
+  };
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
 export function subscribeInventory(fallback, callback) {
@@ -484,8 +490,46 @@ export async function adjustInventory(item, delta, reason, actor) {
     reorderPoint: item.reorderPoint ?? 10,
     stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) + delta)
   };
+  data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: data.inventory[item.id].stock, reorderPoint: data.inventory[item.id].reorderPoint };
   data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
   writeDemoData(data);
+}
+
+export async function updateMenuItem(item, values, actor) {
+  if (firebaseEnabled) return api.updateMenuItem(item.id, values);
+  const data = readDemoData();
+  const updated = {
+    ...item,
+    ...values,
+    price: Number(values.price),
+    stock: Number(values.stock),
+    reorderPoint: Number(values.reorderPoint),
+    walkInOnly: Boolean(values.walkInOnly),
+    unavailable: Boolean(values.unavailable),
+    updatedAt: Date.now(),
+    updatedBy: actor.uid
+  };
+  data.menu[item.id] = updated;
+  data.inventory[item.id] = {
+    ...(data.inventory[item.id] || {}),
+    name: updated.name,
+    category: updated.category,
+    price: updated.price,
+    stock: updated.stock,
+    reorderPoint: updated.reorderPoint,
+    unavailable: updated.unavailable
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "menu_item_updated",
+    itemId: item.id,
+    itemName: updated.name,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { item: updated };
 }
 
 export function subscribeOrders(user, callback) {
@@ -539,6 +583,8 @@ export async function createOrder(order) {
     const result = await api.createOrder({
       phone: order.phone,
       address: order.address,
+      deliveryType: order.deliveryType,
+      notes: order.notes,
       paymentMethod: order.paymentMethod,
       items: order.items.map(({ id, qty }) => ({ id, qty }))
     });
@@ -550,6 +596,8 @@ export async function createOrder(order) {
   const onlinePayment = order.paymentMethod === "gcash";
   data.orders[id] = {
     ...order,
+    deliveryType: order.deliveryType || (order.customerId === "walk-in" ? "walk-in" : "delivery"),
+    notes: order.notes || "",
     createdAt: Date.now(),
     status: onlinePayment ? "pending-payment" : "received",
     paymentStatus: onlinePayment ? "pending" : order.paymentMethod === "cod" ? "cod-pending" : "paid",
@@ -558,7 +606,9 @@ export async function createOrder(order) {
     paymentConfirmedAt: onlinePayment ? null : Date.now()
   };
   for (const item of order.items) {
-    data.inventory[item.id] = { stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) - item.qty) };
+    const nextStock = Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) - item.qty);
+    data.inventory[item.id] = { ...(data.inventory[item.id] || {}), stock: nextStock };
+    data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: nextStock };
   }
   writeDemoData(data);
   const notifications = [
@@ -590,7 +640,27 @@ export async function updateOrder(orderId, values) {
   }
   const data = readDemoData();
   const currentOrder = data.orders[orderId];
-  data.orders[orderId] = { ...data.orders[orderId], ...values };
+  const nextValues = { ...values };
+  if (values.status === "delivered" && currentOrder?.paymentMethod === "cod") {
+    nextValues.paymentStatus = "cod-collected";
+    nextValues.codCollectedAt = Date.now();
+  }
+  if (values.codRemitted && currentOrder?.paymentMethod === "cod") {
+    nextValues.paymentStatus = "paid";
+    nextValues.paymentConfirmedAt = Date.now();
+    nextValues.codRemittedAt = Date.now();
+  }
+  if ((values.cancel || values.status === "cancelled") && currentOrder && currentOrder.status !== "cancelled") {
+    nextValues.status = "cancelled";
+    nextValues.cancelReason = values.cancelReason || "Cancelled";
+    nextValues.cancelledAt = Date.now();
+    for (const item of currentOrder.items || []) {
+      const currentStock = Number(data.inventory[item.id]?.stock || 0) + Number(item.qty || 0);
+      data.inventory[item.id] = { ...(data.inventory[item.id] || {}), stock: currentStock };
+      data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: currentStock };
+    }
+  }
+  data.orders[orderId] = { ...data.orders[orderId], ...nextValues };
   data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
   writeDemoData(data);
   if (values.status && currentOrder?.customerId) {

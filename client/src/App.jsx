@@ -35,6 +35,7 @@ import {
   subscribeSupportMessages,
   subscribeUserProfile,
   updateOrder,
+  updateMenuItem,
   uploadProof
 } from "./services/firebase";
 import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
@@ -47,7 +48,8 @@ const statusLabel = (value) => ({
   ready: "Ready",
   "out-for-delivery": "Out for delivery",
   arrived: "Arrived",
-  delivered: "Delivered"
+  delivered: "Delivered",
+  cancelled: "Cancelled"
 }[value] || value);
 const menuPhotoStyle = (product) => product.image
   ? {
@@ -68,6 +70,7 @@ const staffPosCategories = [
   { id: "drinks", label: "Drinks", matches: (item) => normalizeMenuCategory(item.category) === "drinks" },
   { id: "addons", label: "Add-ons", matches: (item) => ["walkinaddon", "addon", "addons"].includes(normalizeMenuCategory(item.category)) }
 ];
+const menuCategoryOptions = ["Favorite Meal", "Alacarte", "Solo", "Special Meal", "Drinks", "Walk-in Add-on"];
 
 const dayMs = 24 * 60 * 60 * 1000;
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -82,17 +85,22 @@ const reportMoney = (value) => `PHP ${Number(value || 0).toLocaleString("en-PH",
 const sumByTotal = (orders) => orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
 const orderPaymentLabel = (order) => {
   const method = String(order.paymentMethod || "unknown").toUpperCase();
-  const paid = isRevenueOrder(order) ? "counted" : "pending";
+  const paid = order.status === "cancelled"
+    ? "cancelled"
+    : order.paymentMethod === "cod" && order.status === "delivered" && !order.codRemittedAt
+      ? "collected"
+      : isRevenueOrder(order) ? "counted" : "pending";
   return `${method} (${paid})`;
 };
 const isRevenueOrder = (order) => {
-  if (!order || order.paymentStatus === "pending" || order.status === "pending-payment") return false;
+  if (!order || order.status === "cancelled" || order.paymentStatus === "pending" || order.status === "pending-payment") return false;
   if (order.paymentStatus === "paid") return true;
   if (order.paymentMethod === "cash") return true;
   if (order.paymentMethod === "cod") return order.status === "delivered" || Boolean(order.deliveredAt);
   return false;
 };
-const isOutstandingCod = (order) => order?.paymentMethod === "cod" && !isRevenueOrder(order);
+const isOutstandingCod = (order) => order?.paymentMethod === "cod" && order.status !== "cancelled" && !isRevenueOrder(order);
+const isUnremittedCod = (order) => order?.paymentMethod === "cod" && order.status === "delivered" && !order.codRemittedAt;
 const topSellingItems = (orders) => {
   const items = new Map();
   for (const order of orders) {
@@ -171,8 +179,10 @@ const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
   const range = reportDateRange(reportDate);
   const dailyOrders = orders.filter((order) => inRange(order.createdAt, range));
   const revenueOrders = dailyOrders.filter(isRevenueOrder);
-  const pendingOrders = dailyOrders.filter((order) => !isRevenueOrder(order));
+  const cancelledOrders = dailyOrders.filter((order) => order.status === "cancelled");
+  const pendingOrders = dailyOrders.filter((order) => !isRevenueOrder(order) && order.status !== "cancelled");
   const codExposureOrders = dailyOrders.filter(isOutstandingCod);
+  const unremittedCodOrders = dailyOrders.filter(isUnremittedCod);
   const deliveredOrders = dailyOrders.filter((order) => order.status === "delivered");
   const closedShifts = shiftLogs.filter((log) => inRange(log.endedAt || log.createdAt, range));
   const lowStockItems = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0));
@@ -190,8 +200,10 @@ const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
     dailyOrders,
     revenueOrders,
     pendingOrders,
+    cancelledOrders,
     deliveredOrders,
     codExposureOrders,
+    unremittedCodOrders,
     closedShifts,
     lowStockItems,
     topItems: topSellingItems(revenueOrders),
@@ -220,14 +232,22 @@ const printableOwnerReportHtml = (report) => {
     { label: "Staff", value: (log) => log.staffName || "Staff" },
     { label: "Closed", value: (log) => new Date(log.endedAt || log.createdAt).toLocaleString("en-PH") },
     { label: "Orders", value: (log) => log.orderCount || 0 },
+    { label: "Cash movements", value: (log) => reportMoney(Number(log.cashIn || 0) - Number(log.cashOut || 0) - Number(log.expenses || 0)) },
     { label: "Expected", value: (log) => reportMoney(log.expectedCash) },
     { label: "Actual", value: (log) => reportMoney(log.actualCash) },
-    { label: "Variance", value: (log) => reportMoney(log.variance) }
+    { label: "Variance", value: (log) => reportMoney(log.variance) },
+    { label: "Notes", value: (log) => log.notes || "-" }
   ];
   const stockColumns = [
     { label: "Item", value: (item) => item.name },
     { label: "Stock", value: (item) => item.stock },
     { label: "Reorder point", value: (item) => item.reorderPoint }
+  ];
+  const codRemittanceColumns = [
+    { label: "Order", value: (order) => order.id },
+    { label: "Customer", value: (order) => order.customerName || "Customer" },
+    { label: "Rider", value: (order) => order.riderName || order.riderId || "-" },
+    { label: "Collected total", value: (order) => reportMoney(order.total) }
   ];
   const table = (title, columns, rows, emptyText) => `
     <section>
@@ -274,12 +294,15 @@ const printableOwnerReportHtml = (report) => {
     <div class="box"><span>Total orders</span><strong>${report.dailyOrders.length}</strong></div>
     <div class="box"><span>Completed orders</span><strong>${report.deliveredOrders.length}</strong></div>
     <div class="box"><span>Pending or unpaid</span><strong>${report.pendingOrders.length}</strong></div>
+    <div class="box"><span>Cancelled</span><strong>${report.cancelledOrders.length}</strong></div>
     <div class="box"><span>Cash</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.cash))}</strong></div>
     <div class="box"><span>Delivered COD</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.cod))}</strong></div>
     <div class="box"><span>Online/GCash</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.online))}</strong></div>
     <div class="box"><span>Open COD exposure</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.codExposure))}</strong></div>
+    <div class="box"><span>COD to remit</span><strong>${htmlEscape(reportMoney(sumByTotal(report.unremittedCodOrders)))}</strong></div>
   </div>
   ${table("Top selling items", itemColumns, report.topItems, "No paid sales for this day.")}
+  ${table("COD waiting for owner handoff", codRemittanceColumns, report.unremittedCodOrders, "No COD collections waiting for owner handoff.")}
   ${table("Daily order ledger", orderColumns, report.dailyOrders, "No orders for this day.")}
   ${table("Closed shift reconciliation", shiftColumns, report.closedShifts, "No closed shifts for this day.")}
   ${table("Low stock snapshot", stockColumns, report.lowStockItems, "No low stock items.")}
@@ -885,7 +908,7 @@ function NotificationCenter({ notifications, onClose }) {
 
 function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
-  const customerMenu = menu.filter((item) => !item.walkInOnly);
+  const customerMenu = menu.filter((item) => !item.walkInOnly && !item.unavailable);
   const categories = ["All", ...new Set(customerMenu.map((item) => item.category))];
   const visible = category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category);
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
@@ -905,6 +928,9 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
     if (availableStock < 1) return current;
     return [...current, { ...product, stock: availableStock, qty: 1 }];
   });
+  const decrease = (productId) => setCart((current) => current
+    .map((item) => item.id === productId ? { ...item, qty: item.qty - 1 } : item)
+    .filter((item) => item.qty > 0));
   // erick: buong item ang tinatanggal kapag nagkamali ang customer sa cart.
   const remove = (productId) => setCart((current) => current.filter((item) => item.id !== productId));
 
@@ -971,6 +997,11 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
                     <strong>{item.name}</strong>
                     <small>{currency(item.price)} each</small>
                   </div>
+                  <div className="pos-quantity cart-quantity">
+                    <button type="button" onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>-</button>
+                    <span>{item.qty}</span>
+                    <button type="button" disabled={item.qty >= Number(item.stock || 0)} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button>
+                  </div>
                   <b>{currency(item.price * item.qty)}</b>
                   {/* erick: trash icon ang delete action para madaling makita sa cart row. */}
                   <button className="cart-remove-button" type="button" aria-label={`Remove ${item.name} from cart`} onClick={() => remove(item.id)}>
@@ -1003,10 +1034,14 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
 
 function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, notify }) {
   const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
+  const [deliveryType, setDeliveryType] = useState("delivery");
   const [phone, setPhone] = useState(profile?.phone || "");
   const [address, setAddress] = useState(profile?.address || "");
+  const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
-  const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0) + 49;
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const deliveryFee = deliveryType === "delivery" && cart.length > 0 ? 49 : 0;
+  const total = subtotal + deliveryFee;
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -1016,8 +1051,8 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
   }, [onClose]);
 
   const place = async () => {
-    if (!phone.trim() || !address.trim()) {
-      notify("Enter a mobile number and delivery address before placing the order.");
+    if (!phone.trim() || (deliveryType === "delivery" && !address.trim())) {
+      notify(deliveryType === "delivery" ? "Enter a mobile number and delivery address before placing the order." : "Enter a mobile number before placing the order.");
       return;
     }
     setBusy(true);
@@ -1027,7 +1062,9 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
         customerName: user.name,
         customerEmail: user.email,
         phone,
-        address,
+        address: deliveryType === "delivery" ? address : "Store pickup",
+        deliveryType,
+        notes,
         paymentMethod: payment,
         total,
         items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
@@ -1059,15 +1096,21 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
           <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
           <div className="modal-body">
             {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
+            <div className="checkout-mode-grid mt-3" aria-label="Order type">
+              <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>With rider fee</small></button>
+              <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>Claim at store</small></button>
+            </div>
             <label className="form-label mt-3">Mobile number<input className="form-control" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
-            <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+            {deliveryType === "delivery" && <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>}
+            <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: landmark, extra request, or pickup note" /></label>
             <div className="row g-2">
               <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "Not ready"}</small></button></div>
               <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
             </div>
-            <div className="checkout-total"><span>Total including delivery</span><strong>{currency(total)}</strong></div>
+            <div className="checkout-total"><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>
+            {deliveryFee > 0 && <small className="text-secondary d-block mt-2">Delivery fee: {currency(deliveryFee)}</small>}
           </div>
-          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !phone.trim() || !address.trim()} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
+          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !phone.trim() || (deliveryType === "delivery" && !address.trim())} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
         </div>
       </div>
     </div>
@@ -1075,8 +1118,8 @@ function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, n
 }
 
 function OrdersView({ orders, onTrack }) {
-  const activeOrders = orders.filter((order) => order.status !== "delivered");
-  const pastOrders = orders.filter((order) => order.status === "delivered");
+  const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
+  const pastOrders = orders.filter((order) => ["delivered", "cancelled"].includes(order.status));
   const totalSpent = orders.filter(isRevenueOrder).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
   const renderOrderTable = (title, list, emptyText) => (
@@ -1260,28 +1303,111 @@ function InventoryModule({ inventory, user, notify }) {
   );
 }
 
+function MenuManagementModule({ inventory, user, notify }) {
+  const draftFor = useCallback((item) => ({
+    name: item.name || "",
+    category: item.category || "Favorite Meal",
+    description: item.description || "",
+    price: Number(item.price || 0),
+    stock: Number(item.stock || 0),
+    reorderPoint: Number(item.reorderPoint ?? 10),
+    unavailable: Boolean(item.unavailable),
+    walkInOnly: Boolean(item.walkInOnly)
+  }), []);
+  const [drafts, setDrafts] = useState({});
+
+  useEffect(() => {
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const item of inventory) {
+        if (!next[item.id]) next[item.id] = draftFor(item);
+      }
+      return next;
+    });
+  }, [inventory, draftFor]);
+
+  const updateDraft = (item, field, value) => setDrafts((current) => ({
+    ...current,
+    [item.id]: { ...draftFor(item), ...(current[item.id] || {}), [field]: value }
+  }));
+
+  const save = async (item) => {
+    const draft = { ...draftFor(item), ...(drafts[item.id] || {}) };
+    await updateMenuItem(item, {
+      name: draft.name.trim(),
+      category: draft.category,
+      description: draft.description,
+      price: Number(draft.price || 0),
+      stock: Number(draft.stock || 0),
+      reorderPoint: Number(draft.reorderPoint || 0),
+      unavailable: Boolean(draft.unavailable),
+      walkInOnly: Boolean(draft.walkInOnly)
+    }, user);
+    notify(`${draft.name || item.name} menu settings saved.`);
+  };
+
+  return (
+    <div className="dashboard-card">
+      <div className="module-heading">
+        <div><p className="eyebrow text-danger">Owner menu control</p><h3>Menu prices, categories and visibility</h3></div>
+        <span className="module-note">Changes update the customer menu and staff POS menu.</span>
+      </div>
+      <div className="table-responsive">
+        <table className="table align-middle menu-admin-table">
+          <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder</th><th>Visible</th><th>Walk-in only</th><th /></tr></thead>
+          <tbody>{inventory.map((item) => {
+            const draft = drafts[item.id] || draftFor(item);
+            const categories = menuCategoryOptions.includes(draft.category) ? menuCategoryOptions : [draft.category, ...menuCategoryOptions];
+            return (
+              <tr key={item.id}>
+                <td><input className="form-control form-control-sm" value={draft.name} onChange={(event) => updateDraft(item, "name", event.target.value)} /><small className="d-block text-secondary mt-1">{item.id}</small></td>
+                <td><select className="form-select form-select-sm" value={draft.category} onChange={(event) => updateDraft(item, "category", event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.price} onChange={(event) => updateDraft(item, "price", event.target.value)} /></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.stock} onChange={(event) => updateDraft(item, "stock", event.target.value)} /></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.reorderPoint} onChange={(event) => updateDraft(item, "reorderPoint", event.target.value)} /></td>
+                <td><label className="menu-admin-check"><input type="checkbox" checked={!draft.unavailable} onChange={(event) => updateDraft(item, "unavailable", !event.target.checked)} /><span>Show</span></label></td>
+                <td><label className="menu-admin-check"><input type="checkbox" checked={draft.walkInOnly} onChange={(event) => updateDraft(item, "walkInOnly", event.target.checked)} /><span>POS</span></label></td>
+                <td><button className="btn btn-sm btn-danger" onClick={() => save(item)}>Save</button></td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
   const [openingCash, setOpeningCash] = useState(2000);
+  const [cashIn, setCashIn] = useState(0);
+  const [cashOut, setCashOut] = useState(0);
+  const [expenses, setExpenses] = useState(0);
   const [actualCash, setActualCash] = useState(0);
+  const [shiftNotes, setShiftNotes] = useState("");
   const [shiftStartedAt] = useState(() => Date.now() - 8 * 60 * 60 * 1000);
   const shiftOrders = orders.filter((order) => Number(order.createdAt || 0) >= shiftStartedAt && Number(order.createdAt || 0) <= Date.now());
   const cashSales = shiftOrders
     .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && isRevenueOrder(order)))
     .reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const expectedCash = Number(openingCash || 0) + cashSales;
+  const expectedCash = Number(openingCash || 0) + cashSales + Number(cashIn || 0) - Number(cashOut || 0) - Number(expenses || 0);
   const variance = Number(actualCash || 0) - expectedCash;
   const closeShift = async () => {
     const id = await saveShiftLog({
       startedAt: shiftStartedAt,
       endedAt: Date.now(),
       openingCash: Number(openingCash),
+      cashIn: Number(cashIn),
+      cashOut: Number(cashOut),
+      expenses: Number(expenses),
       cashSales,
       expectedCash,
       actualCash: Number(actualCash),
       variance,
-      orderCount: shiftOrders.length
+      orderCount: shiftOrders.length,
+      notes: shiftNotes
     }, user);
     notify(`Shift ${id} closed and sent for owner reconciliation.`);
+    setShiftNotes("");
   };
   return (
     <div className="row g-3">
@@ -1291,9 +1417,16 @@ function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
           <h3>Close current shift</h3>
           <p className="module-note">Counting {shiftOrders.length} order(s) since {new Date(shiftStartedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}.</p>
           <label className="form-label">Opening cash<input className="form-control" type="number" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
+          <div className="row g-2">
+            <label className="form-label col-sm-4">Cash in<input className="form-control" type="number" value={cashIn} onChange={(event) => setCashIn(event.target.value)} /></label>
+            <label className="form-label col-sm-4">Cash out<input className="form-control" type="number" value={cashOut} onChange={(event) => setCashOut(event.target.value)} /></label>
+            <label className="form-label col-sm-4">Expenses<input className="form-control" type="number" value={expenses} onChange={(event) => setExpenses(event.target.value)} /></label>
+          </div>
           <label className="form-label">Actual cash counted<input className="form-control" type="number" value={actualCash} onChange={(event) => setActualCash(event.target.value)} /></label>
+          <label className="form-label">Shift notes<textarea className="form-control" rows="2" value={shiftNotes} onChange={(event) => setShiftNotes(event.target.value)} placeholder="Optional: payouts, shortages, or handoff notes" /></label>
           <dl className="reconciliation-list">
             <div><dt>Cash and COD sales</dt><dd>{currency(cashSales)}</dd></div>
+            <div><dt>Cash movements</dt><dd>{currency(Number(cashIn || 0) - Number(cashOut || 0) - Number(expenses || 0))}</dd></div>
             <div><dt>Expected cash</dt><dd>{currency(expectedCash)}</dd></div>
             <div><dt>Variance</dt><dd className={variance === 0 ? "text-success" : "text-danger"}>{currency(variance)}</dd></div>
           </dl>
@@ -1303,9 +1436,9 @@ function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
       <div className={readOnly ? "col-12" : "col-xl-7"}>
         <div className="dashboard-card">
           <h3>{readOnly ? "Staff shift reconciliation history" : "Shift history"}</h3>
-          <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Staff</th><th>Closed</th><th>Orders</th><th>Expected</th><th>Actual</th><th>Variance</th></tr></thead><tbody>
-            {logs.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No closed shifts yet.</td></tr>}
-            {logs.map((log) => <tr key={log.id}><td>{log.staffName}</td><td>{new Date(log.endedAt || log.createdAt).toLocaleString("en-PH")}</td><td>{log.orderCount}</td><td>{currency(log.expectedCash)}</td><td>{currency(log.actualCash)}</td><td>{currency(log.variance)}</td></tr>)}
+          <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Staff</th><th>Closed</th><th>Orders</th><th>Movements</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Notes</th></tr></thead><tbody>
+            {logs.length === 0 && <tr><td colSpan="8" className="text-center text-secondary py-4">No closed shifts yet.</td></tr>}
+            {logs.map((log) => <tr key={log.id}><td>{log.staffName}</td><td>{new Date(log.endedAt || log.createdAt).toLocaleString("en-PH")}</td><td>{log.orderCount}</td><td>{currency(Number(log.cashIn || 0) - Number(log.cashOut || 0) - Number(log.expenses || 0))}</td><td>{currency(log.expectedCash)}</td><td>{currency(log.actualCash)}</td><td>{currency(log.variance)}</td><td>{log.notes || "-"}</td></tr>)}
           </tbody></table></div>
         </div>
       </div>
@@ -1438,6 +1571,10 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
     const opened = printOwnerDailyReport(dailyReport);
     notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
   };
+  const markCodRemitted = async (order) => {
+    await updateOrder(order.id, { codRemitted: true });
+    notify(`${order.id} COD marked as remitted.`);
+  };
   const generateInsight = async () => {
     if (!serviceStatus?.openai) {
       setInsight(buildLocalDecisionSupport(orders, menu));
@@ -1488,14 +1625,14 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       <div className="row g-3">
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
-        <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => order.status !== "delivered" && order.status !== "pending-payment").length}</strong><span>Live order workload</span></div></div>
+        <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => !["delivered", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live order workload</span></div></div>
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><SalesChart values={salesTrend} /></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Strategy controls</h3><label className="form-label">Sales goal threshold<input className="form-control" type="number" value={salesGoal} onChange={(event) => setSalesGoal(Number(event.target.value))} /></label><label className="form-label">Active promotion<select className="form-select"><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={() => notify("Sales strategy saved.")}>Save strategy</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
       </div>
     </main>
   );
-  if (section === "owner-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Stock governance</p><h2>Inventory</h2></div></div><InventoryModule inventory={inventory} user={user} notify={notify} /></main>;
+  if (section === "owner-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Stock governance</p><h2>Inventory</h2></div></div><div className="row g-3"><div className="col-12"><MenuManagementModule inventory={inventory} user={user} notify={notify} /></div><div className="col-12"><InventoryModule inventory={inventory} user={user} notify={notify} /></div></div></main>;
   if (section === "owner-reports") return (
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading">
@@ -1510,6 +1647,8 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
         <div className="col-md-3"><div className="metric-card"><small>Total orders</small><strong>{dailyReport.dailyOrders.length}</strong><span>Created that day</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Pending or unpaid</small><strong>{dailyReport.pendingOrders.length}</strong><span>Not counted as sales</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>COD exposure</small><strong>{currency(dailyReport.paymentBreakdown.codExposure)}</strong><span>Open COD for the day</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Cancelled</small><strong>{dailyReport.cancelledOrders.length}</strong><span>Stock returned</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>COD to remit</small><strong>{currency(sumByTotal(dailyReport.unremittedCodOrders))}</strong><span>Delivered, not handed over</span></div></div>
         <div className="col-lg-4"><div className="dashboard-card report-breakdown-card"><h3>Payment breakdown</h3><dl className="reconciliation-list">
           <div><dt>Cash</dt><dd>{currency(dailyReport.paymentBreakdown.cash)}</dd></div>
           <div><dt>Delivered COD</dt><dd>{currency(dailyReport.paymentBreakdown.cod)}</dd></div>
@@ -1517,6 +1656,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
           <div><dt>Pending unpaid</dt><dd>{currency(dailyReport.paymentBreakdown.pending)}</dd></div>
         </dl></div></div>
         <div className="col-lg-8"><div className="dashboard-card"><h3>Top selling items</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Item</th><th>Qty sold</th><th>Sales</th></tr></thead><tbody>{dailyReport.topItems.length === 0 && <tr><td colSpan="3" className="text-center text-secondary py-4">No paid sales for this day.</td></tr>}{dailyReport.topItems.map((item) => <tr key={item.name}><td>{item.name}</td><td>{item.qty}</td><td>{currency(item.sales)}</td></tr>)}</tbody></table></div></div></div>
+        <div className="col-12"><div className="dashboard-card"><h3>COD remittance</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Rider</th><th>Total</th><th>Status</th><th /></tr></thead><tbody>{dailyReport.unremittedCodOrders.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No COD collections waiting for owner handoff.</td></tr>}{dailyReport.unremittedCodOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{order.riderName || order.riderId || "-"}</td><td>{currency(order.total)}</td><td><span className="status status-arrived">Collected</span></td><td><button className="btn btn-sm btn-danger" onClick={() => markCodRemitted(order)}>Mark remitted</button></td></tr>)}</tbody></table></div></div></div>
         <div className="col-12"><div className="dashboard-card"><h3>Daily order ledger</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Status</th><th>Sales counted</th><th>Total</th></tr></thead><tbody>{dailyReport.dailyOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders for this day.</td></tr>}{dailyReport.dailyOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{orderItemText(order)}</span></td><td>{orderPaymentLabel(order)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{isRevenueOrder(order) ? "Yes" : "No"}</td><td>{currency(order.total)}</td></tr>)}</tbody></table></div></div></div>
         <div className="col-12"><ShiftLogsModule orders={orders} logs={dailyReport.closedShifts} user={user} notify={notify} readOnly /></div>
       </div>
@@ -1552,6 +1692,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
 
 function OrderManagement({ orders, canAdvance, notify }) {
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
+  const cancellableStatuses = ["pending-payment", "received", "preparing"];
   const advance = async (order) => {
     if (!flow.includes(order.status)) {
       notify("This order is waiting for payment confirmation.");
@@ -1562,6 +1703,12 @@ function OrderManagement({ orders, canAdvance, notify }) {
     api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
   };
+  const cancelOrder = async (order) => {
+    const reason = window.prompt(`Why cancel ${order.id}?`);
+    if (!reason?.trim()) return;
+    await updateOrder(order.id, { cancel: true, cancelReason: reason.trim() });
+    notify(`${order.id} cancelled and stock restored.`);
+  };
   // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
   return (
     <div className="dashboard-card">
@@ -1569,7 +1716,7 @@ function OrderManagement({ orders, canAdvance, notify }) {
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ") || "—"}</span>{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}</td><td>{order.paymentMethod}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}</td></tr>)}</tbody>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div>}</td></tr>)}</tbody>
         </table>
       </div>
     </div>
@@ -1606,6 +1753,7 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
       customerName: "Walk-in Customer",
       paymentMethod: "cash",
       total: posTotal,
+      deliveryType: "walk-in",
       address: "Counter",
       phone: "",
       items: posCart
@@ -1641,7 +1789,7 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
   if (section === "staff-chat") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Live communication</p><h2>Chat Support</h2></div></div><SupportChat messages={messages} user={user} notify={notify} /></main>;
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
-  const activeOrders = orders.filter((order) => order.status !== "delivered");
+  const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
   const todayRange = reportDateRange(localDateInputValue());
   const todaySales = orders.filter((order) => inRange(order.createdAt, todayRange) && isRevenueOrder(order)).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const lowStock = inventory.filter((item) => item.stock <= item.reorderPoint);
@@ -1664,7 +1812,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
   const assignedOrders = orders.filter((order) => order.riderId === user.uid);
   const availableOrders = orders.filter((order) => order.status === "ready" && !order.riderId);
   const [selectedId, setSelectedId] = useState("");
-  const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => order.status !== "delivered") || assignedOrders[0];
+  const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => !["delivered", "cancelled"].includes(order.status)) || assignedOrders[0];
   const [online, setOnline] = useState(false);
   const [location, setLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -1727,15 +1875,23 @@ function RiderWorkspace({ section, user, orders, notify }) {
   };
 
   const firstName = (user.name || "Rider").split(" ")[0];
-  const activeDeliveries = assignedOrders.filter((order) => order.status !== "delivered");
+  const activeDeliveries = assignedOrders.filter((order) => !["delivered", "cancelled"].includes(order.status));
   const completedDeliveries = assignedOrders.filter((order) => order.status === "delivered");
   const codOrders = assignedOrders.filter((order) => order.paymentMethod === "cod");
   const collectedCod = codOrders.filter((order) => order.status === "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const outstandingCod = codOrders.filter((order) => order.status !== "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const assignedValue = assignedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const remittedCod = codOrders.filter((order) => order.codRemittedAt).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashToCollect = codOrders.filter((order) => order.status !== "delivered" && order.status !== "cancelled").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashToRemit = codOrders.filter(isUnremittedCod).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
   const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
   const addressLabel = (value) => value || "Counter pickup";
+  const reportDeliveryIssue = async () => {
+    if (!active) return;
+    const reason = window.prompt(`What happened with ${active.id}?`);
+    if (!reason?.trim()) return;
+    await updateOrder(active.id, { deliveryIssue: reason.trim() });
+    notify("Delivery issue sent to owner and staff.");
+  };
 
   const googleMapsUrl = active
     ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(active.address)}&travelmode=driving`
@@ -1755,20 +1911,20 @@ function RiderWorkspace({ section, user, orders, notify }) {
           </div>
           <div className="rider-earnings">
             <small>Cash to remit</small>
-            <strong>{currency(outstandingCod)}</strong>
+            <strong>{currency(cashToRemit)}</strong>
             <span>{currency(collectedCod)} collected from completed COD orders</span>
           </div>
           <div className="rider-hero-metrics">
             <div><small>COD orders</small><strong>{codOrders.length}</strong></div>
             <div><small>Collected</small><strong>{currency(collectedCod)}</strong></div>
-            <div><small>Assigned value</small><strong>{currency(assignedValue)}</strong></div>
+            <div><small>Remitted</small><strong>{currency(remittedCod)}</strong></div>
           </div>
         </section>
 
         <section className="rider-ledger-list" aria-label="COD order ledger">
           <div className="rider-section-heading">
             <div><p className="eyebrow text-danger">Cash delivery list</p><h2>Payment handoff</h2></div>
-            <span>{codOrders.filter((order) => order.status !== "delivered").length} open</span>
+            <span>{codOrders.filter(isUnremittedCod).length} to remit</span>
           </div>
           {codOrders.length === 0 && <div className="empty-state compact">No COD orders assigned.</div>}
           {codOrders.map((order) => (
@@ -1807,7 +1963,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
         </div>
         <div className="rider-earnings">
           <small>Cash to collect</small>
-          <strong>{currency(outstandingCod)}</strong>
+          <strong>{currency(cashToCollect)}</strong>
           <span>{activeDeliveries.length} active deliveries today</span>
         </div>
         <div className="rider-hero-metrics">
@@ -1888,6 +2044,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
                 <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>
                 <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
                 {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}
+                <button className="rider-action" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={reportDeliveryIssue}><Clock size={17} aria-hidden="true" /> Issue</button>
                 <button className="rider-action warning" disabled={active.status !== "out-for-delivery"} onClick={markArrived}><MapPin size={17} aria-hidden="true" /> Arrived</button>
                 <button className="rider-action success" disabled={active.status !== "arrived"} onClick={() => setCameraOpen(true)}><Camera size={17} aria-hidden="true" /> Proof</button>
               </div>

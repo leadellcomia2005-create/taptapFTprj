@@ -73,6 +73,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ delta, reason }),
     }),
+  updateMenuItem: (itemId, values) =>
+    request(`/menu/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(values),
+    }),
   updateRiderLocation: (orderId, location) =>
     request("/riders/location", {
       method: "POST",

@@ -1,5 +1,6 @@
 export const roles = ["owner", "staff", "rider", "customer"];
 export const orderStatusFlow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
+export const cancellableOrderStatuses = ["pending-payment", "received", "preparing"];
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -95,8 +96,34 @@ export function authorizeOrderUpdate(user, order, input = {}) {
 
   if (["owner", "staff"].includes(user.role)) {
     const changes = {};
+    if (input.cancel === true || input.status === "cancelled") {
+      if (!cancellableOrderStatuses.includes(order.status)) {
+        throw new HttpError(409, "Only pending or kitchen orders can be cancelled.");
+      }
+      const reason = typeof input.cancelReason === "string" ? input.cancelReason.trim().slice(0, 160) : "";
+      if (!reason) throw new HttpError(400, "A cancellation reason is required.");
+      return {
+        status: "cancelled",
+        cancelReason: reason,
+        cancelledAt: now,
+        cancelledBy: user.uid,
+        cancelledByRole: user.role,
+        updatedAt: now
+      };
+    }
+    if (input.codRemitted === true) {
+      if (order.paymentMethod !== "cod") throw new HttpError(409, "Only COD orders can be remitted.");
+      if (order.status !== "delivered") throw new HttpError(409, "COD can be remitted only after delivery.");
+      if (order.codRemittedAt) throw new HttpError(409, "COD was already remitted.");
+      changes.codRemittedAt = now;
+      changes.codRemittedBy = user.uid;
+      changes.paymentStatus = "paid";
+      changes.paymentConfirmedAt = now;
+      changes.updatedAt = now;
+    }
     if (input.status !== undefined) {
       const currentIndex = orderStatusFlow.indexOf(order.status);
+      if (currentIndex < 0) throw new HttpError(409, "This order no longer accepts status updates.");
       const nextStatus = orderStatusFlow[currentIndex + 1];
       if (!nextStatus || input.status !== nextStatus) {
         throw new HttpError(409, `The next valid status is ${nextStatus || "none"}.`);
@@ -106,6 +133,7 @@ export function authorizeOrderUpdate(user, order, input = {}) {
     }
     if (input.riderId !== undefined) {
       if (input.riderId !== null && !validRecordId(input.riderId)) throw new HttpError(400, "Invalid rider ID.");
+      if (input.riderId !== null && order.status !== "ready") throw new HttpError(409, "Riders can be assigned only when an order is ready.");
       changes.riderId = input.riderId;
       changes.assignedAt = now;
     }
@@ -114,6 +142,21 @@ export function authorizeOrderUpdate(user, order, input = {}) {
   }
 
   if (user.role !== "rider") throw new HttpError(403, "Order updates require an operations role.");
+
+  if (input.deliveryIssue) {
+    const reason = typeof input.deliveryIssue === "string" ? input.deliveryIssue.trim().slice(0, 160) : "";
+    if (!reason) throw new HttpError(400, "A delivery issue reason is required.");
+    if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
+    if (!["out-for-delivery", "arrived"].includes(order.status)) {
+      throw new HttpError(409, "Delivery issues can be reported only while delivering.");
+    }
+    return {
+      deliveryIssue: reason,
+      deliveryIssueAt: now,
+      deliveryIssueBy: user.uid,
+      updatedAt: now
+    };
+  }
 
   if (!order.riderId && order.status === "ready" && input.riderId === user.uid && input.status === undefined) {
     return { riderId: user.uid, assignedAt: now };
@@ -141,6 +184,11 @@ export function authorizeOrderUpdate(user, order, input = {}) {
     if (secureUrl) changes.proofOfDeliveryUrl = input.proofOfDeliveryUrl;
     if (storedProof) changes.proofOfDeliveryRef = input.proofOfDeliveryRef;
     changes.deliveredAt = now;
+    if (order.paymentMethod === "cod") {
+      changes.codCollectedAt = now;
+      changes.codCollectedBy = user.uid;
+      changes.paymentStatus = "cod-collected";
+    }
   }
   return changes;
 }

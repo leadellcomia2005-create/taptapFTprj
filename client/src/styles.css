@@ -178,7 +178,7 @@ button { font: inherit; }
 .cart-panel-heading > span { padding: 7px 11px; color: var(--green); background: #e5f5ea; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; }
 .cart-summary-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 2px; }
 .empty-cart-note { padding: 28px 14px; color: var(--muted); background: white; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font-size: 12px; }
-.cart-summary-item { display: grid; grid-template-columns: 34px minmax(0,1fr) auto 46px; align-items: center; gap: 11px; min-height: 58px; padding: 10px; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 8px; animation: cart-item-in .22s ease both; transition: transform .18s ease, background .18s ease, border-color .18s ease; }
+.cart-summary-item { display: grid; grid-template-columns: 34px minmax(0,1fr) auto auto 46px; align-items: center; gap: 11px; min-height: 58px; padding: 10px; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 8px; animation: cart-item-in .22s ease both; transition: transform .18s ease, background .18s ease, border-color .18s ease; }
 .cart-summary-item:hover { background: white; border-color: rgba(227,61,46,.18); transform: translateY(-1px); }
 .cart-summary-item > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: linear-gradient(135deg,var(--red),#ef6b38); border-radius: 9px; font-size: 13px; font-weight: 900; }
 .cart-summary-item strong,.cart-summary-item small { display: block; }
@@ -227,6 +227,10 @@ button { font: inherit; }
 }
 
 .modal.d-block { display: block; background: rgba(20,17,13,.6); backdrop-filter: blur(4px); }
+.checkout-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.checkout-mode-grid button { min-height: 62px; padding: 12px; text-align: left; border: 1px solid var(--line); background: white; border-radius: 12px; }
+.checkout-mode-grid button.active { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); background: #fff9f8; }
+.checkout-mode-grid strong,.checkout-mode-grid small { display: block; }.checkout-mode-grid small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .payment-option { width: 100%; padding: 15px; text-align: left; border: 1px solid var(--line); background: white; border-radius: 12px; }
 .payment-option.active { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); background: #fff9f8; }
 .payment-option strong,.payment-option small { display: block; }.payment-option small { margin-top: 4px; color: var(--muted); font-size: 9px; }
@@ -269,7 +273,7 @@ button { font: inherit; }
 .ai-insight { color: white; background: #25221e; }
 .ai-insight p:not(.eyebrow) { min-height: 190px; color: rgba(255,255,255,.68); font-size: 11px; line-height: 1.75; }
 .status { display: inline-flex; padding: 5px 8px; border-radius: 20px; font-size: 8px; font-weight: 800; white-space: nowrap; }
-.status-pending-payment { color: #916019; background: #fff1d6; }.status-received { color: #23659e; background: #e8f2fb; }.status-preparing { color: #916019; background: #fff1d6; }.status-ready,.status-delivered { color: var(--green); background: #e6f4eb; }.status-out-for-delivery { color: var(--red); background: #f9e5e1; }.status-arrived { color: #75530e; background: #fff0bd; }
+.status-pending-payment { color: #916019; background: #fff1d6; }.status-received { color: #23659e; background: #e8f2fb; }.status-preparing { color: #916019; background: #fff1d6; }.status-ready,.status-delivered { color: var(--green); background: #e6f4eb; }.status-out-for-delivery { color: var(--red); background: #f9e5e1; }.status-arrived { color: #75530e; background: #fff0bd; }.status-cancelled { color: #6d6258; background: #eee8df; }
 .pos-menu-tools { padding: 10px; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(38,29,19,.05); }
 .pos-category-rail { display: grid; grid-template-columns: repeat(7,minmax(94px,1fr)); gap: 8px; }
 .pos-category-rail button { min-width: 0; min-height: 56px; display: grid; align-content: center; gap: 4px; padding: 10px 12px; color: var(--ink); text-align: left; border: 1px solid transparent; background: var(--paper-soft); border-radius: 8px; }
@@ -344,6 +348,10 @@ button { font: inherit; }
 .inventory-table td > strong,.inventory-table td > small { display: block; }
 .inventory-table td > small { margin-top: 3px; color: var(--muted); font-size: 8px; }
 .inventory-input { min-width: 75px; }
+.menu-admin-table { min-width: 980px !important; }
+.menu-admin-check { display: inline-flex !important; align-items: center; gap: 7px; margin: 0; color: var(--ink) !important; font-size: 10px !important; font-weight: 800 !important; letter-spacing: 0 !important; text-transform: none !important; }
+.menu-admin-check input { width: 17px; height: 17px; accent-color: var(--red); }
+.order-action-stack { display: flex; flex-wrap: wrap; gap: 6px; }
 .stock-badge,.role-badge,.shift-chip { display: inline-flex; padding: 5px 9px; border-radius: 20px; font-size: 8px; font-weight: 800; text-transform: capitalize; }
 .stock-badge.healthy { color: var(--green); background: #e6f4eb; }
 .stock-badge.low { color: var(--red); background: #f9e5e1; }
@@ -604,7 +612,9 @@ button { font: inherit; }
   /* erick: compact cart layout para kasya ang price at trash icon sa phone. */
   .store-cart-panel { padding: 16px; }
   .cart-panel-heading h2 { font-size: 34px; }
-  .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) auto 46px; gap: 9px; padding: 10px 8px; }
+  .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) 86px 46px; gap: 9px; padding: 10px 8px; }
+  .cart-summary-item b { grid-column: 2 / 4; justify-self: start; }
+  .cart-remove-button { grid-column: 4; grid-row: 1 / span 2; }
   .cart-summary-item strong { font-size: 13px; }
   .cart-summary-item small { font-size: 10px; }
   .floating-checkout { left: 12px; right: 12px; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); display: block; width: calc(100% - 24px); }
@@ -625,12 +635,14 @@ button { font: inherit; }
 
 @media (max-width: 430px) {
   /* erick: sa extra-small phones, itinatago ang extra text para walang overlap. */
+  .checkout-mode-grid { grid-template-columns: 1fr; }
   .customer-header .brand-lockup div { display: none; }
   .customer-header .user-chip { display: none; }
   .customer-header .brand-mark { width: 44px; height: 44px; flex-basis: 44px; }
   .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) 46px; }
+  .cart-quantity { grid-column: 2; justify-self: start; }
   .cart-summary-item b { grid-column: 2; justify-self: start; }
-  .cart-remove-button { grid-column: 3; grid-row: 1 / span 2; }
+  .cart-remove-button { grid-column: 3; grid-row: 1 / span 3; }
 }
 
 @media (max-width: 900px) {

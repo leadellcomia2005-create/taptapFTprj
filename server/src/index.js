@@ -16,6 +16,7 @@ import {
   saveDeliveryProofRecord,
   saveRiderLocationRecord,
   saveShiftLogRecord,
+  updateMenuItemRecord,
   updateOrderRecord
 } from "./business.js";
 import {
@@ -268,6 +269,12 @@ app.get("/api/inventory", authenticate, requireRoles("owner", "staff"), asyncRou
 app.patch("/api/inventory/:itemId", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
   const result = await adjustInventoryRecord(db(), req.user, req.params.itemId, req.body);
   io.to("role:owner").to("role:staff").emit("inventory:updated", result);
+  res.json(result);
+}));
+
+app.patch("/api/menu/:itemId", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  const result = await updateMenuItemRecord(db(), req.user, req.params.itemId, req.body);
+  io.to("role:owner").to("role:staff").emit("menu:updated", result);
   res.json(result);
 }));
 

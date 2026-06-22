@@ -18,6 +18,7 @@ import {
   saveDeliveryProofRecord,
   saveRiderLocationRecord,
   saveShiftLogRecord,
+  updateMenuItemRecord,
   updateOrderRecord,
   validRecordId
 } from "./operations.js";
@@ -451,6 +452,10 @@ app.get(route("/inventory"), authenticate, requireRoles("owner", "staff"), async
 
 app.patch(route("/inventory/:itemId"), authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
   res.json(await adjustInventoryRecord(database(), req.user, req.params.itemId, req.body));
+}));
+
+app.patch(route("/menu/:itemId"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  res.json(await updateMenuItemRecord(database(), req.user, req.params.itemId, req.body));
 }));
 
 app.post(route("/riders/location"), authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {

@@ -50,12 +50,14 @@ export async function createOrderRecord(db, user, input) {
   const items = requestedItems.map(({ id, qty }) => {
     const product = menu[id];
     if (!product) throw new HttpError(400, `Product ${id} is unavailable.`);
+    if (product.unavailable) throw new HttpError(400, `${product.name} is currently unavailable.`);
     if (user.role === "customer" && product.walkInOnly) throw new HttpError(403, `${product.name} is available for walk-in orders only.`);
     return { id, name: product.name, price: Number(product.price), qty };
   });
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
   const isWalkIn = user.role !== "customer";
-  const fee = isWalkIn ? 0 : deliveryFee;
+  const deliveryType = isWalkIn ? "walk-in" : input.deliveryType === "pickup" ? "pickup" : "delivery";
+  const fee = deliveryType === "delivery" ? deliveryFee : 0;
   const total = subtotal + fee;
   const customerId = isWalkIn ? "walk-in" : user.uid;
   const customerName = isWalkIn ? "Walk-in Customer" : profile.name || user.name || user.email;
@@ -71,7 +73,9 @@ export async function createOrderRecord(db, user, input) {
     customerName,
     customerEmail: isWalkIn ? "" : user.email || profile.email || "",
     phone: cleanText(input.phone, 40),
-    address: isWalkIn ? "Counter" : cleanText(input.address, 300),
+    address: isWalkIn ? "Counter" : deliveryType === "pickup" ? "Store pickup" : cleanText(input.address, 300),
+    deliveryType,
+    notes: cleanText(input.notes, 300),
     paymentMethod: input.paymentMethod,
     subtotal,
     deliveryFee: fee,
@@ -85,7 +89,8 @@ export async function createOrderRecord(db, user, input) {
     paymentConfirmedAt: onlinePayment ? null : createdAt,
     source: isWalkIn ? "walk-in-pos" : "online"
   };
-  if (!isWalkIn && (!order.address || !order.phone)) throw new HttpError(400, "A phone number and delivery address are required.");
+  if (!isWalkIn && !order.phone) throw new HttpError(400, "A phone number is required.");
+  if (deliveryType === "delivery" && !order.address) throw new HttpError(400, "A delivery address is required.");
 
   let transactionError;
   const transaction = await transactionWithInitial(inventoryRef, inventorySnapshot.val(), (inventory) => {
@@ -227,8 +232,104 @@ export async function updateOrderRecord(db, user, orderId, input) {
       orderId
     }));
   }
+  if (changes.deliveryIssue) {
+    const ownerIds = await userIdsForRoles(db, ["owner", "staff"]);
+    Object.assign(updates, notificationUpdates(db, ownerIds, {
+      title: "Delivery issue reported",
+      message: `${orderId}: ${changes.deliveryIssue}`,
+      type: "delivery",
+      orderId
+    }));
+  }
+  if (changes.status === "cancelled" && previous.status !== "cancelled") {
+    const inventoryRef = db.ref("inventory");
+    const inventorySnapshot = await inventoryRef.once("value");
+    const restoredInventory = {};
+    for (const item of previous.items || []) {
+      const current = inventorySnapshot.child(`${item.id}/stock`).val();
+      const nextStock = Number(current || 0) + Number(item.qty || 0);
+      restoredInventory[`inventory/${item.id}/stock`] = nextStock;
+      restoredInventory[`public/menu/${item.id}/stock`] = nextStock;
+    }
+    Object.assign(updates, restoredInventory);
+    if (order.customerId !== "walk-in") {
+      Object.assign(updates, notificationUpdates(db, [order.customerId], {
+        title: "Order cancelled",
+        message: `${orderId} was cancelled: ${changes.cancelReason}.`,
+        type: "order",
+        orderId
+      }));
+    }
+  }
+  if (changes.codRemittedAt) {
+    const ownerIds = await userIdsForRoles(db, ["owner"]);
+    Object.assign(updates, notificationUpdates(db, ownerIds, {
+      title: "COD remitted",
+      message: `${orderId} COD cash was marked as remitted.`,
+      type: "sale",
+      orderId
+    }));
+  }
   await db.ref().update(updates);
   return { order, changes };
+}
+
+export async function updateMenuItemRecord(db, user, itemId, input = {}) {
+  if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
+  if (!validRecordId(itemId)) throw new HttpError(400, "Invalid menu item ID.");
+  const [menuSnapshot, inventorySnapshot] = await Promise.all([
+    db.ref(`public/menu/${itemId}`).once("value"),
+    db.ref(`inventory/${itemId}`).once("value")
+  ]);
+  const currentMenu = menuSnapshot.val();
+  const currentInventory = inventorySnapshot.val() || {};
+  if (!currentMenu) throw new HttpError(404, "Menu item not found.");
+  const price = input.price !== undefined ? Number(input.price) : Number(currentMenu.price || 0);
+  const reorderPoint = input.reorderPoint !== undefined ? Number(input.reorderPoint) : Number(currentInventory.reorderPoint ?? currentMenu.reorderPoint ?? 10);
+  const stock = input.stock !== undefined ? Number(input.stock) : Number(currentInventory.stock ?? currentMenu.stock ?? 0);
+  if (!Number.isFinite(price) || price < 0 || price > 100000) throw new HttpError(400, "Enter a valid price.");
+  if (!Number.isInteger(reorderPoint) || reorderPoint < 0 || reorderPoint > 10000) throw new HttpError(400, "Enter a valid reorder point.");
+  if (!Number.isInteger(stock) || stock < 0 || stock > 100000) throw new HttpError(400, "Enter a valid stock count.");
+  const name = cleanText(input.name ?? currentMenu.name, 120);
+  const category = cleanText(input.category ?? currentMenu.category, 80);
+  const description = cleanText(input.description ?? currentMenu.description, 220);
+  if (!name || !category) throw new HttpError(400, "Menu name and category are required.");
+  const item = {
+    ...currentMenu,
+    name,
+    category,
+    description,
+    price,
+    stock,
+    reorderPoint,
+    walkInOnly: input.walkInOnly !== undefined ? Boolean(input.walkInOnly) : Boolean(currentMenu.walkInOnly),
+    unavailable: input.unavailable !== undefined ? Boolean(input.unavailable) : Boolean(currentMenu.unavailable),
+    updatedAt: Date.now(),
+    updatedBy: user.uid
+  };
+  await db.ref().update({
+    [`public/menu/${itemId}`]: item,
+    [`inventory/${itemId}`]: {
+      ...currentInventory,
+      name,
+      category,
+      price,
+      stock,
+      reorderPoint,
+      unavailable: item.unavailable,
+      updatedAt: item.updatedAt
+    },
+    [`auditLogs/${db.ref("auditLogs").push().key}`]: {
+      action: "menu_item_updated",
+      itemId,
+      itemName: name,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      createdAt: Date.now()
+    }
+  });
+  return { item: { id: itemId, ...item } };
 }
 
 export async function adjustInventoryRecord(db, user, itemId, input) {
@@ -318,10 +419,10 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
 
 export async function saveShiftLogRecord(db, user, input) {
   if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
-  const numericFields = ["startedAt", "endedAt", "openingCash", "cashSales", "expectedCash", "actualCash", "variance", "orderCount"];
+  const numericFields = ["startedAt", "endedAt", "openingCash", "cashSales", "expectedCash", "actualCash", "variance", "orderCount", "cashIn", "cashOut", "expenses"];
   const entry = {};
   for (const field of numericFields) {
-    const value = Number(input[field]);
+    const value = Number(input[field] || 0);
     if (!Number.isFinite(value)) throw new HttpError(400, `Invalid ${field}.`);
     entry[field] = value;
   }
@@ -333,6 +434,7 @@ export async function saveShiftLogRecord(db, user, input) {
   await db.ref().update({
     [`shiftLogs/${shiftId}`]: {
       ...entry,
+      notes: cleanText(input.notes, 300),
       staffId: user.uid,
       staffName: user.name || user.email,
       createdAt

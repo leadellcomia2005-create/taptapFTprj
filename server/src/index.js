@@ -11,13 +11,15 @@ import helmet from "helmet";
 import { Server as SocketServer } from "socket.io";
 import {
   adjustInventoryRecord,
+  createMenuItemRecord,
   createOrderRecord,
   listOrdersForUser,
   saveDeliveryProofRecord,
   saveRiderLocationRecord,
   saveShiftLogRecord,
   updateMenuItemRecord,
-  updateOrderRecord
+  updateOrderRecord,
+  updateReviewRecord
 } from "./business.js";
 import {
   bearerToken,
@@ -276,6 +278,16 @@ app.patch("/api/menu/:itemId", authenticate, requireRoles("owner"), asyncRoute(a
   const result = await updateMenuItemRecord(db(), req.user, req.params.itemId, req.body);
   io.to("role:owner").to("role:staff").emit("menu:updated", result);
   res.json(result);
+}));
+
+app.post("/api/menu", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  const result = await createMenuItemRecord(db(), req.user, req.body);
+  io.to("role:owner").to("role:staff").emit("menu:updated", result);
+  res.status(201).json(result);
+}));
+
+app.patch("/api/reviews/:reviewId", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.json(await updateReviewRecord(db(), req.user, req.params.reviewId, req.body));
 }));
 
 app.post("/api/riders/location", authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {

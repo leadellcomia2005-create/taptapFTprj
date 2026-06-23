@@ -9,11 +9,13 @@ import { api } from "./services/api";
 import {
   adjustInventory,
   completeTwoFactorSession,
+  createMenuItem,
   createOrder,
   firebaseEnabled,
   friendlyAuthError,
   login,
   logout,
+  moderateReview,
   observeAuth,
   registerCustomer,
   refreshEmailVerification,
@@ -320,6 +322,72 @@ const printOwnerDailyReport = (report) => {
   return true;
 };
 
+const printableReceiptHtml = (order) => {
+  const receiptNo = order.receiptNo || order.id;
+  const rows = (order.items || []).map((item) => `
+    <tr>
+      <td>${htmlEscape(`${item.qty} x ${item.name}`)}</td>
+      <td>${htmlEscape(reportMoney(item.price))}</td>
+      <td>${htmlEscape(reportMoney(Number(item.qty || 0) * Number(item.price || 0)))}</td>
+    </tr>`).join("");
+  return `<!doctype html>
+<html>
+<head>
+  <title>TapTap Receipt - ${htmlEscape(receiptNo)}</title>
+  <style>
+    body { width: 320px; margin: 0 auto; padding: 18px; color: #201914; font-family: Arial, sans-serif; }
+    h1 { margin: 0; font-size: 21px; text-align: center; }
+    p { margin: 4px 0; color: #555; font-size: 11px; }
+    .center { text-align: center; }
+    .meta { margin: 14px 0; border-top: 1px dashed #999; border-bottom: 1px dashed #999; padding: 10px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { padding: 6px 0; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+    th:nth-child(2), th:nth-child(3), td:nth-child(2), td:nth-child(3) { text-align: right; }
+    .totals { margin-top: 12px; }
+    .totals div { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+    .totals strong { font-size: 15px; }
+    @media print { body { width: auto; } }
+  </style>
+</head>
+<body>
+  <h1>TapTap Foodtrip</h1>
+  <p class="center">Digital receipt</p>
+  <div class="meta">
+    <p>Receipt: ${htmlEscape(receiptNo)}</p>
+    <p>Order: ${htmlEscape(order.id)}</p>
+    <p>Date: ${htmlEscape(new Date(order.createdAt || Date.now()).toLocaleString("en-PH"))}</p>
+    <p>Customer: ${htmlEscape(order.customerName || "Walk-in Customer")}</p>
+    <p>Cashier: ${htmlEscape(order.cashierName || "-")}</p>
+    <p>Type: ${htmlEscape(order.diningOption || order.deliveryType || "-")}</p>
+  </div>
+  <table>
+    <thead><tr><th>Item</th><th>Each</th><th>Total</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="3">No items</td></tr>`}</tbody>
+  </table>
+  <div class="totals">
+    <div><span>Subtotal</span><span>${htmlEscape(reportMoney(order.subtotal ?? (Number(order.total || 0) + Number(order.discount || 0) - Number(order.deliveryFee || 0))))}</span></div>
+    <div><span>Discount</span><span>${htmlEscape(reportMoney(order.discount || 0))}</span></div>
+    <div><span>Delivery</span><span>${htmlEscape(reportMoney(order.deliveryFee || 0))}</span></div>
+    <div><strong>Total</strong><strong>${htmlEscape(reportMoney(order.total))}</strong></div>
+    ${order.cashReceived != null ? `<div><span>Cash</span><span>${htmlEscape(reportMoney(order.cashReceived))}</span></div>` : ""}
+    ${order.cashReceived != null ? `<div><span>Change</span><span>${htmlEscape(reportMoney(order.changeDue || 0))}</span></div>` : ""}
+  </div>
+  <p class="center" style="margin-top:18px">Thank you for your order.</p>
+</body>
+</html>`;
+};
+
+const printReceipt = (order) => {
+  const printWindow = window.open("", "_blank", "width=420,height=720");
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(printableReceiptHtml(order));
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => printWindow.print(), 250);
+  return true;
+};
+
 const relativeTime = (timestamp) => {
   const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
   if (seconds < 60) return "just now";
@@ -344,6 +412,7 @@ const roleNavigation = {
     ["owner-sales", "Sales & Orders"],
     ["owner-inventory", "Inventory"],
     ["owner-reports", "Reports"],
+    ["owner-reviews", "Reviews"],
     ["owner-users", "Users & Roles"],
     ["owner-audit", "Audit Logs"],
     ["owner-settings", "System Settings"]
@@ -351,10 +420,12 @@ const roleNavigation = {
   staff: [
     ["staff-overview", "Dashboard"],
     ["staff-pos", "Walk-in POS"],
+    ["staff-kitchen", "Kitchen"],
     ["staff-orders", "Order Queue"],
     ["staff-inventory", "Inventory"],
     ["staff-shifts", "Shift Logs"],
     ["staff-chat", "Chat Support"],
+    ["staff-reviews", "Reviews"],
     ["staff-settings", "Settings"]
   ],
   rider: [
@@ -1229,7 +1300,7 @@ function ReceiptsView({ orders }) {
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
-      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
+      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}>Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
     </main>
   );
 }
@@ -1261,6 +1332,60 @@ function ReviewsView({ user, orders, reviews, notify }) {
   );
 }
 
+function ReviewModerationModule({ reviews, user, notify }) {
+  const [drafts, setDrafts] = useState({});
+  const updateDraft = (review, field, value) => setDrafts((current) => ({
+    ...current,
+    [review.id]: { reply: review.reply || "", moderationStatus: review.moderationStatus || "pending", ...(current[review.id] || {}), [field]: value }
+  }));
+  const save = async (review, status = null) => {
+    const draft = { reply: review.reply || "", moderationStatus: review.moderationStatus || "pending", ...(drafts[review.id] || {}) };
+    const nextStatus = status || draft.moderationStatus;
+    await moderateReview(review, { moderationStatus: nextStatus, reply: draft.reply }, user);
+    notify(`Review for ${review.orderId || review.id} marked ${nextStatus}.`);
+  };
+  const groups = {
+    pending: reviews.filter((review) => (review.moderationStatus || "pending") === "pending"),
+    approved: reviews.filter((review) => review.moderationStatus === "approved"),
+    hidden: reviews.filter((review) => review.moderationStatus === "hidden")
+  };
+  return (
+    <div className="row g-3">
+      <div className="col-md-4"><div className="metric-card"><small>Pending reviews</small><strong>{groups.pending.length}</strong><span>Needs decision</span></div></div>
+      <div className="col-md-4"><div className="metric-card"><small>Approved</small><strong>{groups.approved.length}</strong><span>Visible feedback</span></div></div>
+      <div className="col-md-4"><div className="metric-card"><small>Hidden</small><strong>{groups.hidden.length}</strong><span>Kept internal</span></div></div>
+      <div className="col-12"><div className="dashboard-card"><h3>Customer review moderation</h3>
+        <div className="review-moderation-list">
+          {reviews.length === 0 && <div className="empty-chat">No customer reviews yet.</div>}
+          {reviews.map((review) => {
+            const draft = { reply: review.reply || "", moderationStatus: review.moderationStatus || "pending", ...(drafts[review.id] || {}) };
+            return (
+              <article className="review-moderation-card" key={review.id}>
+                <div>
+                  <strong>{review.customerName || "Customer"} <span>{"★".repeat(Number(review.rating || 0))}{"☆".repeat(5 - Number(review.rating || 0))}</span></strong>
+                  <small>{review.orderId} · {(review.items || []).join(", ")}</small>
+                  <p>{review.comment || "No written feedback."}</p>
+                </div>
+                <label className="form-label">Staff reply<textarea className="form-control" rows="2" value={draft.reply} onChange={(event) => updateDraft(review, "reply", event.target.value)} /></label>
+                <div className="review-actions">
+                  <select className="form-select form-select-sm" value={draft.moderationStatus} onChange={(event) => updateDraft(review, "moderationStatus", event.target.value)}>
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="hidden">Hidden</option>
+                  </select>
+                  <button className="btn btn-sm btn-success" onClick={() => save(review, "approved")}>Approve</button>
+                  <button className="btn btn-sm btn-outline-danger" onClick={() => save(review, "hidden")}>Hide</button>
+                  <button className="btn btn-sm btn-dark" onClick={() => save(review)}>Save reply</button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div></div>
+    </div>
+  );
+}
+
 function InventoryModule({ inventory, user, notify }) {
   const [drafts, setDrafts] = useState({});
   const updateDraft = (id, field, value) => setDrafts((current) => ({
@@ -1276,7 +1401,7 @@ function InventoryModule({ inventory, user, notify }) {
   return (
     <div className="dashboard-card">
       <div className="module-heading">
-        <div><p className="eyebrow text-danger">Recipe-based stock control</p><h3>Inventory levels and adjustments</h3></div>
+        <div><p className="eyebrow text-danger">Menu item stock control</p><h3>Inventory levels and adjustments</h3></div>
         <span className="module-note">Every adjustment is written to the audit trail.</span>
       </div>
       <div className="table-responsive">
@@ -1304,6 +1429,17 @@ function InventoryModule({ inventory, user, notify }) {
 }
 
 function MenuManagementModule({ inventory, user, notify }) {
+  const blankItem = {
+    name: "",
+    category: "Favorite Meal",
+    description: "Menu item.",
+    price: 0,
+    stock: 0,
+    reorderPoint: 10,
+    unavailable: false,
+    walkInOnly: false,
+    featured: false
+  };
   const draftFor = useCallback((item) => ({
     name: item.name || "",
     category: item.category || "Favorite Meal",
@@ -1315,6 +1451,8 @@ function MenuManagementModule({ inventory, user, notify }) {
     walkInOnly: Boolean(item.walkInOnly)
   }), []);
   const [drafts, setDrafts] = useState({});
+  const [adding, setAdding] = useState(false);
+  const [newItem, setNewItem] = useState(blankItem);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -1345,13 +1483,44 @@ function MenuManagementModule({ inventory, user, notify }) {
     }, user);
     notify(`${draft.name || item.name} menu settings saved.`);
   };
+  const addItem = async (event) => {
+    event.preventDefault();
+    const result = await createMenuItem({
+      ...newItem,
+      name: newItem.name.trim(),
+      price: Number(newItem.price || 0),
+      stock: Number(newItem.stock || 0),
+      reorderPoint: Number(newItem.reorderPoint || 0)
+    }, user);
+    notify(`${result.item.name} added to the menu inventory.`);
+    setNewItem(blankItem);
+    setAdding(false);
+  };
 
   return (
     <div className="dashboard-card">
       <div className="module-heading">
         <div><p className="eyebrow text-danger">Owner menu control</p><h3>Menu prices, categories and visibility</h3></div>
-        <span className="module-note">Changes update the customer menu and staff POS menu.</span>
+        <div className="module-actions"><span className="module-note">Changes update the customer menu and staff POS menu.</span><button className="btn btn-sm btn-danger" type="button" onClick={() => setAdding((value) => !value)}>{adding ? "Close" : "Add menu item"}</button></div>
       </div>
+      {adding && (
+        <form className="menu-add-panel" onSubmit={addItem}>
+          <div className="row g-2">
+            <label className="form-label col-md-3">Name<input className="form-control" required value={newItem.name} onChange={(event) => setNewItem((current) => ({ ...current, name: event.target.value }))} /></label>
+            <label className="form-label col-md-2">Category<select className="form-select" value={newItem.category} onChange={(event) => setNewItem((current) => ({ ...current, category: event.target.value }))}>{menuCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label>
+            <label className="form-label col-md-2">Price<input className="form-control" type="number" min="0" required value={newItem.price} onChange={(event) => setNewItem((current) => ({ ...current, price: event.target.value }))} /></label>
+            <label className="form-label col-md-2">Stock<input className="form-control" type="number" min="0" required value={newItem.stock} onChange={(event) => setNewItem((current) => ({ ...current, stock: event.target.value }))} /></label>
+            <label className="form-label col-md-2">Reorder<input className="form-control" type="number" min="0" required value={newItem.reorderPoint} onChange={(event) => setNewItem((current) => ({ ...current, reorderPoint: event.target.value }))} /></label>
+            <div className="col-md-1 d-grid align-items-end"><button className="btn btn-dark" type="submit">Add</button></div>
+            <label className="form-label col-12">Description<textarea className="form-control" rows="2" value={newItem.description} onChange={(event) => setNewItem((current) => ({ ...current, description: event.target.value }))} /></label>
+            <div className="col-12 d-flex flex-wrap gap-3">
+              <label className="menu-admin-check"><input type="checkbox" checked={!newItem.unavailable} onChange={(event) => setNewItem((current) => ({ ...current, unavailable: !event.target.checked }))} /><span>Show on menu</span></label>
+              <label className="menu-admin-check"><input type="checkbox" checked={newItem.walkInOnly} onChange={(event) => setNewItem((current) => ({ ...current, walkInOnly: event.target.checked }))} /><span>Walk-in only</span></label>
+              <label className="menu-admin-check"><input type="checkbox" checked={newItem.featured} onChange={(event) => setNewItem((current) => ({ ...current, featured: event.target.checked }))} /><span>Featured</span></label>
+            </div>
+          </div>
+        </form>
+      )}
       <div className="table-responsive">
         <table className="table align-middle menu-admin-table">
           <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder</th><th>Visible</th><th>Walk-in only</th><th /></tr></thead>
@@ -1535,7 +1704,7 @@ function SettingsModule({ title, serviceStatus, staff = false, notify }) {
   );
 }
 
-function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, auditLogs, shiftLogs, notify }) {
+function OwnerWorkspace({ section, user, orders, inventory, reviews, serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -1584,7 +1753,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
     try {
       const result = await api.insights(orders, menu);
       setInsight(result.text);
-    } catch (error) {
+    } catch {
       setInsight(`${buildLocalDecisionSupport(orders, menu)} Online insight is not ready yet.`);
     }
   };
@@ -1669,6 +1838,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
     </div></main>
   );
+  if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
   if (section === "owner-audit") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || "-"}</td><td>{entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-")}</td></tr>)}</tbody></table></div></div></main>
   );
@@ -1679,7 +1849,7 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
       <div className="row g-3">
         <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Recipe mapped</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Ready to sell</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Some features need setup</span></div></div>
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><SalesChart values={salesTrend} /></div></div>
         <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button></div></div>
@@ -1690,7 +1860,37 @@ function OwnerWorkspace({ section, user, orders, inventory, serviceStatus, audit
   );
 }
 
+function ReasonModal({ title, label, placeholder, confirmText, onClose, onSubmit }) {
+  const [reason, setReason] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!reason.trim()) return;
+    await onSubmit(reason.trim());
+  };
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+  return (
+    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-dialog modal-dialog-centered">
+        <form className="modal-content reason-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="reason-modal-title">
+          <div className="modal-header"><h5 className="modal-title" id="reason-modal-title">{title}</h5><button className="btn-close" type="button" aria-label="Close" onClick={onClose} /></div>
+          <div className="modal-body">
+            <label className="form-label">{label}<textarea className="form-control" rows="4" autoFocus value={reason} onChange={(event) => setReason(event.target.value)} placeholder={placeholder} /></label>
+          </div>
+          <div className="modal-footer"><button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button><button className="btn btn-danger" disabled={!reason.trim()}>{confirmText}</button></div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function OrderManagement({ orders, canAdvance, notify }) {
+  const [cancelTarget, setCancelTarget] = useState(null);
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const cancellableStatuses = ["pending-payment", "received", "preparing"];
   const advance = async (order) => {
@@ -1703,10 +1903,8 @@ function OrderManagement({ orders, canAdvance, notify }) {
     api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
   };
-  const cancelOrder = async (order) => {
-    const reason = window.prompt(`Why cancel ${order.id}?`);
-    if (!reason?.trim()) return;
-    await updateOrder(order.id, { cancel: true, cancelReason: reason.trim() });
+  const cancelOrder = async (order, reason) => {
+    await updateOrder(order.id, { cancel: true, cancelReason: reason });
     notify(`${order.id} cancelled and stock restored.`);
   };
   // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
@@ -1716,16 +1914,71 @@ function OrderManagement({ orders, canAdvance, notify }) {
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div>}</td></tr>)}</tbody>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}</div>}</td></tr>)}</tbody>
         </table>
       </div>
+      {cancelTarget && <ReasonModal title={`Cancel ${cancelTarget.id}`} label="Cancellation reason" placeholder="Example: Customer changed order, unavailable item, duplicate order..." confirmText="Cancel order" onClose={() => setCancelTarget(null)} onSubmit={async (reason) => { await cancelOrder(cancelTarget, reason); setCancelTarget(null); }} />}
     </div>
   );
 }
 
-function StaffWorkspace({ section, user, orders, inventory: staffInventory, shiftLogs, messages, serviceStatus, notify }) {
+function KitchenQueue({ orders, notify }) {
+  const lanes = [
+    { status: "received", title: "New orders", next: "preparing", action: "Start prep" },
+    { status: "preparing", title: "Preparing", next: "ready", action: "Mark ready" },
+    { status: "ready", title: "Ready", next: null }
+  ];
+  const orderServiceLabel = (order) => {
+    if (order.deliveryType === "delivery") return "Delivery order";
+    if (order.deliveryType === "pickup") return "Customer pickup";
+    if (order.diningOption === "takeout") return "Takeout";
+    if (order.diningOption === "dine-in") return "Dine-in";
+    if (order.deliveryType === "walk-in") return "Walk-in";
+    return "Order";
+  };
+  const readyActionLabel = (order) => {
+    if (order.deliveryType === "delivery") return "Waiting for rider";
+    if (order.deliveryType === "pickup") return "Ready for pickup";
+    if (order.diningOption === "takeout") return "Ready for handoff";
+    if (order.diningOption === "dine-in") return "Ready to serve";
+    return "Ready at counter";
+  };
+  const move = async (order, next) => {
+    if (!next) return;
+    await updateOrder(order.id, { status: next, updatedAt: Date.now() });
+    notify(`${order.id} moved to ${statusLabel(next)}.`);
+  };
+  return (
+    <div className="kitchen-board">
+      {lanes.map((lane) => {
+        const laneOrders = orders.filter((order) => order.status === lane.status);
+        return (
+          <section className="kitchen-lane" key={lane.status}>
+            <header><div><p className="eyebrow text-danger">Kitchen</p><h3>{lane.title}</h3></div><span>{laneOrders.length}</span></header>
+            {laneOrders.length === 0 && <div className="empty-chat">No orders here.</div>}
+            {laneOrders.map((order) => (
+              <article className="kitchen-ticket" key={order.id}>
+                <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
+                <small>{order.customerName} · {orderServiceLabel(order)}</small>
+                <p>{orderItemText(order)}</p>
+                {order.notes && <em>Note: {order.notes}</em>}
+                <button className={lane.next ? "btn btn-sm btn-danger" : "btn btn-sm btn-outline-dark"} disabled={!lane.next} onClick={() => move(order, lane.next)}>{lane.next ? lane.action : readyActionLabel(order)}</button>
+              </article>
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function StaffWorkspace({ section, user, orders, inventory: staffInventory, reviews, shiftLogs, messages, serviceStatus, notify }) {
   const [posCart, setPosCart] = useState([]);
   const [posCategory, setPosCategory] = useState("all");
+  const [posDiscount, setPosDiscount] = useState(0);
+  const [posCashReceived, setPosCashReceived] = useState(0);
+  const [diningOption, setDiningOption] = useState("dine-in");
+  const [lastReceipt, setLastReceipt] = useState(null);
   const activePosCategory = staffPosCategories.find((item) => item.id === posCategory) || staffPosCategories[0];
   const visibleInventory = staffInventory.filter(activePosCategory.matches);
   const categoryCount = (category) => staffInventory.filter(category.matches).length;
@@ -1734,7 +1987,10 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
     return `${count} item${count === 1 ? "" : "s"}`;
   };
   const inventory = section === "staff-pos" ? visibleInventory : staffInventory;
-  const posTotal = posCart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const posSubtotal = posCart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const posDiscountAmount = Math.max(0, Math.min(posSubtotal, Number(posDiscount || 0)));
+  const posTotal = Math.max(0, posSubtotal - posDiscountAmount);
+  const posChange = Math.max(0, Number(posCashReceived || 0) - posTotal);
   const add = (product) => setPosCart((current) => {
     const found = current.find((item) => item.id === product.id);
     if (found?.qty >= product.stock) {
@@ -1748,17 +2004,33 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
     .filter((item) => item.qty > 0));
   const remove = (productId) => setPosCart((current) => current.filter((item) => item.id !== productId));
   const complete = async () => {
-    const orderId = await createOrder({
+    if (Number(posCashReceived || 0) < posTotal) {
+      notify("Cash received must cover the walk-in order total.");
+      return;
+    }
+    const payload = {
       customerId: "walk-in",
       customerName: "Walk-in Customer",
       paymentMethod: "cash",
       total: posTotal,
+      subtotal: posSubtotal,
+      discount: posDiscountAmount,
+      cashReceived: Number(posCashReceived || 0),
+      changeDue: posChange,
+      diningOption,
+      cashierName: user.name,
       deliveryType: "walk-in",
       address: "Counter",
       phone: "",
       items: posCart
-    });
+    };
+    const orderId = await createOrder(payload);
+    const receipt = { id: orderId, ...payload, createdAt: Date.now(), status: "received" };
     setPosCart([]);
+    setPosDiscount(0);
+    setPosCashReceived(0);
+    setLastReceipt(receipt);
+    if (!printReceipt(receipt)) notify("Allow pop-ups to print the receipt.");
     notify(`Walk-in receipt ${orderId} completed.`);
   };
 
@@ -1779,14 +2051,45 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, shif
           </div>
         </div>
         <div className="col-xl-8"><div className="row g-3">{inventory.map((product) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><div className="menu-photo" style={menuPhotoStyle(product)} /><strong>{product.name}</strong><span>{currency(product.price)} · {product.stock} available</span></button></div>)}</div></div>
-        <div className="col-xl-4"><div className="dashboard-card sticky-pos"><div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>{posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}{posCart.map((item) => <div className="pos-cart-item" key={item.id}><div><strong>{item.name}</strong><small>{currency(item.price)} each</small></div><div className="pos-quantity"><button onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>−</button><span>{item.qty}</span><button disabled={item.qty >= item.stock} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button></div><strong>{currency(item.qty * item.price)}</strong><button className="pos-remove" onClick={() => remove(item.id)}>Remove</button></div>)}<div className="checkout-total"><span>Total ({posCart.reduce((sum, item) => sum + item.qty, 0)} items)</span><strong>{currency(posTotal)}</strong></div><button className="btn btn-danger w-100" disabled={!posCart.length} onClick={complete}>Accept payment and print receipt</button></div></div>
+        <div className="col-xl-4">
+          <div className="dashboard-card sticky-pos">
+            <div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>
+            {posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}
+            {posCart.map((item) => (
+              <div className="pos-cart-item" key={item.id}>
+                <div><strong>{item.name}</strong><small>{currency(item.price)} each</small></div>
+                <div className="pos-quantity"><button onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>-</button><span>{item.qty}</span><button disabled={item.qty >= item.stock} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button></div>
+                <strong>{currency(item.qty * item.price)}</strong>
+                <button className="pos-remove" onClick={() => remove(item.id)}>Remove</button>
+              </div>
+            ))}
+            <div className="pos-payment-panel">
+              <div className="checkout-mode-grid" aria-label="Walk-in type">
+                <button className={diningOption === "dine-in" ? "active" : ""} type="button" aria-pressed={diningOption === "dine-in"} onClick={() => setDiningOption("dine-in")}><strong>Dine-in</strong><small>Counter order</small></button>
+                <button className={diningOption === "takeout" ? "active" : ""} type="button" aria-pressed={diningOption === "takeout"} onClick={() => setDiningOption("takeout")}><strong>Takeout</strong><small>Pack to go</small></button>
+              </div>
+              <label className="form-label">Discount<input className="form-control" type="number" min="0" value={posDiscount} onChange={(event) => setPosDiscount(event.target.value)} /></label>
+              <label className="form-label">Cash received<input className="form-control" type="number" min="0" value={posCashReceived} onChange={(event) => setPosCashReceived(event.target.value)} /></label>
+            </div>
+            <dl className="reconciliation-list pos-totals">
+              <div><dt>Subtotal</dt><dd>{currency(posSubtotal)}</dd></div>
+              <div><dt>Discount</dt><dd>{currency(posDiscountAmount)}</dd></div>
+              <div><dt>Total</dt><dd>{currency(posTotal)}</dd></div>
+              <div><dt>Change</dt><dd>{currency(posChange)}</dd></div>
+            </dl>
+            <button className="btn btn-danger w-100" disabled={!posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
+            {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} · {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
+          </div>
+        </div>
       </div>
     </main>
   );
   if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><OrderManagement orders={orders} canAdvance notify={notify} /></main>;
+  if (section === "staff-kitchen") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Kitchen preparation</p><h2>Kitchen Queue</h2></div></div><KitchenQueue orders={orders.filter((order) => ["received", "preparing", "ready"].includes(order.status))} notify={notify} /></main>;
   if (section === "staff-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Receiving, wastage and availability</p><h2>Inventory</h2></div></div><InventoryModule inventory={inventory} user={user} notify={notify} /></main>;
   if (section === "staff-shifts") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and cash control</p><h2>Shift Logs</h2></div></div><ShiftLogsModule orders={orders} logs={shiftLogs} user={user} notify={notify} /></main>;
   if (section === "staff-chat") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Live communication</p><h2>Chat Support</h2></div></div><SupportChat messages={messages} user={user} notify={notify} /></main>;
+  if (section === "staff-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
   const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
@@ -1816,6 +2119,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
   const [online, setOnline] = useState(false);
   const [location, setLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
   const watchRef = useRef(null);
 
   useEffect(() => () => {
@@ -1885,11 +2189,9 @@ function RiderWorkspace({ section, user, orders, notify }) {
   const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
   const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
   const addressLabel = (value) => value || "Counter pickup";
-  const reportDeliveryIssue = async () => {
+  const reportDeliveryIssue = async (reason) => {
     if (!active) return;
-    const reason = window.prompt(`What happened with ${active.id}?`);
-    if (!reason?.trim()) return;
-    await updateOrder(active.id, { deliveryIssue: reason.trim() });
+    await updateOrder(active.id, { deliveryIssue: reason });
     notify("Delivery issue sent to owner and staff.");
   };
 
@@ -2044,7 +2346,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
                 <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>
                 <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
                 {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}
-                <button className="rider-action" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={reportDeliveryIssue}><Clock size={17} aria-hidden="true" /> Issue</button>
+                <button className="rider-action" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={() => setIssueOpen(true)}><Clock size={17} aria-hidden="true" /> Issue</button>
                 <button className="rider-action warning" disabled={active.status !== "out-for-delivery"} onClick={markArrived}><MapPin size={17} aria-hidden="true" /> Arrived</button>
                 <button className="rider-action success" disabled={active.status !== "arrived"} onClick={() => setCameraOpen(true)}><Camera size={17} aria-hidden="true" /> Proof</button>
               </div>
@@ -2053,6 +2355,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
         </section>
       </div>
       {cameraOpen && <CameraProof onCapture={capture} onClose={() => setCameraOpen(false)} />}
+      {issueOpen && active && <ReasonModal title={`Report ${active.id}`} label="Delivery issue" placeholder="Example: Customer not answering, address unclear, heavy traffic..." confirmText="Send issue" onClose={() => setIssueOpen(false)} onSubmit={async (reason) => { await reportDeliveryIssue(reason); setIssueOpen(false); }} />}
     </main>
   );
 }
@@ -2204,7 +2507,7 @@ export default function App() {
     return subscribeNotifications(activeUser, setNotifications);
   }, [activeUser]);
   useEffect(() => {
-    if (activeUser?.role !== "customer") {
+    if (!activeUser || !["customer", "owner", "staff"].includes(activeUser.role)) {
       setReviews([]);
       return undefined;
     }
@@ -2259,9 +2562,9 @@ export default function App() {
     if (allowedViews.includes(nextView)) setView(nextView);
   };
   const workspace = user.role === "owner"
-    ? <OwnerWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
+    ? <OwnerWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
     : user.role === "staff"
-      ? <StaffWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
+      ? <StaffWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
       : user.role === "rider"
         ? <RiderWorkspace section={view} user={currentUser} orders={orders} notify={setNotice} />
         : <OrdersView orders={orders} onTrack={setTrackingOrder} />;

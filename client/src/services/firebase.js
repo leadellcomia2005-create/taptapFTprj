@@ -435,6 +435,31 @@ export async function submitReview(order, user, rating, comment) {
   });
 }
 
+export async function moderateReview(review, values, actor) {
+  if (firebaseEnabled) return api.updateReview(review.id || review.orderId, values);
+  const data = readDemoData();
+  const id = review.id || review.orderId;
+  data.reviews[id] = {
+    ...(data.reviews[id] || review),
+    moderationStatus: values.moderationStatus,
+    reply: values.reply || "",
+    moderatedAt: Date.now(),
+    moderatedBy: actor.uid
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "review_moderated",
+    reviewId: id,
+    orderId: review.orderId || id,
+    status: values.moderationStatus,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { review: { id, ...data.reviews[id] } };
+}
+
 export function subscribeMenu(fallback, callback) {
   if (firebaseEnabled) {
     return onValue(ref(db, "public/menu"), (snapshot) => {
@@ -444,7 +469,10 @@ export function subscribeMenu(fallback, callback) {
   }
   const emit = () => {
     const menu = readDemoData().menu || {};
-    callback(fallback.map((item) => ({ ...item, ...(menu[item.id] || {}) })));
+    const fallbackIds = new Set(fallback.map((item) => item.id));
+    const merged = fallback.map((item) => ({ ...item, ...(menu[item.id] || {}) }));
+    const added = Object.values(menu).filter((item) => item?.id && !fallbackIds.has(item.id));
+    callback([...merged, ...added]);
   };
   emit();
   window.addEventListener("taptap-demo-data", emit);
@@ -452,17 +480,25 @@ export function subscribeMenu(fallback, callback) {
 }
 
 export function subscribeInventory(fallback, callback) {
-  const mergeInventory = (inventory = {}) => callback(
-    fallback.map((item) => ({
+  const mergeInventory = (inventory = {}, menu = {}) => {
+    const fallbackIds = new Set(fallback.map((item) => item.id));
+    const merged = fallback.map((item) => ({
       ...item,
       stock: inventory[item.id]?.stock ?? item.stock,
       reorderPoint: inventory[item.id]?.reorderPoint ?? 10
-    }))
-  );
+    }));
+    const added = Object.entries(inventory)
+      .filter(([id]) => !fallbackIds.has(id))
+      .map(([id, item]) => ({ id, ...(menu[id] || {}), ...item }));
+    callback([...merged, ...added]);
+  };
   if (firebaseEnabled) {
     return onValue(ref(db, "inventory"), (snapshot) => mergeInventory(snapshot.val()));
   }
-  const emit = () => mergeInventory(readDemoData().inventory);
+  const emit = () => {
+    const data = readDemoData();
+    mergeInventory(data.inventory, data.menu);
+  };
   emit();
   window.addEventListener("taptap-demo-data", emit);
   return () => window.removeEventListener("taptap-demo-data", emit);
@@ -532,6 +568,60 @@ export async function updateMenuItem(item, values, actor) {
   return { item: updated };
 }
 
+const slugifyMenuId = (value) => String(value || "")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-")
+  .replace(/^-+|-+$/g, "")
+  .slice(0, 60);
+
+export async function createMenuItem(values, actor) {
+  if (firebaseEnabled) return api.createMenuItem(values);
+  const data = readDemoData();
+  const id = slugifyMenuId(values.id || values.name);
+  if (!id) throw new Error("Enter a valid menu item name.");
+  if (data.menu[id]) throw new Error("A menu item with this name already exists.");
+  const item = {
+    id,
+    name: values.name,
+    category: values.category || "Favorite Meal",
+    description: values.description || "Menu item.",
+    price: Number(values.price || 0),
+    stock: Number(values.stock || 0),
+    reorderPoint: Number(values.reorderPoint ?? 10),
+    allergens: [],
+    featured: Boolean(values.featured),
+    walkInOnly: Boolean(values.walkInOnly),
+    unavailable: Boolean(values.unavailable),
+    image: values.image || "",
+    imagePosition: values.imagePosition || "center",
+    createdAt: Date.now(),
+    createdBy: actor.uid,
+    updatedAt: Date.now(),
+    updatedBy: actor.uid
+  };
+  data.menu[id] = item;
+  data.inventory[id] = {
+    name: item.name,
+    category: item.category,
+    price: item.price,
+    stock: item.stock,
+    reorderPoint: item.reorderPoint,
+    unavailable: item.unavailable,
+    createdAt: item.createdAt
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "menu_item_created",
+    itemId: id,
+    itemName: item.name,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { item };
+}
+
 export function subscribeOrders(user, callback) {
   if (!user) {
     callback([]);
@@ -585,6 +675,9 @@ export async function createOrder(order) {
       address: order.address,
       deliveryType: order.deliveryType,
       notes: order.notes,
+      discount: order.discount,
+      cashReceived: order.cashReceived,
+      diningOption: order.diningOption,
       paymentMethod: order.paymentMethod,
       items: order.items.map(({ id, qty }) => ({ id, qty }))
     });

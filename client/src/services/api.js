@@ -78,6 +78,16 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(values),
     }),
+  createMenuItem: (values) =>
+    request("/menu", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
+  updateReview: (reviewId, values) =>
+    request(`/reviews/${encodeURIComponent(reviewId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(values),
+    }),
   updateRiderLocation: (orderId, location) =>
     request("/riders/location", {
       method: "POST",

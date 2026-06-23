@@ -12,6 +12,7 @@ import twilio from "twilio";
 import {
   adjustInventoryRecord,
   canAccessOrder,
+  createMenuItemRecord,
   createOrderRecord,
   HttpError,
   listOrdersForUser,
@@ -20,6 +21,7 @@ import {
   saveShiftLogRecord,
   updateMenuItemRecord,
   updateOrderRecord,
+  updateReviewRecord,
   validRecordId
 } from "./operations.js";
 import {
@@ -456,6 +458,14 @@ app.patch(route("/inventory/:itemId"), authenticate, requireRoles("owner", "staf
 
 app.patch(route("/menu/:itemId"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
   res.json(await updateMenuItemRecord(database(), req.user, req.params.itemId, req.body));
+}));
+
+app.post(route("/menu"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  res.status(201).json(await createMenuItemRecord(database(), req.user, req.body));
+}));
+
+app.patch(route("/reviews/:reviewId"), authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.json(await updateReviewRecord(database(), req.user, req.params.reviewId, req.body));
 }));
 
 app.post(route("/riders/location"), authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {

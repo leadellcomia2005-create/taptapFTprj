@@ -28,6 +28,10 @@ function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+function slugifyId(value) {
+  return cleanText(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+
 function validateOrderItems(items) {
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) throw new HttpError(400, "Add between 1 and 50 order items.");
   return items.map((item) => {
@@ -187,6 +191,13 @@ export async function createOrderRecord(db, user, input) {
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
   const isWalkIn = user.role !== "customer";
   const deliveryType = isWalkIn ? "walk-in" : input.deliveryType === "pickup" ? "pickup" : "delivery";
+  const discount = isWalkIn ? Math.max(0, Math.min(subtotal, Number(input.discount || 0))) : 0;
+  if (!Number.isFinite(discount)) throw new HttpError(400, "Enter a valid discount.");
+  const total = subtotal - discount + (deliveryType === "delivery" ? 49 : 0);
+  const cashReceived = isWalkIn && input.paymentMethod === "cash" ? Number(input.cashReceived ?? total) : 0;
+  if (isWalkIn && input.paymentMethod === "cash" && (!Number.isFinite(cashReceived) || cashReceived < total)) {
+    throw new HttpError(400, "Cash received must cover the order total.");
+  }
   const onlinePayment = !isWalkIn && input.paymentMethod === "gcash";
   const orderId = db.ref("orders").push().key;
   const [staffIds, ownerIds] = await Promise.all([userIdsForRoles(db, ["staff"]), userIdsForRoles(db, ["owner"])]);
@@ -201,8 +212,14 @@ export async function createOrderRecord(db, user, input) {
     notes: cleanText(input.notes, 300),
     paymentMethod: input.paymentMethod,
     subtotal,
+    discount,
     deliveryFee: deliveryType === "delivery" ? 49 : 0,
-    total: subtotal + (deliveryType === "delivery" ? 49 : 0),
+    total,
+    cashReceived: isWalkIn && input.paymentMethod === "cash" ? cashReceived : null,
+    changeDue: isWalkIn && input.paymentMethod === "cash" ? cashReceived - total : 0,
+    diningOption: isWalkIn ? cleanText(input.diningOption, 40) || "dine-in" : deliveryType,
+    cashierId: isWalkIn ? user.uid : null,
+    cashierName: isWalkIn ? user.name || user.email : "",
     items,
     createdAt,
     status: onlinePayment ? "pending-payment" : "received",
@@ -325,6 +342,50 @@ export async function updateOrderRecord(db, user, orderId, input) {
   return { order, changes };
 }
 
+export async function createMenuItemRecord(db, user, input = {}) {
+  if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
+  const name = cleanText(input.name, 120);
+  const category = cleanText(input.category || "Favorite Meal", 80);
+  const description = cleanText(input.description || "Menu item.", 220);
+  const id = slugifyId(input.id || name);
+  if (!name || !category) throw new HttpError(400, "Menu name and category are required.");
+  if (!validRecordId(id)) throw new HttpError(400, "Enter a valid menu item ID.");
+  const price = Number(input.price || 0);
+  const stock = Number(input.stock || 0);
+  const reorderPoint = Number(input.reorderPoint ?? 10);
+  if (!Number.isFinite(price) || price < 0 || price > 100000) throw new HttpError(400, "Enter a valid price.");
+  if (!Number.isInteger(stock) || stock < 0 || stock > 100000) throw new HttpError(400, "Enter a valid stock count.");
+  if (!Number.isInteger(reorderPoint) || reorderPoint < 0 || reorderPoint > 10000) throw new HttpError(400, "Enter a valid reorder point.");
+  const itemRef = db.ref(`public/menu/${id}`);
+  if ((await itemRef.once("value")).exists()) throw new HttpError(409, "A menu item with this ID already exists.");
+  const createdAt = Date.now();
+  const item = {
+    id,
+    name,
+    category,
+    description,
+    price,
+    stock,
+    reorderPoint,
+    allergens: Array.isArray(input.allergens) ? input.allergens.map((value) => cleanText(value, 40)).filter(Boolean).slice(0, 8) : [],
+    featured: Boolean(input.featured),
+    walkInOnly: Boolean(input.walkInOnly),
+    unavailable: Boolean(input.unavailable),
+    image: cleanText(input.image, 300),
+    imagePosition: cleanText(input.imagePosition, 40) || "center",
+    createdAt,
+    createdBy: user.uid,
+    updatedAt: createdAt,
+    updatedBy: user.uid
+  };
+  await db.ref().update({
+    [`public/menu/${id}`]: item,
+    [`inventory/${id}`]: { name, category, price, stock, reorderPoint, unavailable: item.unavailable, createdAt },
+    [`auditLogs/${db.ref("auditLogs").push().key}`]: { action: "menu_item_created", itemId: id, itemName: name, actorId: user.uid, actorRole: user.role, createdAt }
+  });
+  return { item };
+}
+
 export async function updateMenuItemRecord(db, user, itemId, input = {}) {
   if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
   if (!validRecordId(itemId)) throw new HttpError(400, "Invalid menu item ID.");
@@ -362,6 +423,26 @@ export async function updateMenuItemRecord(db, user, itemId, input = {}) {
     [`auditLogs/${db.ref("auditLogs").push().key}`]: { action: "menu_item_updated", itemId, itemName: name, actorId: user.uid, actorRole: user.role, createdAt: updatedAt }
   });
   return { item: { id: itemId, ...item } };
+}
+
+export async function updateReviewRecord(db, user, reviewId, input = {}) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  if (!validRecordId(reviewId)) throw new HttpError(400, "Invalid review ID.");
+  const status = cleanText(input.moderationStatus, 40);
+  if (!["pending", "approved", "hidden"].includes(status)) throw new HttpError(400, "Unsupported review status.");
+  const reply = cleanText(input.reply, 500);
+  const reviewRef = db.ref(`reviews/${reviewId}`);
+  const review = (await reviewRef.once("value")).val();
+  if (!review) throw new HttpError(404, "Review not found.");
+  const updatedAt = Date.now();
+  await db.ref().update({
+    [`reviews/${reviewId}/moderationStatus`]: status,
+    [`reviews/${reviewId}/reply`]: reply,
+    [`reviews/${reviewId}/moderatedAt`]: updatedAt,
+    [`reviews/${reviewId}/moderatedBy`]: user.uid,
+    [`auditLogs/${db.ref("auditLogs").push().key}`]: { action: "review_moderated", reviewId, orderId: review.orderId || reviewId, status, actorId: user.uid, actorRole: user.role, createdAt: updatedAt }
+  });
+  return { review: { id: reviewId, ...review, moderationStatus: status, reply, moderatedAt: updatedAt, moderatedBy: user.uid } };
 }
 
 export async function adjustInventoryRecord(db, user, itemId, input) {

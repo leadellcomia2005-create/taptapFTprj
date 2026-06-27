@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Bike, Camera, CheckCircle2, Clock, LogOut, MapPin, Menu, Navigation, Package as PackageIcon, Phone, Route, Trash2, Wallet, X } from "lucide-react";
 import CameraProof from "./components/CameraProof";
 import DeliveryMap from "./components/DeliveryMap";
+import { PageLoader } from "./components/Loaders";
 import SalesChart from "./components/SalesChart";
+import { defaultViewForRole, menuCategoryOptions, roleNavigation, securityMethodLabels, serviceDisplayNames, staffPosCategories } from "./config/appConfig";
 import { demoAccounts, fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
 import {
@@ -42,38 +44,7 @@ import {
 } from "./services/firebase";
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "./services/passkeys";
 import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
-
-const currency = (value) => `₱${Number(value || 0).toLocaleString("en-PH")}`;
-const statusLabel = (value) => ({
-  "pending-payment": "Payment pending",
-  received: "Received",
-  preparing: "Preparing",
-  ready: "Ready",
-  "out-for-delivery": "Out for delivery",
-  arrived: "Arrived",
-  delivered: "Delivered",
-  cancelled: "Cancelled"
-}[value] || value);
-const menuPhotoStyle = (product) => product.image
-  ? {
-      backgroundImage: `url(${product.image})`,
-      backgroundPosition: "center",
-      backgroundRepeat: "no-repeat",
-      backgroundSize: "contain"
-    }
-  : { backgroundPosition: product.imagePosition };
-
-const normalizeMenuCategory = (value = "") => value.toLowerCase().replace(/[^a-z]/g, "");
-const staffPosCategories = [
-  { id: "all", label: "All", matches: () => true },
-  { id: "meal", label: "Meal", matches: (item) => ["favoritemeal", "meal"].includes(normalizeMenuCategory(item.category)) },
-  { id: "alacarte", label: "Ala Carte", matches: (item) => normalizeMenuCategory(item.category) === "alacarte" },
-  { id: "solo", label: "Solo", matches: (item) => normalizeMenuCategory(item.category) === "solo" },
-  { id: "special", label: "Special", matches: (item) => normalizeMenuCategory(item.category) === "specialmeal" },
-  { id: "drinks", label: "Drinks", matches: (item) => normalizeMenuCategory(item.category) === "drinks" },
-  { id: "addons", label: "Add-ons", matches: (item) => ["walkinaddon", "addon", "addons"].includes(normalizeMenuCategory(item.category)) }
-];
-const menuCategoryOptions = ["Favorite Meal", "Alacarte", "Solo", "Special Meal", "Drinks", "Walk-in Add-on"];
+import { assistantSourceLabel, currency, menuPhotoStyle, relativeTime, statusLabel } from "./utils/display";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -387,82 +358,6 @@ const printReceipt = (order) => {
   printWindow.focus();
   setTimeout(() => printWindow.print(), 250);
   return true;
-};
-
-const relativeTime = (timestamp) => {
-  const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp || 0)) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
-};
-
-const roleNavigation = {
-  customer: [
-    ["store", "Storefront"],
-    ["orders", "Order History"],
-    ["receipts", "Digital Receipts"],
-    ["feedback", "Reviews & Feedback"],
-    ["profile", "Personal Info"]
-  ],
-  owner: [
-    ["owner-overview", "Dashboard"],
-    ["owner-sales", "Sales & Orders"],
-    ["owner-inventory", "Inventory"],
-    ["owner-reports", "Reports"],
-    ["owner-reviews", "Reviews"],
-    ["owner-users", "Users & Roles"],
-    ["owner-audit", "Audit Logs"],
-    ["owner-settings", "System Settings"]
-  ],
-  staff: [
-    ["staff-overview", "Dashboard"],
-    ["staff-pos", "Walk-in POS"],
-    ["staff-kitchen", "Kitchen"],
-    ["staff-orders", "Order Queue"],
-    ["staff-inventory", "Inventory"],
-    ["staff-shifts", "Shift Logs"],
-    ["staff-chat", "Chat Support"],
-    ["staff-reviews", "Reviews"],
-    ["staff-settings", "Settings"]
-  ],
-  rider: [
-    ["rider-orders", "Assigned Orders"],
-    ["rider-cod", "COD Ledger"]
-  ]
-};
-
-const defaultViewForRole = (role) => ({
-  customer: "store",
-  owner: "owner-overview",
-  staff: "staff-overview",
-  rider: "rider-orders"
-}[role] || "store");
-
-const serviceDisplayNames = {
-  firebase: "Secure login",
-  socket: "Live updates",
-  openai: "Business insight",
-  dialogflow: "Assistant answers",
-  paymongo: "Online payment",
-  twilio: "SMS updates",
-  emailOtp: "Email codes",
-  twoFactor: "Account security"
-};
-
-const securityMethodLabels = {
-  totp: "Security app",
-  email: "Email code",
-  sms: "SMS code"
-};
-
-const assistantSourceLabel = (source) => {
-  const value = String(source || "").toLowerCase();
-  if (!value || ["assistant", "demo", "openai", "dialogflow", "dialogflow fallback"].includes(value)) return "";
-  return source;
 };
 
 function BrandMark({ className = "" }) {
@@ -2589,7 +2484,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  if (user === undefined) return <div className="loading-screen">Loading Taptap Foodtrip...</div>;
+  if (user === undefined) return <PageLoader />;
   if (!user) return <LoginPanel />;
   if (user.emailVerified !== true) {
     return <EmailVerificationPanel user={user} onVerified={(status) => setUser((current) => ({

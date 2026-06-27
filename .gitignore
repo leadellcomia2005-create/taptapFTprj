@@ -39,6 +39,7 @@ ui-debug.log
 *.tmp
 *.bak
 *.swp
+.codex-tools/
 
 # Archives
 *.zip

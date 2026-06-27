@@ -43,6 +43,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify(values),
     }),
+  beginPasskeyRegistration: () =>
+    request("/passkeys/register/options", { method: "POST", body: "{}" }),
+  verifyPasskeyRegistration: (credential) =>
+    request("/passkeys/register/verify", {
+      method: "POST",
+      body: JSON.stringify(credential),
+    }),
+  beginPasskeyAuthentication: () =>
+    request("/passkeys/authenticate/options", { method: "POST", body: "{}" }),
+  verifyPasskeyAuthentication: (credential) =>
+    request("/passkeys/authenticate/verify", {
+      method: "POST",
+      body: JSON.stringify(credential),
+    }),
   assistant: (message, sessionId, context) =>
     request("/assistant", {
       method: "POST",

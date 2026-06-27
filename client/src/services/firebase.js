@@ -4,6 +4,7 @@ import {
   connectAuthEmulator,
   createUserWithEmailAndPassword,
   deleteUser,
+  browserSessionPersistence,
   getAuth,
   inMemoryPersistence,
   onAuthStateChanged,
@@ -88,7 +89,7 @@ if (firebaseEnabled) {
     }
   }
   authPersistenceReady = Promise.all([
-    setPersistence(auth, inMemoryPersistence),
+    setPersistence(auth, browserSessionPersistence),
     setPersistence(registrationAuth, inMemoryPersistence)
   ]);
 }

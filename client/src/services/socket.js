@@ -3,11 +3,14 @@ import { getAuthToken } from "./authSession";
 
 let socket;
 
+const socketBaseUrl = () => import.meta.env.VITE_SOCKET_URL ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
+
 export async function getSocket() {
   if (socket) return socket;
   const token = await getAuthToken();
   if (!token) throw new Error("Sign in before live updates can start.");
-  socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:8080", {
+  socket = io(socketBaseUrl(), {
     transports: ["websocket", "polling"],
     auth: { token },
     autoConnect: true

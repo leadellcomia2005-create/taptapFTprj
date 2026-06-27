@@ -57,8 +57,8 @@ test("requires Firebase's verified-email claim before POS access", () => {
   assert.equal(hasVerifiedEmail({}), false);
 });
 
-test("limits operational roles to authenticator 2FA", () => {
-  assert.deepEqual(allowedTwoFactorMethods("customer"), ["totp", "sms", "email"]);
+test("allows customer passkeys while limiting operational roles to authenticator 2FA", () => {
+  assert.deepEqual(allowedTwoFactorMethods("customer"), ["passkey", "totp", "sms", "email"]);
   assert.deepEqual(allowedTwoFactorMethods("owner"), ["totp"]);
   assert.deepEqual(allowedTwoFactorMethods("staff"), ["totp"]);
   assert.deepEqual(allowedTwoFactorMethods("rider"), ["totp"]);

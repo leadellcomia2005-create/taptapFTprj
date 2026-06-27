@@ -59,6 +59,12 @@ import {
   unlockTwoFactor,
   verifyChallenge
 } from "./twoFactor.js";
+import {
+  beginPasskeyAuthentication,
+  beginPasskeyRegistration,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration
+} from "./passkeys.js";
 
 dotenv.config({ override: true });
 
@@ -172,6 +178,22 @@ app.post("/api/2fa/setup/verify", authenticateBootstrap, requireVerifiedEmail, a
 
 app.post("/api/2fa/challenge", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await verifyChallenge(db(), req.user, req.body, req.authToken));
+}));
+
+app.post("/api/passkeys/register/options", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await beginPasskeyRegistration(db(), req.user, req));
+}));
+
+app.post("/api/passkeys/register/verify", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await verifyPasskeyRegistration(db(), req.user, req.body, req));
+}));
+
+app.post("/api/passkeys/authenticate/options", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await beginPasskeyAuthentication(db(), req.user, req));
+}));
+
+app.post("/api/passkeys/authenticate/verify", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await verifyPasskeyAuthentication(db(), req.user, req.body, req));
 }));
 
 app.post("/api/assistant", authenticate, asyncRoute(async (req, res) => {

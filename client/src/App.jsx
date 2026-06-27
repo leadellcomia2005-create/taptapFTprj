@@ -40,6 +40,7 @@ import {
   updateMenuItem,
   uploadProof
 } from "./services/firebase";
+import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "./services/passkeys";
 import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
 
 const currency = (value) => `₱${Number(value || 0).toLocaleString("en-PH")}`;
@@ -738,7 +739,8 @@ function TwoFactorPanel({ user, onComplete }) {
   const status = user.twoFactor || {};
   const setup = !status.enabled;
   const customerAccount = status.role === "customer";
-  const [method, setMethod] = useState(status.method || (customerAccount && status.emailOtpAvailable ? "email" : "totp"));
+  const browserPasskeysReady = passkeysSupported();
+  const [method, setMethod] = useState(status.method || (customerAccount && status.passkeyAvailable ? "passkey" : customerAccount && status.emailOtpAvailable ? "email" : "totp"));
   const [setupData, setSetupData] = useState(null);
   const [code, setCode] = useState("");
   const [backupMode, setBackupMode] = useState(false);
@@ -782,6 +784,35 @@ function TwoFactorPanel({ user, onComplete }) {
     try {
       const response = await api.sendTwoFactorEmail(setup ? "setup" : "challenge");
       setDeliveryMessage(`A six-digit code was sent to ${response.emailMasked}. Check Inbox and Spam.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setupPasskey = async () => {
+    setBusy(true);
+    setError("");
+    setDeliveryMessage("");
+    try {
+      const response = await registerCustomerPasskey();
+      if (response.backupCodes) setResult(response);
+      else onComplete(await completeTwoFactorSession(response.customToken));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyPasskey = async () => {
+    setBusy(true);
+    setError("");
+    setDeliveryMessage("");
+    try {
+      const response = await authenticateCustomerPasskey();
+      onComplete(await completeTwoFactorSession(response.customToken));
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -854,16 +885,18 @@ function TwoFactorPanel({ user, onComplete }) {
         <h2>{setup ? "Set up account security" : "Verify your sign-in"}</h2>
         <p>{setup
           ? customerAccount
-            ? "Choose email, a security app, or SMS. Your verified email is the easiest option without another app."
+            ? "Choose passkey, email, a security app, or SMS. Passkey is the fastest option on phones with fingerprint, Face ID, or screen lock."
             : "Owner, staff, and rider accounts must use a security app before opening POS tools."
-          : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "security app"}.`}</p>
+          : status.method === "passkey"
+            ? "Confirm with your phone fingerprint, Face ID, or screen lock to finish signing in."
+            : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "security app"}.`}</p>
         {setup && (
           <div className="security-methods">
-            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-              <strong>Security app</strong><small>Free, offline 30-second codes</small>
-            </button>
             {customerAccount && (
               <>
+                <button type="button" disabled={!status.passkeyAvailable || !browserPasskeysReady} className={method === "passkey" ? "active" : ""} onClick={() => { setMethod("passkey"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
+                  <strong>Passkey</strong><small>{browserPasskeysReady ? "Fingerprint, Face ID, or screen lock" : "Needs HTTPS or localhost"}</small>
+                </button>
                 <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
                   <strong>Email code</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Email sending is not ready"}</small>
                 </button>
@@ -872,13 +905,25 @@ function TwoFactorPanel({ user, onComplete }) {
                 </button>
               </>
             )}
+            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
+              <strong>Security app</strong><small>Free, offline 30-second codes</small>
+            </button>
+          </div>
+        )}
+        {method === "passkey" && !backupMode && (
+          <div className="passkey-panel">
+            <strong>{setup ? "Create customer passkey" : "Use customer passkey"}</strong>
+            <span>{browserPasskeysReady ? "Your phone will ask for fingerprint, Face ID, PIN, or screen lock." : "Passkeys need HTTPS or localhost. Use this after deployment, or test on localhost."}</span>
+            <button type="button" className="btn btn-danger w-100" disabled={busy || !browserPasskeysReady} onClick={setup ? setupPasskey : verifyPasskey}>
+              {busy ? "Waiting for passkey..." : setup ? "Create passkey" : "Continue with passkey"}
+            </button>
           </div>
         )}
         {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Show security app setup code</button>}
         {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Security app setup code" /><p>Setup key: <code>{setupData.manualKey}</code></p></div>}
         {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
         {method === "email" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.emailOtpAvailable} onClick={sendEmail}>Send 6-digit email code</button>}
-        {!backupMode ? (
+        {!backupMode && method !== "passkey" ? (
           <>
             <label className="form-label">6-digit verification code</label>
             <OtpInput value={code} onChange={setCode} disabled={busy} />
@@ -888,9 +933,9 @@ function TwoFactorPanel({ user, onComplete }) {
         )}
         {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
         {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
-        <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
+        {(method !== "passkey" || backupMode) && <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
           {busy ? "Verifying..." : setup ? "Save security setup" : "Verify and open POS"}
-        </button>
+        </button>}
         {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
         <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
       </form>

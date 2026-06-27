@@ -119,7 +119,7 @@ const maskEmail = (value = "") => {
   return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
 };
 
-export const allowedTwoFactorMethods = (role) => role === "customer" ? ["totp", "sms", "email"] : ["totp"];
+export const allowedTwoFactorMethods = (role) => role === "customer" ? ["passkey", "totp", "sms", "email"] : ["totp"];
 
 async function transactionWithInitial(ref, initialValue, update) {
   let firstCall = true;
@@ -190,7 +190,7 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, en
   }
   let totpAvailable = true;
   try { keyFrom(encryptionKey); } catch { totpAvailable = false; }
-  return { uid: user.uid, name: profile.name || user.name || user.email, role, emailVerified: user.email_verified === true, enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone), emailOtpAvailable: Boolean(role === "customer" && emailAvailable && user.email && user.email_verified === true), emailMasked: maskEmail(user.email), allowedMethods: allowedTwoFactorMethods(role), totpAvailable };
+  return { uid: user.uid, name: profile.name || user.name || user.email, role, emailVerified: user.email_verified === true, enabled: Boolean(config.enabled), method: config.method || null, locked: Boolean(config.locked), failedAttempts: Number(config.failedAttempts || 0), phoneConfigured: Boolean(profile.phone), phoneMasked: maskPhone(profile.phone), smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone), emailOtpAvailable: Boolean(role === "customer" && emailAvailable && user.email && user.email_verified === true), passkeyAvailable: role === "customer", passkeyCount: Object.keys(config.passkeys || {}).length, emailMasked: maskEmail(user.email), allowedMethods: allowedTwoFactorMethods(role), totpAvailable };
 }
 
 export async function beginTotpSetup(db, user, encryptionKey) {

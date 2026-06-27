@@ -41,6 +41,12 @@ import {
   unlockTwoFactor,
   verifyChallenge
 } from "./twoFactor.js";
+import {
+  beginPasskeyAuthentication,
+  beginPasskeyRegistration,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration
+} from "./passkeys.js";
 
 initializeApp();
 const database = () => getDatabase();
@@ -296,6 +302,19 @@ app.post(route("/2fa/setup/verify"), authenticateBootstrap, requireVerifiedEmail
 }));
 app.post(route("/2fa/challenge"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
   res.json(await verifyChallenge(database(), req.user, req.body, secretValue(twoFactorKey), req.authToken));
+}));
+
+app.post(route("/passkeys/register/options"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await beginPasskeyRegistration(database(), req.user, req));
+}));
+app.post(route("/passkeys/register/verify"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await verifyPasskeyRegistration(database(), req.user, req.body, req));
+}));
+app.post(route("/passkeys/authenticate/options"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await beginPasskeyAuthentication(database(), req.user, req));
+}));
+app.post(route("/passkeys/authenticate/verify"), authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
+  res.json(await verifyPasskeyAuthentication(database(), req.user, req.body, req));
 }));
 
 app.post(route("/assistant"), authenticate, async (req, res) => {

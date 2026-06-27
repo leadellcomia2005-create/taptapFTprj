@@ -169,7 +169,7 @@ function maskEmail(value = "") {
 }
 
 export function allowedTwoFactorMethods(role) {
-  return role === "customer" ? ["totp", "sms", "email"] : ["totp"];
+  return role === "customer" ? ["passkey", "totp", "sms", "email"] : ["totp"];
 }
 
 async function audit(db, userId, action, details = {}) {
@@ -277,6 +277,8 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
     phoneMasked: maskPhone(profile.phone),
     smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone),
     emailOtpAvailable: Boolean(role === "customer" && emailAvailable && user.email && user.email_verified === true),
+    passkeyAvailable: role === "customer",
+    passkeyCount: Object.keys(config.passkeys || {}).length,
     emailMasked: maskEmail(user.email),
     allowedMethods: allowedTwoFactorMethods(role),
     totpAvailable: twoFactorConfigured()

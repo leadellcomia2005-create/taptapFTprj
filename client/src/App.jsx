@@ -1,10 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
 import { Bell, Bike, Camera, CheckCircle2, Clock, LogOut, MapPin, Menu, Navigation, Package as PackageIcon, Phone, Route, Trash2, Wallet, X } from "lucide-react";
-import CameraProof from "./components/CameraProof";
-import DeliveryMap from "./components/DeliveryMap";
-import { PageLoader } from "./components/Loaders";
-import SalesChart from "./components/SalesChart";
+import { PageLoader, SectionLoader } from "./components/Loaders";
 import { defaultViewForRole, menuCategoryOptions, roleNavigation, securityMethodLabels, serviceDisplayNames, staffPosCategories } from "./config/appConfig";
 import { demoAccounts, fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
@@ -45,6 +42,10 @@ import {
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "./services/passkeys";
 import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
 import { assistantSourceLabel, currency, menuPhotoStyle, relativeTime, statusLabel } from "./utils/display";
+
+const CameraProof = lazy(() => import("./components/CameraProof"));
+const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
+const SalesChart = lazy(() => import("./components/SalesChart"));
 
 const dayMs = 24 * 60 * 60 * 1000;
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -1735,7 +1736,7 @@ function OwnerWorkspace({ section, user, orders, inventory, reviews, serviceStat
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => !["delivered", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live order workload</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><SalesChart values={salesTrend} /></div></div>
+        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Strategy controls</h3><label className="form-label">Sales goal threshold<input className="form-control" type="number" value={salesGoal} onChange={(event) => setSalesGoal(Number(event.target.value))} /></label><label className="form-label">Active promotion<select className="form-select"><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={() => notify("Sales strategy saved.")}>Save strategy</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
       </div>
@@ -1791,7 +1792,7 @@ function OwnerWorkspace({ section, user, orders, inventory, reviews, serviceStat
         <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Ready to sell</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Some features need setup</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><SalesChart values={salesTrend} /></div></div>
+        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
         <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button></div></div>
         <div className="col-lg-7"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="col-lg-5"><div className="dashboard-card"><h3>Low-stock alerts</h3>{inventory.filter((item) => item.stock <= item.reorderPoint).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}{inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}</div></div>
@@ -2280,7 +2281,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
               </div>
 
-              <div className="rider-map-panel"><DeliveryMap rider={location} /></div>
+              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={location} /></Suspense></div>
 
               <div className="rider-action-grid">
                 <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>
@@ -2294,7 +2295,7 @@ function RiderWorkspace({ section, user, orders, notify }) {
           ) : <div className="empty-state compact">Assigned delivery details will appear here.</div>}
         </section>
       </div>
-      {cameraOpen && <CameraProof onCapture={capture} onClose={() => setCameraOpen(false)} />}
+      {cameraOpen && <Suspense fallback={<SectionLoader label="Opening camera..." />}><CameraProof onCapture={capture} onClose={() => setCameraOpen(false)} /></Suspense>}
       {issueOpen && active && <ReasonModal title={`Report ${active.id}`} label="Delivery issue" placeholder="Example: Customer not answering, address unclear, heavy traffic..." confirmText="Send issue" onClose={() => setIssueOpen(false)} onSubmit={async (reason) => { await reportDeliveryIssue(reason); setIssueOpen(false); }} />}
     </main>
   );
@@ -2320,7 +2321,7 @@ function TrackingView({ order, onClose }) {
       <div className="modal-dialog modal-xl modal-dialog-centered">
         <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
           <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
-          <div className="modal-body p-0"><DeliveryMap rider={rider} /></div>
+          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={rider} /></Suspense></div>
         </div>
       </div>
     </div>

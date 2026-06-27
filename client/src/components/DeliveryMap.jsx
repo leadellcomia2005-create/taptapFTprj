@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
 const storeLocation = {
   name: import.meta.env.VITE_STORE_NAME || "Taptap Foodtrip",

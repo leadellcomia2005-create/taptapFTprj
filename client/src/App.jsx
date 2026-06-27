@@ -591,21 +591,24 @@ function Assistant({ user, menu }) {
   const [messages, setMessages] = useState([{ from: "bot", text: "Hi! Ask about menu items, allergens, store details or your order." }]);
   const receivedSupportReplies = useRef(new Set());
 
-  useEffect(() => subscribeSupportMessages((supportMessages) => {
-    const newReplies = supportMessages.filter((message) =>
-      message.senderRole === "staff" && !receivedSupportReplies.current.has(message.id)
-    );
-    if (newReplies.length === 0) return;
-    newReplies.forEach((message) => receivedSupportReplies.current.add(message.id));
-    setMessages((current) => [
-      ...current,
-      ...newReplies.map((message) => ({
-        from: "bot",
-        text: message.text,
-        source: `Staff support - ${message.senderName}`
-      }))
-    ]);
-  }, user.uid), [user.uid]);
+  useEffect(() => {
+    if (!open) return undefined;
+    return subscribeSupportMessages((supportMessages) => {
+      const newReplies = supportMessages.filter((message) =>
+        message.senderRole === "staff" && !receivedSupportReplies.current.has(message.id)
+      );
+      if (newReplies.length === 0) return;
+      newReplies.forEach((message) => receivedSupportReplies.current.add(message.id));
+      setMessages((current) => [
+        ...current,
+        ...newReplies.map((message) => ({
+          from: "bot",
+          text: message.text,
+          source: `Staff support - ${message.senderName}`
+        }))
+      ]);
+    }, user.uid);
+  }, [open, user.uid]);
 
   const send = async (event) => {
     event.preventDefault();
@@ -663,40 +666,65 @@ export default function App() {
     }
     return subscribeUserProfile(activeUser, setProfile);
   }, [activeUser]);
-  useEffect(() => subscribeMenu(fallbackMenu, setMenu), []);
   useEffect(() => {
-    if (!activeUser || !["owner", "staff"].includes(activeUser.role)) {
+    if (!activeUser || activeUser.role === "rider") {
+      setMenu(fallbackMenu);
+      return undefined;
+    }
+    return subscribeMenu(fallbackMenu, setMenu);
+  }, [activeUser]);
+  useEffect(() => {
+    const staffInventoryView = activeUser?.role === "staff" && ["staff-dashboard", "staff-pos", "staff-inventory"].includes(view);
+    const shouldLoadInventory = activeUser?.role === "owner" || staffInventoryView;
+    if (!shouldLoadInventory) {
       setInventory(menu.map((item) => ({ ...item, reorderPoint: item.reorderPoint ?? 10 })));
       return undefined;
     }
     return subscribeInventory(menu, setInventory);
-  }, [menu, activeUser]);
-  useEffect(() => subscribeOrders(activeUser, (nextOrders) => {
+  }, [menu, activeUser, view]);
+  useEffect(() => {
+    const shouldLoadOrders = Boolean(activeUser) && (
+      activeUser.role === "rider" ||
+      (activeUser.role === "customer" && (["orders", "receipts", "feedback"].includes(view) || checkoutOpen || trackingOrder)) ||
+      (activeUser.role === "owner" && ["owner-dashboard", "owner-sales", "owner-reports"].includes(view)) ||
+      (activeUser.role === "staff" && ["staff-dashboard", "staff-pos", "staff-orders", "staff-kitchen", "staff-shifts"].includes(view))
+    );
+    if (!shouldLoadOrders) {
+      previousOrderCount.current = 0;
+      setOrders([]);
+      return undefined;
+    }
+    return subscribeOrders(activeUser, (nextOrders) => {
     if (activeUser?.role === "rider" && nextOrders.length > previousOrderCount.current) navigator.vibrate?.([150, 80, 150]);
     previousOrderCount.current = nextOrders.length;
     setOrders(nextOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
-  }), [activeUser]);
+    });
+  }, [activeUser, checkoutOpen, trackingOrder, view]);
   useEffect(() => {
-    if (activeUser?.role !== "owner") {
+    if (activeUser?.role !== "owner" || view !== "owner-audit") {
       setAuditLogs([]);
       return undefined;
     }
     return subscribeAuditLogs(setAuditLogs);
-  }, [activeUser]);
+  }, [activeUser, view]);
   useEffect(() => {
-    if (!activeUser || !["owner", "staff"].includes(activeUser.role)) {
+    const shouldLoadShiftLogs = (
+      (activeUser?.role === "owner" && view === "owner-reports") ||
+      (activeUser?.role === "staff" && view === "staff-shifts")
+    );
+    if (!shouldLoadShiftLogs) {
       setShiftLogs([]);
       return undefined;
     }
     return subscribeShiftLogs(setShiftLogs);
-  }, [activeUser]);
+  }, [activeUser, view]);
   useEffect(() => {
-    if (activeUser?.role !== "staff") {
+    if (activeUser?.role !== "staff" || view !== "staff-chat") {
       setSupportMessages([]);
       return undefined;
     }
     return subscribeSupportMessages(setSupportMessages);
-  }, [activeUser]);
+  }, [activeUser, view]);
   useEffect(() => {
     if (!activeUser) {
       setNotifications([]);
@@ -705,20 +733,27 @@ export default function App() {
     return subscribeNotifications(activeUser, setNotifications);
   }, [activeUser]);
   useEffect(() => {
-    if (!activeUser || !["customer", "owner", "staff"].includes(activeUser.role)) {
+    const shouldLoadReviews = (
+      (activeUser?.role === "customer" && view === "feedback") ||
+      (activeUser?.role === "owner" && view === "owner-reviews") ||
+      (activeUser?.role === "staff" && view === "staff-reviews")
+    );
+    if (!shouldLoadReviews) {
       setReviews([]);
       return undefined;
     }
     return subscribeReviews(activeUser, setReviews);
-  }, [activeUser]);
+  }, [activeUser, view]);
   useEffect(() => {
     if (activeUser) setView(defaultViewForRole(activeUser.role));
   }, [activeUser]);
   useEffect(() => {
+    if (!activeUser) return undefined;
     api.status().then((result) => setServiceStatus((current) => ({ ...current, ...result.services }))).catch(() => {});
-  }, []);
+    return undefined;
+  }, [activeUser]);
   useEffect(() => {
-    if (!activeUser) {
+    if (!trackingOrder) {
       disconnectSocket();
       setServiceStatus((current) => ({ ...current, socket: false }));
       return undefined;
@@ -735,7 +770,7 @@ export default function App() {
       activeSocket?.off("disconnect");
       disconnectSocket();
     };
-  }, [activeUser]);
+  }, [activeUser?.uid, trackingOrder]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 4500);

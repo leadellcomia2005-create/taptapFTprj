@@ -96,18 +96,26 @@ function LoginPanel({ onLoggedIn }) {
   return (
     <div className="login-screen">
       <div className="login-visual">
-        <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
-        <div>
-          <p className="eyebrow">Integrated operations platform</p>
-          <h1>One system.<br />Every <em>foodtrip.</em></h1>
-          <p>Ordering, inventory, payments, delivery, analytics and AI support in one role-based application.</p>
+        <div className="login-restaurant-top">
+          <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
+          <span>Open daily</span>
+        </div>
+        <div className="login-restaurant-copy">
+          <p className="eyebrow">Pinoy tapsilog house</p>
+          <h1>Traditional taste.<br />Fast <em>foodtrip.</em></h1>
+          <p>We sell traditional Pinoy Style Tapsilog at the lowest price with quality taste and service.</p>
+          <div className="login-special-card" aria-label="TapTap favorite plate">
+            <span>Best value</span>
+            <strong>Tapsilog meals from PHP 99</strong>
+            <small>Egg, soup, rice, and fresh kitchen service.</small>
+          </div>
         </div>
       </div>
       <div className="login-form-wrap">
         <form className="login-card" onSubmit={submit}>
-          <p className="eyebrow text-danger">Secure access</p>
+          <p className="eyebrow text-danger">TapTap account</p>
           <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-          <p className="text-secondary small">{firebaseEnabled ? "Secure login is ready." : "Preview sign-in is available."}</p>
+          <p className="text-secondary small">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Preview sign-in is available."}</p>
           {!registering && (
             <div className="role-tabs">
               {["customer", "owner", "staff", "rider"].map((item) => (

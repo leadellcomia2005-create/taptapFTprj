@@ -148,18 +148,62 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
   );
   if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
   return (
-    <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Super Admin / Owner</p><h2>Business dashboard</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
-      <div className="row g-3">
-        <div className="col-md-3"><div className="metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Orders</small><strong>{orders.length}</strong><span>All channels</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Menu items</small><strong>{menu.length}</strong><span>Ready to sell</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus).filter(Boolean).length}</strong><span>Some features need setup</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales performance</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
-        <div className="col-lg-4"><div className="dashboard-card ai-insight"><p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p><h3>Decision support</h3><p>{insight}</p><button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button></div></div>
-        <div className="col-lg-7"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
-        <div className="col-lg-5"><div className="dashboard-card"><h3>Low-stock alerts</h3>{inventory.filter((item) => item.stock <= item.reorderPoint).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}{inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}</div></div>
-      </div>
+    <main className="container-fluid dashboard-page owner-listing-page">
+      <section className="owner-listing-hero">
+        <div>
+          <p className="eyebrow">Super Admin / Owner</p>
+          <h2>TapTap FoodTrip control center</h2>
+          <p>Track sales, listing readiness, stock health, and today&apos;s order movement from one owner view.</p>
+        </div>
+        <button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button>
+      </section>
+
+      <section className="owner-listing-grid">
+        <article className="owner-listing-card">
+          <div className="owner-listing-cover">
+            <span>Open</span>
+          </div>
+          <div className="owner-listing-body">
+            <p className="eyebrow text-danger">Restaurant listing</p>
+            <h3>TapTap FoodTrip</h3>
+            <p>Traditional Pinoy tapsilog, alacarte, drinks, and special meals.</p>
+            <div className="owner-listing-stats">
+              <span><strong>{menu.length}</strong> menu items</span>
+              <span><strong>{orders.length}</strong> orders</span>
+              <span><strong>{Object.values(serviceStatus || {}).filter(Boolean).length}</strong> ready tools</span>
+            </div>
+          </div>
+        </article>
+
+        <div className="owner-stat-grid">
+          <div className="metric-card owner-metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div>
+          <div className="metric-card owner-metric-card"><small>Awaiting action</small><strong>{orders.filter((order) => !["delivered", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live workload</span></div>
+          <div className="metric-card owner-metric-card"><small>Low stock</small><strong>{inventory.filter((item) => item.stock <= item.reorderPoint).length}</strong><span>Needs attention</span></div>
+          <div className="metric-card owner-metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus || {}).filter(Boolean).length}</strong><span>System health</span></div>
+        </div>
+      </section>
+
+      <section className="owner-panel-grid">
+        <div className="dashboard-card chart-card owner-chart-card">
+          <div className="module-heading">
+            <div><p className="eyebrow text-danger">Sales performance</p><h3>Weekly revenue</h3></div>
+            <span className="shift-chip">{Math.min(100, Math.round(totalSales / salesGoal * 100))}% goal</span>
+          </div>
+          <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense>
+        </div>
+        <div className="dashboard-card ai-insight owner-decision-card">
+          <p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p>
+          <h3>Decision support</h3>
+          <p>{insight}</p>
+          <button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button>
+        </div>
+        <div className="owner-listing-orders"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
+        <div className="dashboard-card owner-stock-panel">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Inventory watch</p><h3>Low-stock alerts</h3></div></div>
+          {inventory.filter((item) => item.stock <= item.reorderPoint).slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}
+          {inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}
+        </div>
+      </section>
     </main>
   );
 }

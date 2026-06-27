@@ -355,20 +355,23 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
   const navigation = roleNavigation[user.role] || [];
   const homeView = defaultViewForRole(user.role);
   const customerNavigation = user.role === "customer";
-  // erick: drawer state ito para hiwalay ang customer menu sa masikip na mobile header.
-  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
-  useEffect(() => setCustomerMenuOpen(false), [activeView, user.role]);
+  const workspaceDrawerNavigation = user.role === "owner" || user.role === "staff";
+  // erick: drawer state ito para hiwalay ang mobile menu sa masikip na header.
+  const [drawerMenuOpen, setDrawerMenuOpen] = useState(false);
+  useEffect(() => setDrawerMenuOpen(false), [activeView, user.role]);
   const navigateFromHeader = (nextView) => {
     onNavigate(nextView);
-    setCustomerMenuOpen(false);
+    setDrawerMenuOpen(false);
   };
+  const drawerTitle = customerNavigation ? "Foodtrip pages" : `${user.role} pages`;
+  const drawerEyebrow = customerNavigation ? "Customer menu" : "Workspace menu";
 
   return (
-    <header className={`app-header ${customerNavigation ? "customer-header" : ""}`}>
-      {customerNavigation && (
+    <header className={`app-header ${customerNavigation ? "customer-header" : ""} ${workspaceDrawerNavigation ? "workspace-header" : ""}`}>
+      {(customerNavigation || workspaceDrawerNavigation) && (
         /* erick: icon button ang menu para hindi na mag-overlap ang X at logo sa maliit na screen. */
-        <button className={`customer-menu-toggle ${customerMenuOpen ? "active" : ""}`} aria-expanded={customerMenuOpen} aria-label={customerMenuOpen ? "Close customer menu" : "Open customer menu"} onClick={() => setCustomerMenuOpen((current) => !current)}>
-          {customerMenuOpen ? <X size={24} strokeWidth={2.7} aria-hidden="true" /> : <Menu size={24} strokeWidth={2.7} aria-hidden="true" />}
+        <button className={`customer-menu-toggle ${workspaceDrawerNavigation ? "workspace-menu-toggle" : ""} ${drawerMenuOpen ? "active" : ""}`} aria-expanded={drawerMenuOpen} aria-label={drawerMenuOpen ? "Close navigation menu" : "Open navigation menu"} onClick={() => setDrawerMenuOpen((current) => !current)}>
+          {drawerMenuOpen ? <X size={24} strokeWidth={2.7} aria-hidden="true" /> : <Menu size={24} strokeWidth={2.7} aria-hidden="true" />}
         </button>
       )}
       <button className="brand-lockup border-0 bg-transparent" onClick={() => navigateFromHeader(homeView)}>
@@ -376,20 +379,33 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
       </button>
       {customerNavigation ? (
         <>
-          {customerMenuOpen && <button className="customer-menu-backdrop" aria-label="Close customer menu" onClick={() => setCustomerMenuOpen(false)} />}
-          <nav className={`customer-menu-drawer ${customerMenuOpen ? "open" : ""}`} aria-label="Customer navigation">
-            <div className="customer-menu-title"><p className="eyebrow text-danger">Customer menu</p><strong>Foodtrip pages</strong></div>
+          {drawerMenuOpen && <button className="customer-menu-backdrop" aria-label="Close navigation menu" onClick={() => setDrawerMenuOpen(false)} />}
+          <nav className={`customer-menu-drawer ${drawerMenuOpen ? "open" : ""}`} aria-label="Customer navigation">
+            <div className="customer-menu-title"><p className="eyebrow text-danger">{drawerEyebrow}</p><strong>{drawerTitle}</strong></div>
             {navigation.map(([view, label]) => (
               <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
             ))}
           </nav>
         </>
       ) : (
-        <nav className="role-navigation" aria-label={`${user.role} navigation`}>
-          {navigation.map(([view, label]) => (
-            <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
-          ))}
-        </nav>
+        <>
+          <nav className="role-navigation" aria-label={`${user.role} navigation`}>
+            {navigation.map(([view, label]) => (
+              <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+            ))}
+          </nav>
+          {workspaceDrawerNavigation && (
+            <>
+              {drawerMenuOpen && <button className="customer-menu-backdrop workspace-menu-backdrop" aria-label="Close navigation menu" onClick={() => setDrawerMenuOpen(false)} />}
+              <nav className={`customer-menu-drawer workspace-menu-drawer ${drawerMenuOpen ? "open" : ""}`} aria-label={`${user.role} mobile navigation`}>
+                <div className="customer-menu-title"><p className="eyebrow text-danger">{drawerEyebrow}</p><strong>{drawerTitle}</strong></div>
+                {navigation.map(([view, label]) => (
+                  <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+                ))}
+              </nav>
+            </>
+          )}
+        </>
       )}
       <div className="header-actions">
         {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}

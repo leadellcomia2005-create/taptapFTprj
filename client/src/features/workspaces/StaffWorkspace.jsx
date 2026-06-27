@@ -68,10 +68,21 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   };
 
   if (section === "staff-pos") return (
-    <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Fast counter entry</p><h2>Walk-in POS</h2></div></div>
-      <div className="row g-3">
-        <div className="col-12">
+    <main className="container-fluid dashboard-page staff-pos-page">
+      <section className="staff-pos-hero">
+        <div>
+          <p className="eyebrow">Fast counter entry</p>
+          <h2>Walk-in POS</h2>
+          <span>{activePosCategory.label} - {inventory.length} item{inventory.length === 1 ? "" : "s"}</span>
+        </div>
+        <div className="staff-pos-total">
+          <small>Current total</small>
+          <strong>{currency(posTotal)}</strong>
+        </div>
+      </section>
+
+      <section className="staff-pos-layout">
+        <div className="staff-pos-menu">
           <div className="pos-menu-tools">
             <div className="pos-category-rail" aria-label="Staff POS menu categories">
               {staffPosCategories.map((category) => (
@@ -82,11 +93,20 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
               ))}
             </div>
           </div>
+          <div className="staff-product-grid">
+            {inventory.map((product, index) => (
+              <button className="pos-product" key={product.id} disabled={product.stock <= 0} onClick={() => add(product)}>
+                <MenuPhoto product={product} priority={index < 6} />
+                <strong>{product.name}</strong>
+                <span>{currency(product.price)} - {product.stock} available</span>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="col-xl-8"><div className="row g-3">{inventory.map((product, index) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><MenuPhoto product={product} priority={index < 6} /><strong>{product.name}</strong><span>{currency(product.price)} - {product.stock} available</span></button></div>)}</div></div>
-        <div className="col-xl-4">
-          <div className="dashboard-card sticky-pos">
-            <div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>
+
+        <aside className="dashboard-card sticky-pos staff-checkout-panel">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Order cart</p><h3>Current walk-in order</h3></div>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>
+          <div className="staff-cart-list">
             {posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}
             {posCart.map((item) => (
               <div className="pos-cart-item" key={item.id}>
@@ -96,25 +116,25 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
                 <button className="pos-remove" onClick={() => remove(item.id)}>Remove</button>
               </div>
             ))}
-            <div className="pos-payment-panel">
-              <div className="checkout-mode-grid" aria-label="Walk-in type">
-                <button className={diningOption === "dine-in" ? "active" : ""} type="button" aria-pressed={diningOption === "dine-in"} onClick={() => setDiningOption("dine-in")}><strong>Dine-in</strong><small>Counter order</small></button>
-                <button className={diningOption === "takeout" ? "active" : ""} type="button" aria-pressed={diningOption === "takeout"} onClick={() => setDiningOption("takeout")}><strong>Takeout</strong><small>Pack to go</small></button>
-              </div>
-              <label className="form-label">Discount<input className="form-control" type="number" min="0" value={posDiscount} onChange={(event) => setPosDiscount(event.target.value)} /></label>
-              <label className="form-label">Cash received<input className="form-control" type="number" min="0" value={posCashReceived} onChange={(event) => setPosCashReceived(event.target.value)} /></label>
-            </div>
-            <dl className="reconciliation-list pos-totals">
-              <div><dt>Subtotal</dt><dd>{currency(posSubtotal)}</dd></div>
-              <div><dt>Discount</dt><dd>{currency(posDiscountAmount)}</dd></div>
-              <div><dt>Total</dt><dd>{currency(posTotal)}</dd></div>
-              <div><dt>Change</dt><dd>{currency(posChange)}</dd></div>
-            </dl>
-            <button className="btn btn-danger w-100" disabled={!posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
-            {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} · {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
           </div>
-        </div>
-      </div>
+          <div className="pos-payment-panel">
+            <div className="checkout-mode-grid" aria-label="Walk-in type">
+              <button className={diningOption === "dine-in" ? "active" : ""} type="button" aria-pressed={diningOption === "dine-in"} onClick={() => setDiningOption("dine-in")}><strong>Dine-in</strong><small>Counter order</small></button>
+              <button className={diningOption === "takeout" ? "active" : ""} type="button" aria-pressed={diningOption === "takeout"} onClick={() => setDiningOption("takeout")}><strong>Takeout</strong><small>Pack to go</small></button>
+            </div>
+            <label className="form-label">Discount<input className="form-control" type="number" min="0" value={posDiscount} onChange={(event) => setPosDiscount(event.target.value)} /></label>
+            <label className="form-label">Cash received<input className="form-control" type="number" min="0" value={posCashReceived} onChange={(event) => setPosCashReceived(event.target.value)} /></label>
+          </div>
+          <dl className="reconciliation-list pos-totals">
+            <div><dt>Subtotal</dt><dd>{currency(posSubtotal)}</dd></div>
+            <div><dt>Discount</dt><dd>{currency(posDiscountAmount)}</dd></div>
+            <div><dt>Total</dt><dd>{currency(posTotal)}</dd></div>
+            <div><dt>Change</dt><dd>{currency(posChange)}</dd></div>
+          </dl>
+          <button className="btn btn-danger w-100" disabled={!posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
+          {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} - {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
+        </aside>
+      </section>
     </main>
   );
   if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><OrderManagement orders={orders} canAdvance notify={notify} /></main>;
@@ -130,8 +150,15 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   const todaySales = orders.filter((order) => inRange(order.createdAt, todayRange) && isRevenueOrder(order)).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const lowStock = inventory.filter((item) => item.stock <= item.reorderPoint);
   return (
-    <main className="container-fluid dashboard-page py-4">
-      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Staff / Admin</p><h2>Shift Dashboard</h2></div><span className="shift-chip">Active shift · {new Date().toLocaleDateString("en-PH")}</span></div>
+    <main className="container-fluid dashboard-page staff-dashboard-page">
+      <section className="staff-dashboard-hero">
+        <div>
+          <p className="eyebrow">Staff / Admin</p>
+          <h2>Shift Dashboard</h2>
+          <span>Counter, kitchen, stock, and order movement for today.</span>
+        </div>
+        <span className="shift-chip">Active shift - {new Date().toLocaleDateString("en-PH")}</span>
+      </section>
       <div className="row g-3">
         <div className="col-md-3"><div className="metric-card"><small>Active orders</small><strong>{activeOrders.length}</strong><span>Kitchen and delivery queue</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Today's sales</small><strong>{currency(todaySales)}</strong><span>Online and walk-in</span></div></div>

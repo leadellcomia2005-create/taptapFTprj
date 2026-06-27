@@ -1,30 +1,23 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
 import { Bell, Bike, Camera, CheckCircle2, Clock, LogOut, MapPin, Menu, Navigation, Package as PackageIcon, Phone, Route, Trash2, Wallet, X } from "lucide-react";
+import { BrandMark, ServiceBadge } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
-import { defaultViewForRole, menuCategoryOptions, roleNavigation, securityMethodLabels, serviceDisplayNames, staffPosCategories } from "./config/appConfig";
-import { demoAccounts, fallbackMenu } from "./data/menu";
+import MenuPhoto from "./components/MenuPhoto";
+import { defaultViewForRole, menuCategoryOptions, roleNavigation, securityMethodLabels, staffPosCategories } from "./config/appConfig";
+import { fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
 import {
   adjustInventory,
-  completeTwoFactorSession,
   createMenuItem,
   createOrder,
   firebaseEnabled,
-  friendlyAuthError,
-  login,
   logout,
   moderateReview,
   observeAuth,
-  registerCustomer,
-  refreshEmailVerification,
-  resendVerificationEmail,
-  resetPassword,
-  saveUserProfile,
   saveShiftLog,
   saveRiderLocation,
   sendSupportMessage,
-  submitReview,
   subscribeAuditLogs,
   subscribeInventory,
   subscribeMenu,
@@ -39,13 +32,18 @@ import {
   updateMenuItem,
   uploadProof
 } from "./services/firebase";
-import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "./services/passkeys";
 import { disconnectSocket, getSocket, joinOrderRoom, sendRiderLocation } from "./services/socket";
-import { assistantSourceLabel, currency, menuPhotoStyle, relativeTime, statusLabel } from "./utils/display";
+import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
+import { assistantSourceLabel, currency, relativeTime, statusLabel } from "./utils/display";
 
 const CameraProof = lazy(() => import("./components/CameraProof"));
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
 const SalesChart = lazy(() => import("./components/SalesChart"));
+const Checkout = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.Checkout })));
+const OrdersView = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.OrdersView })));
+const CustomerProfile = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.CustomerProfile })));
+const ReceiptsView = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.ReceiptsView })));
+const ReviewsView = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.ReviewsView })));
 
 const dayMs = 24 * 60 * 60 * 1000;
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -361,484 +359,6 @@ const printReceipt = (order) => {
   return true;
 };
 
-function BrandMark({ className = "" }) {
-  return (
-    <span className={`brand-mark ${className}`.trim()}>
-      <img src="/assets/taptap-logo.png" alt="TapTap FoodTrip logo" />
-    </span>
-  );
-}
-
-function ServiceBadge({ name, active, note }) {
-  const displayName = serviceDisplayNames[name] || name.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
-  return (
-    <div className="service-badge">
-      <span className={`service-dot ${active ? "active" : ""}`} />
-      <div><strong>{displayName}</strong><small>{note || (active ? "Ready" : "Needs setup")}</small></div>
-    </div>
-  );
-}
-
-function LoginPanel({ onLoggedIn }) {
-  const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
-  const registrationStepDefaults = [
-    { id: "auth", label: "Account sign-in", detail: "Waiting to create your secure login.", status: "pending" },
-    { id: "profile", label: "Customer profile", detail: "Waiting to save your profile.", status: "pending" },
-    { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
-    { id: "session", label: "Final setup", detail: "Waiting to finish your account setup.", status: "pending" }
-  ];
-  const [role, setRole] = useState("customer");
-  const [registering, setRegistering] = useState(registrationRequested);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState(registrationRequested ? "" : demoAccounts.customer.email);
-  const [password, setPassword] = useState(registrationRequested ? "" : demoAccounts.customer.password);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
-  const [registrationResult, setRegistrationResult] = useState(null);
-
-  const updateRegistrationStep = (id, status, detail) => {
-    setRegistrationSteps((current) => current.map((step) => (
-      step.id === id ? { ...step, status, detail } : step
-    )));
-  };
-
-  const toggleRegistration = () => {
-    setRegistering((current) => {
-      const next = !current;
-      const url = new URL(window.location.href);
-      if (next) url.searchParams.set("register", "true");
-      else url.searchParams.delete("register");
-      window.history.replaceState({}, "", url);
-      return next;
-    });
-    setRole("customer");
-    setName("");
-    setEmail("");
-    setPassword("");
-    setError("");
-    setRegistrationResult(null);
-    setRegistrationSteps(registrationStepDefaults);
-  };
-
-  const selectRole = (nextRole) => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("register");
-    window.history.replaceState({}, "", url);
-    setRole(nextRole);
-    setEmail(demoAccounts[nextRole].email);
-    setPassword(demoAccounts[nextRole].password);
-    setRegistering(false);
-    setRegistrationResult(null);
-    setRegistrationSteps(registrationStepDefaults);
-  };
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    if (registering) {
-      setRegistrationResult(null);
-      setRegistrationSteps(registrationStepDefaults);
-    }
-    try {
-      if (registering) {
-        const result = await registerCustomer(name, email, password, updateRegistrationStep);
-        setRegistrationResult(result);
-        setPassword("");
-      } else {
-        await login(email, password, role, demoAccounts);
-        onLoggedIn?.();
-      }
-    } catch (authError) {
-      setError(friendlyAuthError(authError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="login-screen">
-      <div className="login-visual">
-        <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
-        <div>
-          <p className="eyebrow">Integrated operations platform</p>
-          <h1>One system.<br />Every <em>foodtrip.</em></h1>
-          <p>Ordering, inventory, payments, delivery, analytics and AI support in one role-based application.</p>
-        </div>
-      </div>
-      <div className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
-          <p className="eyebrow text-danger">Secure access</p>
-          <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-          <p className="text-secondary small">{firebaseEnabled ? "Secure login is ready." : "Preview sign-in is available."}</p>
-          {!registering && (
-            <div className="role-tabs">
-              {["customer", "owner", "staff", "rider"].map((item) => (
-                <button type="button" key={item} className={role === item ? "active" : ""} onClick={() => selectRole(item)}>
-                  {item}
-                </button>
-              ))}
-            </div>
-          )}
-          {registering && (
-            <label className="form-label">Full name
-              <input className="form-control" required value={name} onChange={(event) => setName(event.target.value)} />
-            </label>
-          )}
-          <label className="form-label">Email
-            <input className="form-control" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
-          </label>
-          <label className="form-label">Password
-            <input className="form-control" type="password" minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
-          </label>
-          {registering && (
-            <div className="firebase-registration-flow" aria-live="polite">
-              <div className="registration-flow-heading">
-                <div><strong>Creating your account</strong><small>Setting up your secure customer profile.</small></div>
-                <span>{registrationResult ? "Complete" : busy ? "Working" : "Ready"}</span>
-              </div>
-              {registrationSteps.map((step) => (
-                <div className={`registration-step registration-${step.status}`} key={step.id}>
-                  <span className="registration-step-icon" aria-hidden="true" />
-                  <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-                </div>
-              ))}
-              {registrationResult && (
-                <div className="registration-result">
-                  <strong>Customer account created</strong>
-                  <span>Your account is ready. Please check your email to verify it.</span>
-                  <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
-                </div>
-              )}
-            </div>
-          )}
-          {error && <div className="alert alert-danger py-2 small">{error}</div>}
-          <button className="btn btn-danger w-100" disabled={busy}>
-            {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
-          </button>
-          {/* erick: dating plain links, ginawang outline buttons para clickable. */}
-          <div className="d-flex justify-content-between gap-2 mt-3">
-            <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
-              {registering ? "Back to sign in" : "Customer registration"}
-            </button>
-            {!registering && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function OtpInput({ value, onChange, disabled }) {
-  const refs = useRef([]);
-  const digits = Array.from({ length: 6 }, (_, index) => value[index] || "");
-  const update = (index, nextValue) => {
-    const digit = nextValue.replace(/\D/g, "").slice(-1);
-    const next = [...digits];
-    next[index] = digit;
-    onChange(next.join(""));
-    if (digit && index < 5) refs.current[index + 1]?.focus();
-  };
-  const paste = (event) => {
-    const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pasted.length) return;
-    event.preventDefault();
-    onChange(pasted);
-    refs.current[Math.min(pasted.length, 6) - 1]?.focus();
-  };
-  return (
-    <div className="otp-inputs" onPaste={paste}>
-      {digits.map((digit, index) => (
-        <input
-          aria-label={`Digit ${index + 1}`}
-          autoComplete="one-time-code"
-          disabled={disabled}
-          inputMode="numeric"
-          key={index}
-          maxLength="1"
-          onChange={(event) => update(index, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Backspace" && !digits[index] && index > 0) refs.current[index - 1]?.focus();
-          }}
-          ref={(element) => { refs.current[index] = element; }}
-          value={digit}
-        />
-      ))}
-    </div>
-  );
-}
-
-function EmailVerificationPanel({ user, onVerified }) {
-  const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  const resend = async () => {
-    setBusy("resend");
-    setMessage("");
-    setError("");
-    try {
-      const result = await resendVerificationEmail();
-      setMessage(result.alreadyVerified
-        ? "Your email is verified. You can continue."
-        : `A new verification link was sent to ${user.email}. Check Inbox and Spam.`);
-    } catch (requestError) {
-      setError(friendlyAuthError(requestError));
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const check = async () => {
-    setBusy("check");
-    setMessage("");
-    setError("");
-    try {
-      const result = await refreshEmailVerification();
-      if (!result.verified) {
-        setError("Your email is not verified yet. Please open the link in your email, then check again.");
-        return;
-      }
-      onVerified(result.status);
-    } catch (requestError) {
-      setError(friendlyAuthError(requestError));
-    } finally {
-      setBusy("");
-    }
-  };
-
-  return (
-    <div className="security-screen">
-      <div className="security-card">
-        <p className="eyebrow text-danger">First login verification</p>
-        <h2>Verify your email</h2>
-        <p>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>.</p>
-        <div className="email-verification-actions">
-          <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
-          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy)} onClick={resend}>
-            {busy === "resend" ? "Sending..." : "Resend verification email"}
-          </button>
-          <button className="btn btn-danger w-100" disabled={Boolean(busy)} onClick={check}>
-            {busy === "check" ? "Checking your email..." : "I verified my email, check again"}
-          </button>
-        </div>
-        {message && <div className="alert alert-success py-2 small mt-3">{message}</div>}
-        {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
-        <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
-      </div>
-    </div>
-  );
-}
-
-function TwoFactorPanel({ user, onComplete }) {
-  const status = user.twoFactor || {};
-  const setup = !status.enabled;
-  const customerAccount = status.role === "customer";
-  const browserPasskeysReady = passkeysSupported();
-  const [method, setMethod] = useState(status.method || (customerAccount && status.passkeyAvailable ? "passkey" : customerAccount && status.emailOtpAvailable ? "email" : "totp"));
-  const [setupData, setSetupData] = useState(null);
-  const [code, setCode] = useState("");
-  const [backupMode, setBackupMode] = useState(false);
-  const [backupCode, setBackupCode] = useState("");
-  const [result, setResult] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [deliveryMessage, setDeliveryMessage] = useState("");
-
-  const beginTotp = async () => {
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      setSetupData(await api.beginTotpSetup());
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const sendSms = async () => {
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      const response = await api.sendTwoFactorSms(setup ? "setup" : "challenge");
-      setDeliveryMessage(`A six-digit code was sent to ${response.phoneMasked}.`);
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const sendEmail = async () => {
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      const response = await api.sendTwoFactorEmail(setup ? "setup" : "challenge");
-      setDeliveryMessage(`A six-digit code was sent to ${response.emailMasked}. Check Inbox and Spam.`);
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setupPasskey = async () => {
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      const response = await registerCustomerPasskey();
-      if (response.backupCodes) setResult(response);
-      else onComplete(await completeTwoFactorSession(response.customToken));
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verifyPasskey = async () => {
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      const response = await authenticateCustomerPasskey();
-      onComplete(await completeTwoFactorSession(response.customToken));
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verify = async (event) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    setDeliveryMessage("");
-    try {
-      const response = setup
-        ? await api.finishTwoFactorSetup(method, code)
-        : await api.verifyTwoFactor(backupMode ? { backupCode } : { code });
-      if (response.backupCodes) setResult(response);
-      else onComplete(await completeTwoFactorSession(response.customToken));
-    } catch (requestError) {
-      setCode("");
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const continueWithBackupCodes = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      onComplete(await completeTwoFactorSession(result.customToken));
-    } catch (requestError) {
-      setError(friendlyAuthError(requestError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (status.locked) {
-    return (
-      <div className="security-screen"><div className="security-card">
-        <p className="eyebrow text-danger">Account locked</p>
-        <h2>Account security is locked</h2>
-        <p>Three consecutive verification attempts failed. An owner must unlock this account from Users & Roles.</p>
-        <button className="btn btn-outline-danger" onClick={() => resetPassword(user.email).then(() => window.alert("Password reset email sent. After changing the password, sign in again to unlock security.")).catch((requestError) => window.alert(requestError.message))}>Reset password to unlock</button>
-        <button className="btn btn-link text-danger" onClick={logout}>Return to sign in</button>
-      </div></div>
-    );
-  }
-
-  if (result?.backupCodes) {
-    return (
-      <div className="security-screen"><div className="security-card">
-        <p className="eyebrow text-danger">Recovery codes</p>
-        <h2>Save these backup codes</h2>
-        <p>Each code works once. They cannot be displayed again after you continue.</p>
-        <div className="backup-code-grid">{result.backupCodes.map((item) => <code key={item}>{item}</code>)}</div>
-        {error && <div className="alert alert-danger py-2 small">{error}</div>}
-        <button className="btn btn-danger w-100" disabled={busy} onClick={continueWithBackupCodes}>
-          {busy ? "Opening your dashboard..." : "I saved my codes, continue"}
-        </button>
-      </div></div>
-    );
-  }
-
-  return (
-    <div className="security-screen">
-      <form className="security-card" onSubmit={verify}>
-        <p className="eyebrow text-danger">{setup ? "Required security setup" : "Second verification step"}</p>
-        <h2>{setup ? "Set up account security" : "Verify your sign-in"}</h2>
-        <p>{setup
-          ? customerAccount
-            ? "Choose passkey, email, a security app, or SMS. Passkey is the fastest option on phones with fingerprint, Face ID, or screen lock."
-            : "Owner, staff, and rider accounts must use a security app before opening POS tools."
-          : status.method === "passkey"
-            ? "Confirm with your phone fingerprint, Face ID, or screen lock to finish signing in."
-            : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "security app"}.`}</p>
-        {setup && (
-          <div className="security-methods">
-            {customerAccount && (
-              <>
-                <button type="button" disabled={!status.passkeyAvailable || !browserPasskeysReady} className={method === "passkey" ? "active" : ""} onClick={() => { setMethod("passkey"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>Passkey</strong><small>{browserPasskeysReady ? "Fingerprint, Face ID, or screen lock" : "Needs HTTPS or localhost"}</small>
-                </button>
-                <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>Email code</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Email sending is not ready"}</small>
-                </button>
-                <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>SMS code</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Phone number required"}</small>
-                </button>
-              </>
-            )}
-            <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-              <strong>Security app</strong><small>Free, offline 30-second codes</small>
-            </button>
-          </div>
-        )}
-        {method === "passkey" && !backupMode && (
-          <div className="passkey-panel">
-            <strong>{setup ? "Create customer passkey" : "Use customer passkey"}</strong>
-            <span>{browserPasskeysReady ? "Your phone will ask for fingerprint, Face ID, PIN, or screen lock." : "Passkeys need HTTPS or localhost. Use this after deployment, or test on localhost."}</span>
-            <button type="button" className="btn btn-danger w-100" disabled={busy || !browserPasskeysReady} onClick={setup ? setupPasskey : verifyPasskey}>
-              {busy ? "Waiting for passkey..." : setup ? "Create passkey" : "Continue with passkey"}
-            </button>
-          </div>
-        )}
-        {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Show security app setup code</button>}
-        {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Security app setup code" /><p>Setup key: <code>{setupData.manualKey}</code></p></div>}
-        {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
-        {method === "email" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.emailOtpAvailable} onClick={sendEmail}>Send 6-digit email code</button>}
-        {!backupMode && method !== "passkey" ? (
-          <>
-            <label className="form-label">6-digit verification code</label>
-            <OtpInput value={code} onChange={setCode} disabled={busy} />
-          </>
-        ) : (
-          <label className="form-label">Single-use backup code<input className="form-control" autoComplete="one-time-code" value={backupCode} onChange={(event) => setBackupCode(event.target.value.toUpperCase())} /></label>
-        )}
-        {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
-        {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
-        {(method !== "passkey" || backupMode) && <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
-          {busy ? "Verifying..." : setup ? "Save security setup" : "Verify and open POS"}
-        </button>}
-        {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
-        <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
-      </form>
-    </div>
-  );
-}
-
 function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications }) {
   const navigation = roleNavigation[user.role] || [];
   const homeView = defaultViewForRole(user.role);
@@ -918,16 +438,18 @@ function NotificationCenter({ notifications, onClose }) {
   );
 }
 
-function Storefront({ menu, cart, setCart, onCheckout, notify }) {
+const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
-  const customerMenu = menu.filter((item) => !item.walkInOnly && !item.unavailable);
-  const categories = ["All", ...new Set(customerMenu.map((item) => item.category))];
-  const visible = category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category);
-  const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
-  const cartSubtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && !item.unavailable), [menu]);
+  const categories = useMemo(() => ["All", ...new Set(customerMenu.map((item) => item.category))], [customerMenu]);
+  const visible = useMemo(() => (
+    category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category)
+  ), [category, customerMenu]);
+  const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
+  const cartSubtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
   const deliveryFee = cart.length > 0 ? 49 : 0;
   // erick: i-cap ang add-to-cart sa available stock (gaya ng POS) para hindi lumampas.
-  const add = (product) => setCart((current) => {
+  const add = useCallback((product) => setCart((current) => {
     const availableStock = Number(product.stock ?? 0);
     const existing = current.find((item) => item.id === product.id);
     if (existing) {
@@ -939,12 +461,12 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
     }
     if (availableStock < 1) return current;
     return [...current, { ...product, stock: availableStock, qty: 1 }];
-  });
-  const decrease = (productId) => setCart((current) => current
+  }), [notify, setCart]);
+  const decrease = useCallback((productId) => setCart((current) => current
     .map((item) => item.id === productId ? { ...item, qty: item.qty - 1 } : item)
-    .filter((item) => item.qty > 0));
+    .filter((item) => item.qty > 0)), [setCart]);
   // erick: buong item ang tinatanggal kapag nagkamali ang customer sa cart.
-  const remove = (productId) => setCart((current) => current.filter((item) => item.id !== productId));
+  const remove = useCallback((productId) => setCart((current) => current.filter((item) => item.id !== productId)), [setCart]);
 
   return (
     <main className="storefront-page" id="live-menu">
@@ -968,11 +490,11 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
           </div>
 
           <div className="menu-list">
-            {visible.map((product) => {
+            {visible.map((product, index) => {
               const stock = Number(product.stock ?? 0);
               return (
                 <article className="menu-list-card" key={product.id}>
-                  <div className="menu-photo" style={menuPhotoStyle(product)} />
+                  <MenuPhoto product={product} priority={index < 4} />
                   <div className="menu-item-copy">
                     <div>
                       <h3>{product.name}</h3>
@@ -1042,236 +564,7 @@ function Storefront({ menu, cart, setCart, onCheckout, notify }) {
       {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={onCheckout}>Checkout {cartCount} item{cartCount === 1 ? "" : "s"}</button>}
     </main>
   );
-}
-
-function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, notify }) {
-  const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
-  const [deliveryType, setDeliveryType] = useState("delivery");
-  const [phone, setPhone] = useState(profile?.phone || "");
-  const [address, setAddress] = useState(profile?.address || "");
-  const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const deliveryFee = deliveryType === "delivery" && cart.length > 0 ? 49 : 0;
-  const total = subtotal + deliveryFee;
-  useEffect(() => {
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
-  const place = async () => {
-    if (!phone.trim() || (deliveryType === "delivery" && !address.trim())) {
-      notify(deliveryType === "delivery" ? "Enter a mobile number and delivery address before placing the order." : "Enter a mobile number before placing the order.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const orderPayload = {
-        customerId: user.uid,
-        customerName: user.name,
-        customerEmail: user.email,
-        phone,
-        address: deliveryType === "delivery" ? address : "Store pickup",
-        deliveryType,
-        notes,
-        paymentMethod: payment,
-        total,
-        items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
-      };
-      const orderId = await createOrder(orderPayload);
-      if (payment === "gcash") {
-        try {
-          const result = await api.createPayment({ orderId });
-          if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
-          else notify(`Order ${orderId} created. Online payment setup is not ready yet.`);
-        } catch (paymentError) {
-          notify(`Order ${orderId} created. ${paymentError.message}`);
-        }
-      } else {
-        notify(`Order ${orderId} was sent to the kitchen.`);
-      }
-      onComplete(orderId);
-    } catch (error) {
-      notify(error.message || "The order could not be placed. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
-          <div className="modal-body">
-            {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
-            <div className="checkout-mode-grid mt-3" aria-label="Order type">
-              <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>With rider fee</small></button>
-              <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>Claim at store</small></button>
-            </div>
-            <label className="form-label mt-3">Mobile number<input className="form-control" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
-            {deliveryType === "delivery" && <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} /></label>}
-            <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: landmark, extra request, or pickup note" /></label>
-            <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "Not ready"}</small></button></div>
-              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
-            </div>
-            <div className="checkout-total"><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>
-            {deliveryFee > 0 && <small className="text-secondary d-block mt-2">Delivery fee: {currency(deliveryFee)}</small>}
-          </div>
-          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !phone.trim() || (deliveryType === "delivery" && !address.trim())} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OrdersView({ orders, onTrack }) {
-  const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
-  const pastOrders = orders.filter((order) => ["delivered", "cancelled"].includes(order.status));
-  const totalSpent = orders.filter(isRevenueOrder).reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const latestOrder = orders[0];
-  const renderOrderTable = (title, list, emptyText) => (
-    <section className="order-table-card">
-      <div className="order-table-heading">
-        <h3>{title}</h3>
-        <span>{list.length}</span>
-      </div>
-      <div className="order-table">
-        <div className="order-table-head">
-          <span>Order</span>
-          <span>Date</span>
-          <span>Status</span>
-          <span>Delivery</span>
-          <span>Total</span>
-          <span>Action</span>
-        </div>
-        {list.length === 0 && <div className="empty-state compact">{emptyText}</div>}
-        {list.map((order) => (
-          <article className="order-table-row" key={order.id}>
-            <div className="order-line-item" data-label="Order">
-              <small>{order.id}</small>
-              <strong>{order.items?.map((item) => `${item.qty} x ${item.name}`).join(", ") || "Order items"}</strong>
-            </div>
-            <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
-            <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
-            <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}</div>
-            <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button></div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-
-  return (
-    <main className="container-fluid customer-page order-history-page">
-      <div className="order-history-layout">
-        <section className="order-history-main">
-          <div className="section-title">
-            <div><p className="eyebrow text-danger">Your orders</p><h2>Order history</h2></div>
-            <p>Review previous and active purchases with live delivery status.</p>
-          </div>
-          {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : (
-            <>
-              {renderOrderTable("Active orders", activeOrders, "No active orders right now.")}
-              {renderOrderTable("Past orders", pastOrders, "Completed orders will appear here.")}
-            </>
-          )}
-        </section>
-        <aside className="order-summary-panel">
-          <h3>Summary</h3>
-          <div className="summary-metric"><span>Active orders</span><strong>{activeOrders.length}</strong></div>
-          <div className="summary-metric"><span>Completed orders</span><strong>{pastOrders.length}</strong></div>
-          <div className="summary-metric"><span>Total spend</span><strong>{currency(totalSpent)}</strong></div>
-          <div className="summary-metric"><span>Latest update</span><strong>{latestOrder ? statusLabel(latestOrder.status) : "-"}</strong></div>
-        </aside>
-      </div>
-    </main>
-  );
-}
-
-function CustomerProfile({ user, profile, notify }) {
-  const [form, setForm] = useState(profile || {});
-  useEffect(() => setForm(profile || {}), [profile]);
-  const save = async (event) => {
-    event.preventDefault();
-    await saveUserProfile(user, form);
-    notify("Personal information and saved address updated.");
-  };
-  return (
-    <main className="container py-5 customer-page">
-      <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Personal info</h2></div><p>Keep your contact details and preferred delivery address ready for checkout.</p></div>
-      <form className="dashboard-card profile-form" onSubmit={save}>
-        <div className="row g-3">
-          <label className="form-label col-md-6">Full name<input className="form-control" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
-          <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
-          <label className="form-label col-md-6">Mobile number<input className="form-control" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /></label>
-          <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
-          <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
-        </div>
-        <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label></div>
-        <button className="btn btn-danger">Save personal information</button>
-      </form>
-    </main>
-  );
-}
-
-function ReceiptsView({ orders }) {
-  const downloadReceipt = async (order) => {
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF();
-    pdf.setFontSize(20);
-    pdf.text("Taptap Foodtrip", 18, 20);
-    pdf.setFontSize(12);
-    pdf.text("Digital Receipt", 18, 29);
-    pdf.setFontSize(10);
-    pdf.text(`Receipt: ${order.id}`, 18, 40);
-    pdf.text(`Date: ${new Date(order.createdAt).toLocaleString("en-PH")}`, 18, 47);
-    pdf.text(`Customer: ${order.customerName}`, 18, 54);
-    pdf.text(`Payment: ${order.paymentMethod?.toUpperCase()}`, 18, 61);
-    order.items?.forEach((item, index) => pdf.text(`${item.qty} x ${item.name} - ${currency(item.qty * item.price)}`, 18, 76 + index * 8));
-    pdf.setFontSize(13);
-    pdf.text(`Total: ${currency(order.total)}`, 18, 90 + (order.items?.length || 0) * 8);
-    pdf.save(`${order.id}-receipt.pdf`);
-  };
-  return (
-    <main className="container py-5 customer-page">
-      <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
-      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}>Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
-    </main>
-  );
-}
-
-function ReviewsView({ user, orders, reviews, notify }) {
-  const reviewByOrder = new Map(reviews.map((review) => [review.orderId, review]));
-  const eligibleOrders = orders.filter((order) => order.status === "delivered" && !reviewByOrder.has(order.id));
-  const [selectedOrderId, setSelectedOrderId] = useState("");
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("");
-  const selectedOrder = eligibleOrders.find((order) => order.id === selectedOrderId) || eligibleOrders[0];
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!selectedOrder) return;
-    await submitReview(selectedOrder, user, rating, comment.trim());
-    setSelectedOrderId("");
-    setRating(5);
-    setComment("");
-    notify(`Thank you for rating ${selectedOrder.id}.`);
-  };
-  return (
-    <main className="container py-5 customer-page">
-      <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
-      <div className="row g-4">
-        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} · {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
-        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} · {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
-      </div>
-    </main>
-  );
-}
+});
 
 function ReviewModerationModule({ reviews, user, notify }) {
   const [drafts, setDrafts] = useState({});
@@ -1991,7 +1284,7 @@ function StaffWorkspace({ section, user, orders, inventory: staffInventory, revi
             </div>
           </div>
         </div>
-        <div className="col-xl-8"><div className="row g-3">{inventory.map((product) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><div className="menu-photo" style={menuPhotoStyle(product)} /><strong>{product.name}</strong><span>{currency(product.price)} · {product.stock} available</span></button></div>)}</div></div>
+        <div className="col-xl-8"><div className="row g-3">{inventory.map((product, index) => <div className="col-md-4" key={product.id}><button className="pos-product" disabled={product.stock <= 0} onClick={() => add(product)}><MenuPhoto product={product} priority={index < 6} /><strong>{product.name}</strong><span>{currency(product.price)} - {product.stock} available</span></button></div>)}</div></div>
         <div className="col-xl-4">
           <div className="dashboard-card sticky-pos">
             <div className="module-heading"><h3>Current walk-in order</h3>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>
@@ -2508,18 +1801,38 @@ export default function App() {
       ? <StaffWorkspace section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
       : user.role === "rider"
         ? <RiderWorkspace section={view} user={currentUser} orders={orders} notify={setNotice} />
-        : <OrdersView orders={orders} onTrack={setTrackingOrder} />;
+        : null;
 
   return (
     <div className="app-shell">
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
-      {user.role === "customer" && view === "orders" && <OrdersView orders={orders} onTrack={setTrackingOrder} />}
-      {user.role === "customer" && view === "receipts" && <ReceiptsView orders={orders} />}
-      {user.role === "customer" && view === "feedback" && <ReviewsView user={currentUser} orders={orders} reviews={reviews} notify={setNotice} />}
-      {user.role === "customer" && view === "profile" && <CustomerProfile user={currentUser} profile={profile} notify={setNotice} />}
+      {user.role === "customer" && view === "orders" && (
+        <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
+          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} />
+        </Suspense>
+      )}
+      {user.role === "customer" && view === "receipts" && (
+        <Suspense fallback={<SectionLoader label="Loading receipts..." />}>
+          <ReceiptsView orders={orders} printReceipt={printReceipt} />
+        </Suspense>
+      )}
+      {user.role === "customer" && view === "feedback" && (
+        <Suspense fallback={<SectionLoader label="Loading feedback..." />}>
+          <ReviewsView user={currentUser} orders={orders} reviews={reviews} notify={setNotice} />
+        </Suspense>
+      )}
+      {user.role === "customer" && view === "profile" && (
+        <Suspense fallback={<SectionLoader label="Loading profile..." />}>
+          <CustomerProfile user={currentUser} profile={profile} notify={setNotice} />
+        </Suspense>
+      )}
       {user.role !== "customer" && workspace}
-      {user.role === "customer" && checkoutOpen && <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />}
+      {user.role === "customer" && checkoutOpen && (
+        <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
+          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />
+        </Suspense>
+      )}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}

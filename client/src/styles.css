@@ -211,7 +211,9 @@ button { font: inherit; }
 .category-pills button { flex: none; padding: 9px 15px; color: var(--muted); border: 1px solid var(--line); background: white; border-radius: 30px; font-size: 10px; font-weight: 750; }
 .category-pills button.active { color: white; border-color: var(--ink); background: var(--ink); }
 .menu-card { height: 100%; overflow: hidden; background: white; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 30px rgba(38,29,19,.06); }
-.menu-photo { height: 220px; background: url("/assets/menu-grid.png") no-repeat; background-size: 300% 200%; }
+.menu-photo { height: 220px; overflow: hidden; background: #f7f2ea; border-radius: 8px; }
+.menu-photo img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.menu-photo-placeholder { background: linear-gradient(135deg,#fff8ef,#f0e2cf); }
 .menu-card h3 { margin: 0; font: 700 21px var(--display); }
 .menu-card p { min-height: 42px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .menu-card small { color: #998f83; font-size: 8px; }

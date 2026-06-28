@@ -11,12 +11,19 @@ import helmet from "helmet";
 import { Server as SocketServer } from "socket.io";
 import {
   adjustInventoryRecord,
+  archiveCompletedOrdersRecord,
+  closeActiveShiftRecord,
+  createApprovalRequestRecord,
   createMenuItemRecord,
   createOrderRecord,
+  getActiveShiftRecord,
+  listApprovalRequestsRecord,
   listOrdersForUser,
+  resolveApprovalRequestRecord,
   saveDeliveryProofRecord,
   saveRiderLocationRecord,
   saveShiftLogRecord,
+  startShiftRecord,
   updateMenuItemRecord,
   updateOrderRecord,
   updateReviewRecord
@@ -286,6 +293,14 @@ app.patch("/api/orders/:orderId", authenticate, asyncRoute(async (req, res) => {
   res.json({ id: req.params.orderId, ...result });
 }));
 
+app.post("/api/orders/:orderId/receipt-email", authenticate, asyncRoute(async (req, res) => {
+  if (!validRecordId(req.params.orderId)) throw new HttpError(400, "Invalid order ID.");
+  const order = (await db().ref(`orders/${req.params.orderId}`).once("value")).val();
+  if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot access this receipt.");
+  const result = await sendOrderReceiptEmail({ id: req.params.orderId, ...order });
+  res.json({ sent: Boolean(result?.sent ?? result), result });
+}));
+
 app.get("/api/inventory", authenticate, requireRoles("owner", "staff"), asyncRoute(async (_req, res) => {
   res.json({ inventory: (await db().ref("inventory").once("value")).val() || {} });
 }));
@@ -332,11 +347,56 @@ app.post("/api/shift-logs", authenticate, requireRoles("owner", "staff"), asyncR
   res.status(201).json(result);
 }));
 
+app.get("/api/shifts/active", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.json(await getActiveShiftRecord(db(), req.user));
+}));
+
+app.post("/api/shifts/start", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  const result = await startShiftRecord(db(), req.user, req.body);
+  io.to("role:owner").to("role:staff").emit("shift:started", result);
+  res.status(201).json(result);
+}));
+
+app.post("/api/shifts/close", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  const result = await closeActiveShiftRecord(db(), req.user, req.body);
+  io.to("role:owner").to("role:staff").emit("shift:closed", result);
+  res.status(201).json(result);
+}));
+
+app.get("/api/approvals", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.json(await listApprovalRequestsRecord(db(), req.user));
+}));
+
+app.post("/api/approvals", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  res.status(201).json(await createApprovalRequestRecord(db(), req.user, req.body));
+}));
+
+app.patch("/api/approvals/:requestId", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  res.json(await resolveApprovalRequestRecord(db(), req.user, req.params.requestId, req.body));
+}));
+
+app.post("/api/admin/archive-orders", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  res.json(await archiveCompletedOrdersRecord(db(), req.user, req.body));
+}));
+
 app.post("/api/admin/roles", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
   if (!validRecordId(req.body.uid)) throw new HttpError(400, "Invalid account ID.");
   if (!["owner", "staff", "rider", "customer"].includes(req.body.role)) throw new HttpError(400, "Unsupported role.");
+  const currentRole = (await db().ref(`users/${req.body.uid}/role`).once("value")).val() || "customer";
   await getAuth().setCustomUserClaims(req.body.uid, { role: req.body.role });
-  await db().ref(`users/${req.body.uid}/role`).set(req.body.role);
+  const createdAt = Date.now();
+  await db().ref().update({
+    [`users/${req.body.uid}/role`]: req.body.role,
+    [`auditLogs/AUD-${createdAt}-${req.body.uid}-role`]: {
+      action: "role_changed",
+      targetUserId: req.body.uid,
+      actorId: req.user.uid,
+      actorName: req.user.name || req.user.email,
+      actorRole: req.user.role,
+      details: { before: { role: currentRole }, after: { role: req.body.role } },
+      createdAt
+    }
+  });
   res.json({ updated: true });
 }));
 

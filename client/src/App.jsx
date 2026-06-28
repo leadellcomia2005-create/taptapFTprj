@@ -670,11 +670,21 @@ export default function App() {
   const [trackingOrder, setTrackingOrder] = useState(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [online, setOnline] = useState(() => navigator.onLine);
   const [serviceStatus, setServiceStatus] = useState({ firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
   const activeUser = user?.mfaVerified ? user : null;
 
   useEffect(() => observeAuth(setUser), []);
+  useEffect(() => {
+    const updateOnlineState = () => setOnline(navigator.onLine);
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+    };
+  }, []);
   useEffect(() => {
     if (!activeUser) {
       setProfile(null);
@@ -702,7 +712,7 @@ export default function App() {
     const shouldLoadOrders = Boolean(activeUser) && (
       activeUser.role === "rider" ||
       (activeUser.role === "customer" && (["orders", "receipts", "feedback"].includes(view) || checkoutOpen || trackingOrder)) ||
-      (activeUser.role === "owner" && ["owner-dashboard", "owner-sales", "owner-reports"].includes(view)) ||
+      (activeUser.role === "owner" && ["owner-dashboard", "owner-sales", "owner-reports", "owner-settings"].includes(view)) ||
       (activeUser.role === "staff" && ["staff-dashboard", "staff-pos", "staff-orders", "staff-kitchen", "staff-shifts"].includes(view))
     );
     if (!shouldLoadOrders) {
@@ -837,15 +847,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
+      {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
-          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} />
+          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} />
         </Suspense>
       )}
       {user.role === "customer" && view === "receipts" && (
         <Suspense fallback={<SectionLoader label="Loading receipts..." />}>
-          <ReceiptsView orders={orders} printReceipt={printReceipt} />
+          <ReceiptsView orders={orders} printReceipt={printReceipt} notify={setNotice} />
         </Suspense>
       )}
       {user.role === "customer" && view === "feedback" && (

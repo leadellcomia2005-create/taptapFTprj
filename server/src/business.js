@@ -7,6 +7,7 @@ import {
   validateLocation,
   validateOrderItems
 } from "./security.js";
+import { getAuth } from "firebase-admin/auth";
 import { notificationUpdates, userIdsForRoles } from "./notifications.js";
 
 const deliveryFee = 49;
@@ -22,6 +23,58 @@ function slugifyId(value) {
 
 function cloneData(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function auditDetails(before = {}, after = {}, fields = []) {
+  const beforeValues = {};
+  const afterValues = {};
+  for (const field of fields) {
+    const previous = before[field] ?? null;
+    const next = after[field] ?? null;
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      beforeValues[field] = previous;
+      afterValues[field] = next;
+    }
+  }
+  return { before: beforeValues, after: afterValues };
+}
+
+function stockHistoryEntry({ item, itemId, beforeStock, afterStock, delta, reason, user, action, orderId = null }) {
+  return {
+    itemId,
+    itemName: item?.name || itemId,
+    beforeStock: Number(beforeStock || 0),
+    afterStock: Number(afterStock || 0),
+    delta: Number(delta || 0),
+    reason,
+    action,
+    orderId,
+    actorId: user?.uid || "system",
+    actorName: user?.name || user?.email || "System",
+    actorRole: user?.role || "system",
+    createdAt: Date.now()
+  };
+}
+
+const activeDeliveryStatuses = new Set(["ready", "out-for-delivery", "arrived"]);
+
+async function chooseLeastBusyRider(db) {
+  const [usersSnapshot, ordersSnapshot] = await Promise.all([
+    db.ref("users").once("value"),
+    db.ref("orders").once("value")
+  ]);
+  const riders = Object.entries(usersSnapshot.val() || {})
+    .map(([uid, profile]) => ({ uid, ...profile }))
+    .filter((profile) => profile.role === "rider");
+  if (riders.length === 0) return null;
+  const activeCounts = new Map(riders.map((rider) => [rider.uid, 0]));
+  for (const order of Object.values(ordersSnapshot.val() || {})) {
+    if (order.riderId && activeDeliveryStatuses.has(order.status) && activeCounts.has(order.riderId)) {
+      activeCounts.set(order.riderId, activeCounts.get(order.riderId) + 1);
+    }
+  }
+  return riders
+    .sort((a, b) => (activeCounts.get(a.uid) || 0) - (activeCounts.get(b.uid) || 0) || String(a.name || a.email || a.uid).localeCompare(String(b.name || b.email || b.uid)))[0];
 }
 
 async function transactionWithInitial(ref, initialValue, update) {
@@ -162,7 +215,20 @@ export async function createOrderRecord(db, user, input) {
   };
   // erick: i-mirror ang nabawasang stock sa public/menu para live ang storefront availability.
   for (const item of items) {
-    updates[`public/menu/${item.id}/stock`] = Number(committedInventory[item.id]?.stock ?? 0);
+    const afterStock = Number(committedInventory[item.id]?.stock ?? 0);
+    const historyId = db.ref(`stockHistory/${item.id}`).push().key;
+    updates[`public/menu/${item.id}/stock`] = afterStock;
+    updates[`stockHistory/${item.id}/${historyId}`] = stockHistoryEntry({
+      item,
+      itemId: item.id,
+      beforeStock: afterStock + Number(item.qty || 0),
+      afterStock,
+      delta: -Number(item.qty || 0),
+      reason: `Order ${orderId}`,
+      user,
+      action: "order_deducted",
+      orderId
+    });
   }
 
   try {
@@ -221,17 +287,54 @@ export async function updateOrderRecord(db, user, orderId, input) {
   if (!transaction.committed) throw updateError || new HttpError(409, "The order changed before this update was applied.");
 
   const order = transaction.snapshot.val();
+  const now = Date.now();
+  let autoAssignedRider = null;
+  if (
+    order.status === "ready" &&
+    order.deliveryType === "delivery" &&
+    !order.riderId &&
+    previous.status !== "ready"
+  ) {
+    autoAssignedRider = await chooseLeastBusyRider(db);
+    if (autoAssignedRider) {
+      order.riderId = autoAssignedRider.uid;
+      order.riderName = autoAssignedRider.name || autoAssignedRider.email || "Rider";
+      order.assignedAt = now;
+      order.assignedBy = "system";
+      order.assignmentMode = "auto";
+      changes.riderId = autoAssignedRider.uid;
+      changes.riderName = order.riderName;
+      changes.assignedAt = now;
+    }
+  }
   const updates = {
-    [`auditLogs/AUD-${Date.now()}-${orderId}`]: {
+    [`auditLogs/AUD-${now}-${orderId}`]: {
       action: "order_updated",
       orderId,
       status: changes.status || null,
+      details: auditDetails(previous, order, ["status", "riderId", "riderName", "paymentStatus", "cancelReason", "refundStatus", "codRemittedAt"]),
       actorId: user.uid,
       actorName: user.name || user.email,
       actorRole: user.role,
-      createdAt: Date.now()
+      createdAt: now
     }
   };
+  if (autoAssignedRider) {
+    updates[`orders/${orderId}/riderId`] = autoAssignedRider.uid;
+    updates[`orders/${orderId}/riderName`] = order.riderName;
+    updates[`orders/${orderId}/assignedAt`] = now;
+    updates[`orders/${orderId}/assignedBy`] = "system";
+    updates[`orders/${orderId}/assignmentMode`] = "auto";
+    updates[`auditLogs/AUD-${now}-${orderId}-auto-rider`] = {
+      action: "rider_auto_assigned",
+      orderId,
+      actorId: "system",
+      actorName: "System",
+      actorRole: "system",
+      details: { after: { riderId: autoAssignedRider.uid, riderName: order.riderName } },
+      createdAt: now
+    };
+  }
   if (changes.status && order.customerId !== "walk-in") {
     Object.assign(updates, notificationUpdates(db, [order.customerId], {
       title: "Order status updated",
@@ -264,8 +367,20 @@ export async function updateOrderRecord(db, user, orderId, input) {
     for (const item of previous.items || []) {
       const current = inventorySnapshot.child(`${item.id}/stock`).val();
       const nextStock = Number(current || 0) + Number(item.qty || 0);
+      const historyId = db.ref(`stockHistory/${item.id}`).push().key;
       restoredInventory[`inventory/${item.id}/stock`] = nextStock;
       restoredInventory[`public/menu/${item.id}/stock`] = nextStock;
+      restoredInventory[`stockHistory/${item.id}/${historyId}`] = stockHistoryEntry({
+        item,
+        itemId: item.id,
+        beforeStock: Number(current || 0),
+        afterStock: nextStock,
+        delta: Number(item.qty || 0),
+        reason: `Cancelled order ${orderId}`,
+        user,
+        action: "order_cancel_restored",
+        orderId
+      });
     }
     Object.assign(updates, restoredInventory);
     if (order.customerId !== "walk-in") {
@@ -329,6 +444,16 @@ export async function createMenuItemRecord(db, user, input = {}) {
   await db.ref().update({
     [`public/menu/${id}`]: item,
     [`inventory/${id}`]: { name, category, price, stock, reorderPoint, unavailable: item.unavailable, createdAt },
+    [`stockHistory/${id}/${db.ref(`stockHistory/${id}`).push().key}`]: stockHistoryEntry({
+      item,
+      itemId: id,
+      beforeStock: 0,
+      afterStock: stock,
+      delta: stock,
+      reason: "Initial menu stock",
+      user,
+      action: "menu_item_created"
+    }),
     [`auditLogs/${db.ref("auditLogs").push().key}`]: {
       action: "menu_item_created",
       itemId: id,
@@ -391,11 +516,22 @@ export async function updateMenuItemRecord(db, user, itemId, input = {}) {
       action: "menu_item_updated",
       itemId,
       itemName: name,
+      details: auditDetails({ ...currentMenu, stock: currentInventory.stock }, item, ["name", "category", "description", "price", "stock", "reorderPoint", "walkInOnly", "unavailable"]),
       actorId: user.uid,
       actorName: user.name || user.email,
       actorRole: user.role,
       createdAt: Date.now()
-    }
+    },
+    [`stockHistory/${itemId}/${db.ref(`stockHistory/${itemId}`).push().key}`]: stockHistoryEntry({
+      item,
+      itemId,
+      beforeStock: Number(currentInventory.stock ?? currentMenu.stock ?? 0),
+      afterStock: stock,
+      delta: stock - Number(currentInventory.stock ?? currentMenu.stock ?? 0),
+      reason: "Owner menu stock edit",
+      user,
+      action: "menu_stock_updated"
+    })
   });
   return { item: { id: itemId, ...item } };
 }
@@ -441,6 +577,7 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
   const itemRef = db.ref(`inventory/${itemId}`);
   const initialItem = (await itemRef.once("value")).val();
   if (!initialItem) throw new HttpError(404, "Inventory item not found.");
+  const beforeStock = Number(initialItem.stock || 0);
   let failure;
   const result = await transactionWithInitial(itemRef, initialItem, (item) => {
     if (!item) {
@@ -465,11 +602,22 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
     itemName: item.name,
     quantity: delta,
     reason,
+    details: { before: { stock: beforeStock }, after: { stock: Number(item.stock || 0) } },
     actorId: user.uid,
     actorName: user.name || user.email,
     actorRole: user.role,
     createdAt: Date.now()
-    }
+    },
+    [`stockHistory/${itemId}/${db.ref(`stockHistory/${itemId}`).push().key}`]: stockHistoryEntry({
+      item,
+      itemId,
+      beforeStock,
+      afterStock: Number(item.stock || 0),
+      delta,
+      reason,
+      user,
+      action: delta > 0 ? "inventory_received" : "inventory_adjusted"
+    })
   };
   if (Number(item.stock || 0) <= Number(item.reorderPoint || 10)) {
     const ownerIds = await userIdsForRoles(db, ["owner"]);
@@ -553,9 +701,286 @@ export async function saveShiftLogRecord(db, user, input) {
   return { id: shiftId };
 }
 
+export async function getActiveShiftRecord(db, user) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  const shift = (await db.ref(`activeShifts/${user.uid}`).once("value")).val();
+  return { shift: shift ? { id: user.uid, ...shift } : null };
+}
+
+export async function startShiftRecord(db, user, input = {}) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  const activeRef = db.ref(`activeShifts/${user.uid}`);
+  if ((await activeRef.once("value")).exists()) throw new HttpError(409, "You already have an active shift.");
+  const openingCash = Number(input.openingCash || 0);
+  if (!Number.isFinite(openingCash) || openingCash < 0 || openingCash > 1_000_000) throw new HttpError(400, "Enter a valid opening cash amount.");
+  const startedAt = Date.now();
+  const shift = {
+    staffId: user.uid,
+    staffName: user.name || user.email,
+    openingCash,
+    notes: cleanText(input.notes, 200),
+    startedAt,
+    createdAt: startedAt
+  };
+  await db.ref().update({
+    [`activeShifts/${user.uid}`]: shift,
+    [`auditLogs/AUD-${startedAt}-${user.uid}-shift-started`]: {
+      action: "shift_started",
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      details: { after: { openingCash } },
+      createdAt: startedAt
+    }
+  });
+  return { shift: { id: user.uid, ...shift } };
+}
+
+export async function closeActiveShiftRecord(db, user, input = {}) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  const activeRef = db.ref(`activeShifts/${user.uid}`);
+  const activeShift = (await activeRef.once("value")).val();
+  if (!activeShift) throw new HttpError(409, "Start a shift before closing one.");
+  const now = Date.now();
+  const orders = Object.values((await db.ref("orders").once("value")).val() || {})
+    .filter((order) => Number(order.createdAt || 0) >= Number(activeShift.startedAt || 0))
+    .filter((order) => order.cashierId === user.uid || (user.role === "owner" && order.source === "walk-in-pos"));
+  const cashSales = orders
+    .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && order.status === "delivered"))
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashIn = Number(input.cashIn || 0);
+  const cashOut = Number(input.cashOut || 0);
+  const expenses = Number(input.expenses || 0);
+  const actualCash = Number(input.actualCash || 0);
+  for (const [label, value] of Object.entries({ cashIn, cashOut, expenses, actualCash })) {
+    if (!Number.isFinite(value) || value < 0 || value > 1_000_000) throw new HttpError(400, `Enter a valid ${label} amount.`);
+  }
+  const openingCash = Number(activeShift.openingCash || 0);
+  const expectedCash = openingCash + cashSales + cashIn - cashOut - expenses;
+  const variance = actualCash - expectedCash;
+  const shiftId = db.ref("shiftLogs").push().key;
+  const log = {
+    staffId: user.uid,
+    staffName: user.name || user.email,
+    startedAt: Number(activeShift.startedAt || now),
+    endedAt: now,
+    openingCash,
+    cashSales,
+    expectedCash,
+    actualCash,
+    variance,
+    orderCount: orders.length,
+    cashIn,
+    cashOut,
+    expenses,
+    notes: cleanText(input.notes, 300),
+    createdAt: now
+  };
+  await db.ref().update({
+    [`shiftLogs/${shiftId}`]: log,
+    [`activeShifts/${user.uid}`]: null,
+    [`auditLogs/AUD-${now}-${shiftId}`]: {
+      action: "shift_closed",
+      shiftLogId: shiftId,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      details: { before: { activeShift }, after: { expectedCash, actualCash, variance, orderCount: orders.length } },
+      createdAt: now
+    },
+    ...notificationUpdates(db, [user.uid], {
+      title: "Shift summary ready",
+      message: `Your shift summary is ready with ${orders.length} order(s) and a variance of ${variance} PHP.`,
+      type: "shift"
+    })
+  });
+  return { id: shiftId, log };
+}
+
+export async function createApprovalRequestRecord(db, user, input = {}) {
+  const type = cleanText(input.type, 80);
+  if (!["stock_correction", "void_order", "menu_price_change", "menu_visibility", "role_change"].includes(type)) {
+    throw new HttpError(400, "Unsupported approval request.");
+  }
+  const reason = cleanText(input.reason, 300);
+  if (!reason) throw new HttpError(400, "A reason is required.");
+  const createdAt = Date.now();
+  const requestId = db.ref("approvalRequests").push().key;
+  const request = {
+    type,
+    reason,
+    targetId: cleanText(input.targetId, 128),
+    payload: cloneData(input.payload || {}),
+    status: "pending",
+    requesterId: user.uid,
+    requesterName: user.name || user.email,
+    requesterRole: user.role,
+    createdAt
+  };
+  await db.ref().update({
+    [`approvalRequests/${requestId}`]: request,
+    [`auditLogs/AUD-${createdAt}-${requestId}`]: {
+      action: "approval_requested",
+      approvalId: requestId,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      details: { after: { type, targetId: request.targetId, reason } },
+      createdAt
+    }
+  });
+  return { id: requestId, request };
+}
+
+export async function listApprovalRequestsRecord(db, user) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  const requests = Object.entries((await db.ref("approvalRequests").once("value")).val() || {})
+    .map(([id, request]) => ({ id, ...request }))
+    .filter((request) => user.role === "owner" || request.requesterId === user.uid)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  return { requests };
+}
+
+export async function resolveApprovalRequestRecord(db, user, requestId, input = {}) {
+  if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
+  if (!validRecordId(requestId)) throw new HttpError(400, "Invalid approval ID.");
+  const requestRef = db.ref(`approvalRequests/${requestId}`);
+  const request = (await requestRef.once("value")).val();
+  if (!request) throw new HttpError(404, "Approval request not found.");
+  if (request.status !== "pending") throw new HttpError(409, "This request was already reviewed.");
+  const decision = input.decision === "approved" ? "approved" : "rejected";
+  const now = Date.now();
+  const updates = {
+    [`approvalRequests/${requestId}/status`]: decision,
+    [`approvalRequests/${requestId}/reviewedAt`]: now,
+    [`approvalRequests/${requestId}/reviewedBy`]: user.uid,
+    [`approvalRequests/${requestId}/reviewerName`]: user.name || user.email,
+    [`approvalRequests/${requestId}/reviewNote`]: cleanText(input.note, 240),
+    [`auditLogs/AUD-${now}-${requestId}`]: {
+      action: decision === "approved" ? "approval_approved" : "approval_rejected",
+      approvalId: requestId,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      details: { before: { status: "pending" }, after: { status: decision, type: request.type, targetId: request.targetId } },
+      createdAt: now
+    }
+  };
+
+  if (decision === "approved") {
+    if (request.type === "stock_correction") {
+      const itemId = cleanText(request.payload?.itemId || request.targetId, 128);
+      if (!validRecordId(itemId)) throw new HttpError(400, "Invalid inventory item ID.");
+      const inventory = (await db.ref(`inventory/${itemId}`).once("value")).val();
+      if (!inventory) throw new HttpError(404, "Inventory item not found.");
+      const beforeStock = Number(inventory.stock || 0);
+      const countedStock = Number(request.payload?.countedStock);
+      if (!Number.isInteger(countedStock) || countedStock < 0 || countedStock > 100000) throw new HttpError(400, "Invalid counted stock.");
+      updates[`inventory/${itemId}/stock`] = countedStock;
+      updates[`public/menu/${itemId}/stock`] = countedStock;
+      updates[`stockHistory/${itemId}/${db.ref(`stockHistory/${itemId}`).push().key}`] = stockHistoryEntry({
+        item: inventory,
+        itemId,
+        beforeStock,
+        afterStock: countedStock,
+        delta: countedStock - beforeStock,
+        reason: request.reason,
+        user,
+        action: "stock_count_approved"
+      });
+    }
+    if (request.type === "menu_price_change") {
+      const itemId = cleanText(request.payload?.itemId || request.targetId, 128);
+      const menuItem = (await db.ref(`public/menu/${itemId}`).once("value")).val();
+      if (!menuItem) throw new HttpError(404, "Menu item not found.");
+      const price = Number(request.payload?.price);
+      if (!Number.isFinite(price) || price < 0 || price > 100000) throw new HttpError(400, "Invalid price.");
+      updates[`public/menu/${itemId}/price`] = price;
+      updates[`inventory/${itemId}/price`] = price;
+    }
+    if (request.type === "menu_visibility") {
+      const itemId = cleanText(request.payload?.itemId || request.targetId, 128);
+      const unavailable = Boolean(request.payload?.unavailable);
+      updates[`public/menu/${itemId}/unavailable`] = unavailable;
+      updates[`inventory/${itemId}/unavailable`] = unavailable;
+    }
+    if (request.type === "role_change") {
+      const uid = cleanText(request.payload?.uid || request.targetId, 128);
+      const role = cleanText(request.payload?.role, 30);
+      if (!validRecordId(uid) || !["owner", "staff", "rider", "customer"].includes(role)) throw new HttpError(400, "Invalid role change.");
+      await getAuth().setCustomUserClaims(uid, { role });
+      updates[`users/${uid}/role`] = role;
+    }
+    if (request.type === "void_order") {
+      const orderId = cleanText(request.payload?.orderId || request.targetId, 128);
+      const order = (await db.ref(`orders/${orderId}`).once("value")).val();
+      if (!order) throw new HttpError(404, "Order not found.");
+      if (order.status !== "cancelled") {
+        const reason = request.reason;
+        const inventorySnapshot = await db.ref("inventory").once("value");
+        updates[`orders/${orderId}/status`] = "cancelled";
+        updates[`orders/${orderId}/cancelReason`] = reason;
+        updates[`orders/${orderId}/cancelledAt`] = now;
+        updates[`orders/${orderId}/cancelledBy`] = user.uid;
+        updates[`orders/${orderId}/cancelledByRole`] = user.role;
+        for (const item of order.items || []) {
+          const beforeStock = Number(inventorySnapshot.child(`${item.id}/stock`).val() || 0);
+          const afterStock = beforeStock + Number(item.qty || 0);
+          updates[`inventory/${item.id}/stock`] = afterStock;
+          updates[`public/menu/${item.id}/stock`] = afterStock;
+          updates[`stockHistory/${item.id}/${db.ref(`stockHistory/${item.id}`).push().key}`] = stockHistoryEntry({
+            item,
+            itemId: item.id,
+            beforeStock,
+            afterStock,
+            delta: Number(item.qty || 0),
+            reason,
+            user,
+            action: "owner_void_restored",
+            orderId
+          });
+        }
+      }
+    }
+  }
+
+  await db.ref().update(updates);
+  return { id: requestId, status: decision };
+}
+
+export async function archiveCompletedOrdersRecord(db, user, input = {}) {
+  if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
+  const olderThanDays = Math.max(1, Math.min(365, Number(input.olderThanDays || 30)));
+  const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+  const orders = (await db.ref("orders").once("value")).val() || {};
+  const updates = {};
+  let archived = 0;
+  for (const [orderId, order] of Object.entries(orders)) {
+    if (order.archivedAt) continue;
+    if (!["delivered", "cancelled"].includes(order.status)) continue;
+    const referenceTime = Number(order.deliveredAt || order.cancelledAt || order.updatedAt || order.createdAt || 0);
+    if (referenceTime > cutoff) continue;
+    archived += 1;
+    updates[`orders/${orderId}/archivedAt`] = Date.now();
+    updates[`orderArchive/${orderId}`] = { ...order, archivedAt: Date.now(), archivedBy: user.uid };
+  }
+  const createdAt = Date.now();
+  updates[`auditLogs/AUD-${createdAt}-archive-orders`] = {
+    action: "orders_archived",
+    actorId: user.uid,
+    actorName: user.name || user.email,
+    actorRole: user.role,
+    details: { after: { archived, olderThanDays } },
+    createdAt
+  };
+  await db.ref().update(updates);
+  return { archived };
+}
+
 export async function listOrdersForUser(db, user) {
   const orders = (await db.ref("orders").once("value")).val() || {};
   return Object.entries(orders)
     .map(([id, order]) => ({ id, ...order }))
+    .filter((order) => !order.archivedAt)
     .filter((order) => canAccessOrder(user, order, { allowAvailableRiderOrder: true }));
 }

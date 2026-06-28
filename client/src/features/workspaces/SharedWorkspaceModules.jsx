@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { adjustInventory, createMenuItem, moderateReview, saveShiftLog, sendSupportMessage, updateMenuItem, updateOrder } from "../../services/firebase";
+import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateMenuItem, updateOrder } from "../../services/firebase";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
 
 export function ReviewModerationModule({ reviews, user, notify }) {
@@ -63,13 +63,28 @@ export function InventoryModule({ inventory, user, notify }) {
   const [drafts, setDrafts] = useState({});
   const updateDraft = (id, field, value) => setDrafts((current) => ({
     ...current,
-    [id]: { quantity: 1, reason: "New delivery", ...(current[id] || {}), [field]: value }
+    [id]: { quantity: 1, reason: "New delivery", countedStock: "", ...(current[id] || {}), [field]: value }
   }));
   const applyAdjustment = async (item, direction) => {
     const draft = { quantity: 1, reason: direction > 0 ? "New delivery" : "Wastage", ...(drafts[item.id] || {}) };
     const quantity = Math.max(1, Number(draft.quantity || 1)) * direction;
     await adjustInventory(item, quantity, draft.reason, user);
     notify(`${item.name} stock ${direction > 0 ? "received" : "adjusted"} by ${Math.abs(quantity)}.`);
+  };
+  const requestCountApproval = async (item) => {
+    const draft = { countedStock: item.stock, ...(drafts[item.id] || {}) };
+    const countedStock = Number(draft.countedStock);
+    if (!Number.isInteger(countedStock) || countedStock < 0) {
+      notify("Enter a valid counted stock number.");
+      return;
+    }
+    await createApprovalRequest({
+      type: "stock_correction",
+      targetId: item.id,
+      reason: `Daily stock audit for ${item.name}`,
+      payload: { itemId: item.id, countedStock }
+    }, user);
+    notify(`${item.name} stock count sent for owner approval.`);
   };
   return (
     <div className="dashboard-card">
@@ -79,10 +94,10 @@ export function InventoryModule({ inventory, user, notify }) {
       </div>
       <div className="table-responsive">
         <table className="table align-middle inventory-table">
-          <thead><tr><th>Product</th><th>Current stock</th><th>Reorder point</th><th>Status</th><th>Quantity</th><th>Reason</th><th>Action</th></tr></thead>
+          <thead><tr><th>Product</th><th>Current stock</th><th>Reorder point</th><th>Status</th><th>Quantity</th><th>Reason</th><th>Daily count</th><th>Action</th></tr></thead>
           <tbody>{inventory.map((item) => {
             const lowStock = item.stock <= item.reorderPoint;
-            const draft = drafts[item.id] || { quantity: 1, reason: "New delivery" };
+            const draft = drafts[item.id] || { quantity: 1, reason: "New delivery", countedStock: "" };
             return (
               <tr key={item.id}>
                 <td><strong>{item.name}</strong><small>{item.category}</small></td>
@@ -91,7 +106,8 @@ export function InventoryModule({ inventory, user, notify }) {
                 <td><span className={`stock-badge ${lowStock ? "low" : "healthy"}`}>{lowStock ? "Low stock" : "Healthy"}</span></td>
                 <td><input className="form-control form-control-sm inventory-input" type="number" min="1" value={draft.quantity} onChange={(event) => updateDraft(item.id, "quantity", event.target.value)} /></td>
                 <td><select className="form-select form-select-sm" value={draft.reason} onChange={(event) => updateDraft(item.id, "reason", event.target.value)}><option>New delivery</option><option>Physical count correction</option><option>Wastage</option><option>Spoilage</option><option>Staff meal</option></select></td>
-                <td><div className="d-flex gap-1"><button className="btn btn-sm btn-success" onClick={() => applyAdjustment(item, 1)}>Receive</button><button className="btn btn-sm btn-outline-danger" onClick={() => applyAdjustment(item, -1)}>Deduct</button></div></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" min="0" placeholder={String(item.stock)} value={draft.countedStock} onChange={(event) => updateDraft(item.id, "countedStock", event.target.value)} /></td>
+                <td><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-success" onClick={() => applyAdjustment(item, 1)}>Receive</button><button className="btn btn-sm btn-outline-danger" onClick={() => applyAdjustment(item, -1)}>Deduct</button><button className="btn btn-sm btn-dark" onClick={() => requestCountApproval(item)}>Request count</button></div></td>
               </tr>
             );
           })}</tbody>
@@ -219,46 +235,54 @@ export function MenuManagementModule({ inventory, user, notify }) {
   );
 }
 
-export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }) {
+export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false, activeShift = null, onShiftChange = () => {} }) {
   const [openingCash, setOpeningCash] = useState(2000);
   const [cashIn, setCashIn] = useState(0);
   const [cashOut, setCashOut] = useState(0);
   const [expenses, setExpenses] = useState(0);
   const [actualCash, setActualCash] = useState(0);
   const [shiftNotes, setShiftNotes] = useState("");
-  const [shiftStartedAt] = useState(() => Date.now() - 8 * 60 * 60 * 1000);
+  const shiftStartedAt = Number(activeShift?.startedAt || 0);
   const shiftOrders = orders.filter((order) => Number(order.createdAt || 0) >= shiftStartedAt && Number(order.createdAt || 0) <= Date.now());
   const cashSales = shiftOrders
     .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && isRevenueOrder(order)))
     .reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const expectedCash = Number(openingCash || 0) + cashSales + Number(cashIn || 0) - Number(cashOut || 0) - Number(expenses || 0);
+  const expectedCash = Number(activeShift?.openingCash || openingCash || 0) + cashSales + Number(cashIn || 0) - Number(cashOut || 0) - Number(expenses || 0);
   const variance = Number(actualCash || 0) - expectedCash;
+  const beginShift = async () => {
+    const result = await startShift({ openingCash: Number(openingCash || 0), notes: shiftNotes }, user);
+    onShiftChange(result.shift);
+    setShiftNotes("");
+    notify("Shift opened. POS is now available for walk-in orders.");
+  };
   const closeShift = async () => {
-    const id = await saveShiftLog({
-      startedAt: shiftStartedAt,
-      endedAt: Date.now(),
-      openingCash: Number(openingCash),
+    if (!activeShift) {
+      notify("Start a shift before closing.");
+      return;
+    }
+    const result = await closeActiveShift({
       cashIn: Number(cashIn),
       cashOut: Number(cashOut),
       expenses: Number(expenses),
-      cashSales,
-      expectedCash,
       actualCash: Number(actualCash),
-      variance,
-      orderCount: shiftOrders.length,
       notes: shiftNotes
     }, user);
-    notify(`Shift ${id} closed and sent for owner reconciliation.`);
+    onShiftChange(null);
+    notify(`Shift ${result.id} closed and sent for owner reconciliation.`);
     setShiftNotes("");
+    setCashIn(0);
+    setCashOut(0);
+    setExpenses(0);
+    setActualCash(0);
   };
   return (
     <div className="row g-3">
       {!readOnly && <div className="col-xl-5">
         <div className="dashboard-card">
-          <p className="eyebrow text-danger">End-of-shift reconciliation</p>
-          <h3>Close current shift</h3>
-          <p className="module-note">Counting {shiftOrders.length} order(s) since {new Date(shiftStartedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}.</p>
-          <label className="form-label">Opening cash<input className="form-control" type="number" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
+          <p className="eyebrow text-danger">{activeShift ? "End-of-shift reconciliation" : "Shift start"}</p>
+          <h3>{activeShift ? "Close current shift" : "Open current shift"}</h3>
+          <p className="module-note">{activeShift ? `Counting ${shiftOrders.length} order(s) since ${new Date(shiftStartedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}.` : "Open a shift before using the walk-in POS."}</p>
+          <label className="form-label">Opening cash<input className="form-control" type="number" disabled={Boolean(activeShift)} value={activeShift?.openingCash ?? openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
           <div className="row g-2">
             <label className="form-label col-sm-4">Cash in<input className="form-control" type="number" value={cashIn} onChange={(event) => setCashIn(event.target.value)} /></label>
             <label className="form-label col-sm-4">Cash out<input className="form-control" type="number" value={cashOut} onChange={(event) => setCashOut(event.target.value)} /></label>
@@ -272,7 +296,9 @@ export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false }
             <div><dt>Expected cash</dt><dd>{currency(expectedCash)}</dd></div>
             <div><dt>Variance</dt><dd className={variance === 0 ? "text-success" : "text-danger"}>{currency(variance)}</dd></div>
           </dl>
-          <button className="btn btn-danger w-100" onClick={closeShift}>Close shift and save log</button>
+          {activeShift
+            ? <button className="btn btn-danger w-100" onClick={closeShift}>Close shift and save log</button>
+            : <button className="btn btn-danger w-100" onClick={beginShift}>Start shift</button>}
         </div>
       </div>}
       <div className={readOnly ? "col-12" : "col-xl-7"}>
@@ -356,6 +382,75 @@ export function SupportChat({ messages, user, notify }) {
   );
 }
 
+export function ApprovalQueueModule({ user, notify }) {
+  const [requests, setRequests] = useState([]);
+  useEffect(() => subscribeApprovalRequests(user, setRequests), [user]);
+  const decide = async (request, decision) => {
+    await resolveApprovalRequest(request.id, decision, user);
+    setRequests((current) => current.map((item) => item.id === request.id ? { ...item, status: decision } : item));
+    notify(`Approval request ${decision}.`);
+  };
+  return (
+    <div className="dashboard-card">
+      <div className="module-heading">
+        <div><p className="eyebrow text-danger">Owner approval flow</p><h3>Sensitive action requests</h3></div>
+        <span className="module-note">Stock counts, voids, menu changes, and role requests appear here.</span>
+      </div>
+      <div className="table-responsive">
+        <table className="table align-middle">
+          <thead><tr><th>Request</th><th>Requester</th><th>Reason</th><th>Status</th><th /></tr></thead>
+          <tbody>
+            {requests.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No approval requests yet.</td></tr>}
+            {requests.map((request) => (
+              <tr key={request.id}>
+                <td><strong>{String(request.type || "request").replaceAll("_", " ")}</strong><small className="d-block text-secondary">{request.targetId || request.id}</small></td>
+                <td>{request.requesterName || "Staff"}<small className="d-block text-secondary">{request.requesterRole}</small></td>
+                <td>{request.reason || "-"}</td>
+                <td><span className={`stock-badge ${request.status === "pending" ? "low" : "healthy"}`}>{request.status}</span></td>
+                <td>{user.role === "owner" && request.status === "pending" && <div className="d-flex gap-1"><button className="btn btn-sm btn-success" onClick={() => decide(request, "approved")}>Approve</button><button className="btn btn-sm btn-outline-danger" onClick={() => decide(request, "rejected")}>Reject</button></div>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function AdminCleanupModule({ user, orders, notify }) {
+  const [olderThanDays, setOlderThanDays] = useState(30);
+  const exportCsv = () => {
+    const rows = [
+      ["Order", "Customer", "Status", "Payment", "Total", "Created"],
+      ...orders.map((order) => [order.id, order.customerName || "", order.status || "", order.paymentMethod || "", Number(order.total || 0), order.createdAt ? new Date(order.createdAt).toLocaleString("en-PH") : ""])
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `taptap-orders-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify("Orders CSV exported.");
+  };
+  const archive = async () => {
+    const result = await archiveCompletedOrders(olderThanDays, user);
+    notify(`${result.archived || 0} old completed/cancelled order(s) archived.`);
+  };
+  return (
+    <div className="dashboard-card">
+      <div className="module-heading">
+        <div><p className="eyebrow text-danger">Data cleanup</p><h3>Export and archive tools</h3></div>
+        <span className="module-note">Archived orders stay in the archive record and leave the active queues.</span>
+      </div>
+      <div className="row g-2 align-items-end">
+        <label className="form-label col-md-4">Archive completed/cancelled older than<input className="form-control" type="number" min="1" max="365" value={olderThanDays} onChange={(event) => setOlderThanDays(event.target.value)} /></label>
+        <div className="col-md-8 d-flex flex-wrap gap-2"><button className="btn btn-outline-dark" onClick={exportCsv}>Export orders CSV</button><button className="btn btn-danger" onClick={archive}>Archive old orders</button></div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModule({ title, serviceStatus, staff = false, notify }) {
   const [settings, setSettings] = useState({
     gcash: true,
@@ -406,7 +501,7 @@ export function ReasonModal({ title, label, placeholder, confirmText, onClose, o
   );
 }
 
-export function OrderManagement({ orders, canAdvance, notify }) {
+export function OrderManagement({ orders, canAdvance, notify, user = null }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const cancellableStatuses = ["pending-payment", "received", "preparing"];
@@ -424,6 +519,17 @@ export function OrderManagement({ orders, canAdvance, notify }) {
     await updateOrder(order.id, { cancel: true, cancelReason: reason });
     notify(`${order.id} cancelled and stock restored.`);
   };
+  const requestVoid = async (order) => {
+    const reason = window.prompt(`Why should ${order.id} be voided?`);
+    if (!reason?.trim() || !user) return;
+    await createApprovalRequest({
+      type: "void_order",
+      targetId: order.id,
+      reason: reason.trim(),
+      payload: { orderId: order.id }
+    }, user);
+    notify(`${order.id} void request sent to owner approval.`);
+  };
   // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
   return (
     <div className="dashboard-card">
@@ -431,7 +537,7 @@ export function OrderManagement({ orders, canAdvance, notify }) {
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}</div>}</td></tr>)}</tbody>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}{user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}</div>}</td></tr>)}</tbody>
         </table>
       </div>
       {cancelTarget && <ReasonModal title={`Cancel ${cancelTarget.id}`} label="Cancellation reason" placeholder="Example: Customer changed order, unavailable item, duplicate order..." confirmText="Cancel order" onClose={() => setCancelTarget(null)} onSubmit={async (reason) => { await cancelOrder(cancelTarget, reason); setCancelTarget(null); }} />}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrandMark } from "../../components/Branding";
 import { api } from "../../services/api";
-import { createOrder, saveUserProfile, submitReview } from "../../services/firebase";
+import { createOrder, resendReceiptEmail, saveUserProfile, submitReview, updateOrder } from "../../services/firebase";
 import { currency, statusLabel } from "../../utils/display";
 
 export function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComplete, notify }) {
@@ -23,6 +23,10 @@ export function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComp
   }, [onClose]);
 
   const place = async () => {
+    if (!navigator.onLine) {
+      notify("You are offline. Reconnect before placing an order.");
+      return;
+    }
     if (!phone.trim() || (deliveryType === "delivery" && !address.trim())) {
       notify(deliveryType === "delivery" ? "Enter a mobile number and delivery address before placing the order." : "Enter a mobile number before placing the order.");
       return;
@@ -89,12 +93,22 @@ export function Checkout({ cart, user, profile, paymongoEnabled, onClose, onComp
   );
 }
 
-export function OrdersView({ orders, onTrack, isRevenueOrder }) {
+export function OrdersView({ orders, onTrack, isRevenueOrder, notify }) {
   const revenueCheck = isRevenueOrder || (() => false);
   const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
   const pastOrders = orders.filter((order) => ["delivered", "cancelled"].includes(order.status));
   const totalSpent = orders.filter(revenueCheck).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
+  const cancelOrder = async (order) => {
+    const reason = window.prompt(`Why do you want to cancel ${order.id}?`);
+    if (!reason?.trim()) return;
+    try {
+      await updateOrder(order.id, { cancel: true, cancelReason: reason.trim() });
+      notify?.(`${order.id} cancellation submitted.`);
+    } catch (error) {
+      notify?.(error.message || "This order can no longer be cancelled here.");
+    }
+  };
   const renderOrderTable = (title, list, emptyText) => (
     <section className="order-table-card">
       <div className="order-table-heading">
@@ -121,7 +135,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder }) {
             <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
             <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button></div>
+            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button>{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
           </article>
         ))}
       </div>
@@ -181,7 +195,8 @@ export function CustomerProfile({ user, profile, notify }) {
   );
 }
 
-export function ReceiptsView({ orders, printReceipt }) {
+export function ReceiptsView({ orders, printReceipt, notify }) {
+  const [sendingReceiptId, setSendingReceiptId] = useState("");
   const downloadReceipt = async (order) => {
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF();
@@ -199,10 +214,21 @@ export function ReceiptsView({ orders, printReceipt }) {
     pdf.text(`Total: ${currency(order.total)}`, 18, 90 + (order.items?.length || 0) * 8);
     pdf.save(`${order.id}-receipt.pdf`);
   };
+  const emailReceipt = async (order) => {
+    setSendingReceiptId(order.id);
+    try {
+      const result = await resendReceiptEmail(order.id);
+      notify?.(result.sent ? "Receipt email sent." : "Receipt email is not available in local preview.");
+    } catch (error) {
+      notify?.(error.message || "Receipt email could not be sent.");
+    } finally {
+      setSendingReceiptId("");
+    }
+  };
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
-      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}>Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button></div></article>)}</div>
+      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}>Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button><button className="btn btn-sm btn-danger" disabled={sendingReceiptId === order.id} onClick={() => emailReceipt(order)}>{sendingReceiptId === order.id ? "Sending..." : "Email receipt"}</button></div></article>)}</div>
     </main>
   );
 }

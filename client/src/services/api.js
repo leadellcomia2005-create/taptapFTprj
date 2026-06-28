@@ -82,6 +82,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(values),
     }),
+  resendReceiptEmail: (orderId) =>
+    request(`/orders/${encodeURIComponent(orderId)}/receipt-email`, {
+      method: "POST",
+      body: "{}",
+    }),
   adjustInventory: (itemId, delta, reason) =>
     request(`/inventory/${encodeURIComponent(itemId)}`, {
       method: "PATCH",
@@ -116,6 +121,33 @@ export const api = {
     request("/shift-logs", {
       method: "POST",
       body: JSON.stringify(entry),
+    }),
+  getActiveShift: () => request("/shifts/active"),
+  startShift: (values) =>
+    request("/shifts/start", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
+  closeShift: (values) =>
+    request("/shifts/close", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
+  listApprovals: () => request("/approvals"),
+  createApproval: (values) =>
+    request("/approvals", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
+  resolveApproval: (requestId, decision, note = "") =>
+    request(`/approvals/${encodeURIComponent(requestId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ decision, note }),
+    }),
+  archiveCompletedOrders: (olderThanDays = 30) =>
+    request("/admin/archive-orders", {
+      method: "POST",
+      body: JSON.stringify({ olderThanDays }),
     }),
   sendNotification: (notification) =>
     request("/notifications/sms", {

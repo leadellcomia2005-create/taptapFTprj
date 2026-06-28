@@ -3,7 +3,7 @@ import { SectionLoader } from "../../components/Loaders";
 import { securityMethodLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
 import { updateOrder } from "../../services/firebase";
-import { InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
+import { AdminCleanupModule, ApprovalQueueModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
 import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
@@ -92,6 +92,14 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
       notify(error.message);
     }
   };
+  const auditDetailText = (entry) => {
+    if (entry.details?.before || entry.details?.after) {
+      const before = Object.entries(entry.details.before || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
+      const after = Object.entries(entry.details.after || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
+      return [before && `Before ${before}`, after && `After ${after}`].filter(Boolean).join(" | ") || "-";
+    }
+    return entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-");
+  };
   if (section === "owner-sales") return (
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Sales strategy and analytics</p><h2>Sales & Orders</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
@@ -144,9 +152,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
   );
   if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
   if (section === "owner-audit") return (
-    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || "-"}</td><td>{entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-")}</td></tr>)}</tbody></table></div></div></main>
+    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div></main>
   );
-  if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></main>;
+  if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><div className="row g-3"><div className="col-12"><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></div><div className="col-12"><ApprovalQueueModule user={user} notify={notify} /></div><div className="col-12"><AdminCleanupModule user={user} orders={orders} notify={notify} /></div></div></main>;
   return (
     <main className="container-fluid dashboard-page owner-listing-page">
       <section className="owner-listing-hero">

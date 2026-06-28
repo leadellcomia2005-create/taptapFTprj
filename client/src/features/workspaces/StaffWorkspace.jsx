@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MenuPhoto from "../../components/MenuPhoto";
 import { staffPosCategories } from "../../config/appConfig";
-import { createOrder } from "../../services/firebase";
+import { createOrder, getActiveShift, startShift } from "../../services/firebase";
 import { InventoryModule, KitchenQueue, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule, SupportChat } from "./SharedWorkspaceModules";
 import { currency, inRange, isRevenueOrder, localDateInputValue, printReceipt, reportDateRange, setWorkspaceHelpers } from "./workspaceHelpers";
 
@@ -12,6 +12,18 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   const [posCashReceived, setPosCashReceived] = useState(0);
   const [diningOption, setDiningOption] = useState("dine-in");
   const [lastReceipt, setLastReceipt] = useState(null);
+  const [activeShift, setActiveShift] = useState(null);
+  const [openingCash, setOpeningCash] = useState(2000);
+  useEffect(() => {
+    if (!["staff-dashboard", "staff-pos", "staff-shifts"].includes(section)) return undefined;
+    let mounted = true;
+    getActiveShift().then((result) => {
+      if (mounted) setActiveShift(result.shift || null);
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [section]);
   const activePosCategory = staffPosCategories.find((item) => item.id === posCategory) || staffPosCategories[0];
   const visibleInventory = staffInventory.filter(activePosCategory.matches);
   const categoryCount = (category) => staffInventory.filter(category.matches).length;
@@ -37,6 +49,14 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     .filter((item) => item.qty > 0));
   const remove = (productId) => setPosCart((current) => current.filter((item) => item.id !== productId));
   const complete = async () => {
+    if (!activeShift) {
+      notify("Start a shift before accepting walk-in payments.");
+      return;
+    }
+    if (!navigator.onLine) {
+      notify("You are offline. Reconnect before completing a POS order.");
+      return;
+    }
     if (Number(posCashReceived || 0) < posTotal) {
       notify("Cash received must cover the walk-in order total.");
       return;
@@ -52,6 +72,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       changeDue: posChange,
       diningOption,
       cashierName: user.name,
+      shiftId: activeShift.id || activeShift.staffId,
       deliveryType: "walk-in",
       address: "Counter",
       phone: "",
@@ -66,9 +87,23 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     if (!printReceipt(receipt)) notify("Allow pop-ups to print the receipt.");
     notify(`Walk-in receipt ${orderId} completed.`);
   };
+  const openShiftFromPos = async () => {
+    const result = await startShift({ openingCash: Number(openingCash || 0) }, user);
+    setActiveShift(result.shift);
+    notify("Shift opened. Walk-in POS is ready.");
+  };
 
   if (section === "staff-pos") return (
     <main className="container-fluid dashboard-page staff-pos-page">
+      {!activeShift && (
+        <section className="dashboard-card mb-3">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Required before sales</p><h3>Open staff shift</h3></div><span className="module-note">Walk-in POS is locked until a shift is active.</span></div>
+          <div className="row g-2 align-items-end">
+            <label className="form-label col-sm-4">Opening cash<input className="form-control" type="number" min="0" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
+            <div className="col-sm-8"><button className="btn btn-danger" onClick={openShiftFromPos}>Start shift</button></div>
+          </div>
+        </section>
+      )}
       <section className="staff-pos-hero">
         <div>
           <p className="eyebrow">Fast counter entry</p>
@@ -131,16 +166,16 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
             <div><dt>Total</dt><dd>{currency(posTotal)}</dd></div>
             <div><dt>Change</dt><dd>{currency(posChange)}</dd></div>
           </dl>
-          <button className="btn btn-danger w-100" disabled={!posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
+          <button className="btn btn-danger w-100" disabled={!activeShift || !posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
           {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} - {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
         </aside>
       </section>
     </main>
   );
-  if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><OrderManagement orders={orders} canAdvance notify={notify} /></main>;
+  if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><OrderManagement orders={orders} canAdvance notify={notify} user={user} /></main>;
   if (section === "staff-kitchen") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Kitchen preparation</p><h2>Kitchen Queue</h2></div></div><KitchenQueue orders={orders.filter((order) => ["received", "preparing", "ready"].includes(order.status))} notify={notify} /></main>;
   if (section === "staff-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Receiving, wastage and availability</p><h2>Inventory</h2></div></div><InventoryModule inventory={inventory} user={user} notify={notify} /></main>;
-  if (section === "staff-shifts") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and cash control</p><h2>Shift Logs</h2></div></div><ShiftLogsModule orders={orders} logs={shiftLogs} user={user} notify={notify} /></main>;
+  if (section === "staff-shifts") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and cash control</p><h2>Shift Logs</h2></div></div><ShiftLogsModule orders={orders} logs={shiftLogs} user={user} notify={notify} activeShift={activeShift} onShiftChange={setActiveShift} /></main>;
   if (section === "staff-chat") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Live communication</p><h2>Chat Support</h2></div></div><SupportChat messages={messages} user={user} notify={notify} /></main>;
   if (section === "staff-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
@@ -157,14 +192,14 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
           <h2>Shift Dashboard</h2>
           <span>Counter, kitchen, stock, and order movement for today.</span>
         </div>
-        <span className="shift-chip">Active shift - {new Date().toLocaleDateString("en-PH")}</span>
+        <span className="shift-chip">{activeShift ? `Active shift - ${new Date(activeShift.startedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}` : "No active shift"}</span>
       </section>
       <div className="row g-3">
         <div className="col-md-3"><div className="metric-card"><small>Active orders</small><strong>{activeOrders.length}</strong><span>Kitchen and delivery queue</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Today's sales</small><strong>{currency(todaySales)}</strong><span>Online and walk-in</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Pending pickup</small><strong>{orders.filter((order) => order.status === "ready").length}</strong><span>Waiting for rider</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Low stock alerts</small><strong>{lowStock.length}</strong><span>Requires staff action</span></div></div>
-        <div className="col-lg-8"><OrderManagement orders={activeOrders.slice(0, 6)} canAdvance notify={notify} /></div>
+        <div className="col-lg-8"><OrderManagement orders={activeOrders.slice(0, 6)} canAdvance notify={notify} user={user} /></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Quick actions</h3><div className="d-grid gap-2"><button className="btn btn-danger" onClick={() => notify("Open Walk-in POS from the navigation.")}>New walk-in order</button><button className="btn btn-outline-dark" onClick={() => notify(`${lowStock.length} product(s) need inventory attention.`)}>Review low stock</button><button className="btn btn-outline-dark" onClick={() => notify("Shift reconciliation is available in Shift Logs.")}>Prepare shift close</button></div><h3 className="mt-4">Critical stock</h3>{lowStock.slice(0, 4).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder at {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}</div></div>
       </div>
     </main>

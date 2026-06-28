@@ -141,6 +141,28 @@ export function authorizeOrderUpdate(user, order, input = {}) {
     return changes;
   }
 
+  if (user.role === "customer") {
+    if (order.customerId !== user.uid) throw new HttpError(403, "This order is not yours.");
+    if (input.cancel !== true && input.status !== "cancelled") {
+      throw new HttpError(403, "Customers can only cancel their own eligible orders.");
+    }
+    if (!["pending-payment", "received"].includes(order.status)) {
+      throw new HttpError(409, "This order is already being prepared. Please contact staff for owner approval.");
+    }
+    const reason = typeof input.cancelReason === "string" ? input.cancelReason.trim().slice(0, 160) : "";
+    if (!reason) throw new HttpError(400, "A cancellation reason is required.");
+    const changes = {
+      status: "cancelled",
+      cancelReason: reason,
+      cancelledAt: now,
+      cancelledBy: user.uid,
+      cancelledByRole: user.role,
+      updatedAt: now
+    };
+    if (order.paymentStatus === "paid") changes.refundStatus = "owner-review";
+    return changes;
+  }
+
   if (user.role !== "rider") throw new HttpError(403, "Order updates require an operations role.");
 
   if (input.deliveryIssue) {

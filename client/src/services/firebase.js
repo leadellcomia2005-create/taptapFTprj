@@ -107,6 +107,9 @@ function readDemoData() {
     riderLocations: {},
     users: {},
     auditLogs: {},
+    stockHistory: {},
+    approvalRequests: {},
+    activeShifts: {},
     messages: {},
     shiftLogs: {},
     reviews: {},
@@ -118,6 +121,15 @@ function readDemoData() {
 function writeDemoData(data) {
   localStorage.setItem(demoDataKey, JSON.stringify(data));
   window.dispatchEvent(new CustomEvent("taptap-demo-data"));
+}
+
+function addDemoStockHistory(data, itemId, entry) {
+  data.stockHistory[itemId] ||= {};
+  data.stockHistory[itemId][`STOCK-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`] = {
+    ...entry,
+    itemId,
+    createdAt: Date.now()
+  };
 }
 
 export function observeAuth(callback) {
@@ -521,13 +533,26 @@ export async function adjustInventory(item, delta, reason, actor) {
     return api.adjustInventory(item.id, delta, reason);
   }
   const data = readDemoData();
+  const beforeStock = Number(data.inventory[item.id]?.stock ?? item.stock ?? 0);
+  const afterStock = Math.max(0, beforeStock + delta);
   data.inventory[item.id] = {
     ...data.inventory[item.id],
     name: item.name,
     reorderPoint: item.reorderPoint ?? 10,
-    stock: Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) + delta)
+    stock: afterStock
   };
   data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: data.inventory[item.id].stock, reorderPoint: data.inventory[item.id].reorderPoint };
+  addDemoStockHistory(data, item.id, {
+    itemName: item.name,
+    beforeStock,
+    afterStock,
+    delta,
+    reason,
+    action: delta > 0 ? "inventory_received" : "inventory_adjusted",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role
+  });
   data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
   writeDemoData(data);
 }
@@ -556,6 +581,17 @@ export async function updateMenuItem(item, values, actor) {
     reorderPoint: updated.reorderPoint,
     unavailable: updated.unavailable
   };
+  addDemoStockHistory(data, item.id, {
+    itemName: updated.name,
+    beforeStock: Number(item.stock || 0),
+    afterStock: updated.stock,
+    delta: updated.stock - Number(item.stock || 0),
+    reason: "Owner menu stock edit",
+    action: "menu_stock_updated",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role
+  });
   data.auditLogs[`AUD-${Date.now()}`] = {
     action: "menu_item_updated",
     itemId: item.id,
@@ -610,6 +646,17 @@ export async function createMenuItem(values, actor) {
     unavailable: item.unavailable,
     createdAt: item.createdAt
   };
+  addDemoStockHistory(data, id, {
+    itemName: item.name,
+    beforeStock: 0,
+    afterStock: item.stock,
+    delta: item.stock,
+    reason: "Initial menu stock",
+    action: "menu_item_created",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role
+  });
   data.auditLogs[`AUD-${Date.now()}`] = {
     action: "menu_item_created",
     itemId: id,
@@ -629,7 +676,7 @@ export function subscribeOrders(user, callback) {
     return () => {};
   }
   if (firebaseEnabled) {
-    const normalize = (snapshot) => Object.entries(snapshot.val() || {}).map(([id, order]) => ({ id, ...order }));
+    const normalize = (snapshot) => Object.entries(snapshot.val() || {}).map(([id, order]) => ({ id, ...order })).filter((order) => !order.archivedAt);
     if (["owner", "staff"].includes(user.role)) {
       return onValue(ref(db, "orders"), (snapshot) => callback(normalize(snapshot)));
     }
@@ -661,7 +708,7 @@ export function subscribeOrders(user, callback) {
   }
   const emit = () => {
     const data = readDemoData();
-    const orders = Object.entries(data.orders).map(([id, order]) => ({ id, ...order }));
+    const orders = Object.entries(data.orders).map(([id, order]) => ({ id, ...order })).filter((order) => !order.archivedAt);
     callback(user.role === "customer" ? orders.filter((order) => order.customerId === user.uid) : orders);
   };
   emit();
@@ -700,9 +747,22 @@ export async function createOrder(order) {
     paymentConfirmedAt: onlinePayment ? null : Date.now()
   };
   for (const item of order.items) {
-    const nextStock = Math.max(0, (data.inventory[item.id]?.stock ?? item.stock) - item.qty);
+    const beforeStock = Number(data.inventory[item.id]?.stock ?? item.stock ?? 0);
+    const nextStock = Math.max(0, beforeStock - item.qty);
     data.inventory[item.id] = { ...(data.inventory[item.id] || {}), stock: nextStock };
     data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: nextStock };
+    addDemoStockHistory(data, item.id, {
+      itemName: item.name,
+      beforeStock,
+      afterStock: nextStock,
+      delta: -Number(item.qty || 0),
+      reason: `Order ${id}`,
+      action: "order_deducted",
+      orderId: id,
+      actorId: order.customerId,
+      actorName: order.customerName,
+      actorRole: order.customerId === "walk-in" ? "staff" : "customer"
+    });
   }
   writeDemoData(data);
   const notifications = [
@@ -749,13 +809,44 @@ export async function updateOrder(orderId, values) {
     nextValues.cancelReason = values.cancelReason || "Cancelled";
     nextValues.cancelledAt = Date.now();
     for (const item of currentOrder.items || []) {
-      const currentStock = Number(data.inventory[item.id]?.stock || 0) + Number(item.qty || 0);
+      const beforeStock = Number(data.inventory[item.id]?.stock || 0);
+      const currentStock = beforeStock + Number(item.qty || 0);
       data.inventory[item.id] = { ...(data.inventory[item.id] || {}), stock: currentStock };
       data.menu[item.id] = { ...(data.menu[item.id] || {}), stock: currentStock };
+      addDemoStockHistory(data, item.id, {
+        itemName: item.name,
+        beforeStock,
+        afterStock: currentStock,
+        delta: Number(item.qty || 0),
+        reason: `Cancelled order ${orderId}`,
+        action: "order_cancel_restored",
+        orderId
+      });
     }
   }
+  if (values.status === "ready" && currentOrder?.deliveryType === "delivery" && !currentOrder.riderId) {
+    nextValues.riderId = "demo-rider";
+    nextValues.riderName = "Demo Rider";
+    nextValues.assignedAt = Date.now();
+    nextValues.assignedBy = "system";
+    nextValues.assignmentMode = "auto";
+  }
   data.orders[orderId] = { ...data.orders[orderId], ...nextValues };
-  data.auditLogs[`AUD-${Date.now()}`] = auditEntry;
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    ...auditEntry,
+    details: {
+      before: {
+        status: currentOrder?.status,
+        riderId: currentOrder?.riderId || null,
+        paymentStatus: currentOrder?.paymentStatus || null
+      },
+      after: {
+        status: data.orders[orderId]?.status,
+        riderId: data.orders[orderId]?.riderId || null,
+        paymentStatus: data.orders[orderId]?.paymentStatus || null
+      }
+    }
+  };
   writeDemoData(data);
   if (values.status && currentOrder?.customerId) {
     await createNotification({ targetUserId: currentOrder.customerId, title: "Order status updated", message: `${orderId} is now ${values.status.replaceAll("-", " ")}.`, type: "order", orderId });
@@ -863,6 +954,195 @@ export async function saveShiftLog(entry, actor) {
   };
   writeDemoData(data);
   return id;
+}
+
+export async function getActiveShift() {
+  if (firebaseEnabled) return api.getActiveShift();
+  const data = readDemoData();
+  return { shift: demoUser ? data.activeShifts[demoUser.uid] || null : null };
+}
+
+export async function startShift(values, actor) {
+  if (firebaseEnabled) return api.startShift(values);
+  const data = readDemoData();
+  if (data.activeShifts[actor.uid]) throw new Error("You already have an active shift.");
+  const shift = {
+    id: actor.uid,
+    staffId: actor.uid,
+    staffName: actor.name,
+    openingCash: Number(values.openingCash || 0),
+    notes: values.notes || "",
+    startedAt: Date.now(),
+    createdAt: Date.now()
+  };
+  data.activeShifts[actor.uid] = shift;
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "shift_started",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { shift };
+}
+
+export async function closeActiveShift(values, actor) {
+  if (firebaseEnabled) return api.closeShift(values);
+  const data = readDemoData();
+  const activeShift = data.activeShifts[actor.uid];
+  if (!activeShift) throw new Error("Start a shift before closing one.");
+  const orders = Object.values(data.orders || {}).filter((order) => Number(order.createdAt || 0) >= Number(activeShift.startedAt || 0) && order.cashierId === actor.uid);
+  const cashSales = orders.filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && order.status === "delivered")).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const openingCash = Number(activeShift.openingCash || 0);
+  const cashIn = Number(values.cashIn || 0);
+  const cashOut = Number(values.cashOut || 0);
+  const expenses = Number(values.expenses || 0);
+  const actualCash = Number(values.actualCash || 0);
+  const expectedCash = openingCash + cashSales + cashIn - cashOut - expenses;
+  const id = `SHIFT-${Date.now()}`;
+  const log = {
+    startedAt: activeShift.startedAt,
+    endedAt: Date.now(),
+    openingCash,
+    cashIn,
+    cashOut,
+    expenses,
+    cashSales,
+    expectedCash,
+    actualCash,
+    variance: actualCash - expectedCash,
+    orderCount: orders.length,
+    notes: values.notes || "",
+    staffId: actor.uid,
+    staffName: actor.name,
+    createdAt: Date.now()
+  };
+  data.shiftLogs[id] = log;
+  delete data.activeShifts[actor.uid];
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "shift_closed",
+    shiftLogId: id,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { id, log };
+}
+
+export async function createApprovalRequest(values, actor) {
+  if (firebaseEnabled) return api.createApproval(values);
+  const data = readDemoData();
+  const id = `APPROVAL-${Date.now()}`;
+  data.approvalRequests[id] = {
+    ...values,
+    status: "pending",
+    requesterId: actor.uid,
+    requesterName: actor.name,
+    requesterRole: actor.role,
+    createdAt: Date.now()
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "approval_requested",
+    approvalId: id,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { id, request: data.approvalRequests[id] };
+}
+
+export function subscribeApprovalRequests(user, callback) {
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, request]) => ({ id, ...request }))
+      .filter((request) => user?.role === "owner" || request.requesterId === user?.uid)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+  );
+  if (firebaseEnabled) {
+    api.listApprovals().then((result) => callback(result.requests || [])).catch(() => callback([]));
+    return () => {};
+  }
+  const emit = () => normalize(readDemoData().approvalRequests);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function resolveApprovalRequest(requestId, decision, actor) {
+  if (firebaseEnabled) return api.resolveApproval(requestId, decision);
+  const data = readDemoData();
+  const request = data.approvalRequests[requestId];
+  if (!request) throw new Error("Approval request not found.");
+  data.approvalRequests[requestId] = {
+    ...request,
+    status: decision,
+    reviewedAt: Date.now(),
+    reviewedBy: actor.uid,
+    reviewerName: actor.name
+  };
+  if (decision === "approved" && request.type === "stock_correction") {
+    const itemId = request.payload?.itemId || request.targetId;
+    const beforeStock = Number(data.inventory[itemId]?.stock || 0);
+    const afterStock = Number(request.payload?.countedStock || 0);
+    data.inventory[itemId] = { ...(data.inventory[itemId] || {}), stock: afterStock };
+    data.menu[itemId] = { ...(data.menu[itemId] || {}), stock: afterStock };
+    addDemoStockHistory(data, itemId, {
+      itemName: data.inventory[itemId]?.name || itemId,
+      beforeStock,
+      afterStock,
+      delta: afterStock - beforeStock,
+      reason: request.reason,
+      action: "stock_count_approved",
+      actorId: actor.uid,
+      actorName: actor.name,
+      actorRole: actor.role
+    });
+  }
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: decision === "approved" ? "approval_approved" : "approval_rejected",
+    approvalId: requestId,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { id: requestId, status: decision };
+}
+
+export async function archiveCompletedOrders(olderThanDays, actor) {
+  if (firebaseEnabled) return api.archiveCompletedOrders(olderThanDays);
+  const data = readDemoData();
+  const cutoff = Date.now() - Number(olderThanDays || 30) * 24 * 60 * 60 * 1000;
+  let archived = 0;
+  data.orderArchive ||= {};
+  for (const [id, order] of Object.entries(data.orders || {})) {
+    if (order.archivedAt || !["delivered", "cancelled"].includes(order.status)) continue;
+    const referenceTime = Number(order.deliveredAt || order.cancelledAt || order.updatedAt || order.createdAt || 0);
+    if (referenceTime > cutoff) continue;
+    archived += 1;
+    data.orders[id] = { ...order, archivedAt: Date.now() };
+    data.orderArchive[id] = { ...order, archivedAt: Date.now(), archivedBy: actor.uid };
+  }
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "orders_archived",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  return { archived };
+}
+
+export async function resendReceiptEmail(orderId) {
+  if (firebaseEnabled) return api.resendReceiptEmail(orderId);
+  return { sent: false, preview: true };
 }
 
 export async function saveRiderLocation(orderId, location) {

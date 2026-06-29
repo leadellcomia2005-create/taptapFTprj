@@ -241,6 +241,7 @@ app.post("/api/notifications/sms", authenticate, requireRoles("owner", "staff"),
   if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await db().ref(`orders/${req.body.orderId}`).once("value")).val();
   if (!order) throw new HttpError(404, "Order not found.");
+  if (!order.phoneVerified || !order.smsNotifications) throw new HttpError(409, "SMS updates require a verified phone number and customer consent.");
   const result = await sendTwilioSms({ to: order.phone, orderId: req.body.orderId, status: order.status });
   res.json({ sent: Boolean(result), sid: result?.sid || null });
 }));

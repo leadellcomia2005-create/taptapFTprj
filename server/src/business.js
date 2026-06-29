@@ -17,6 +17,34 @@ function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+function normalizePhilippinePhone(value = "") {
+  const digits = String(value).replace(/\D/g, "");
+  if (digits.startsWith("639") && digits.length === 12) return `+${digits}`;
+  if (digits.startsWith("09") && digits.length === 11) return `+63${digits.slice(1)}`;
+  if (digits.startsWith("9") && digits.length === 10) return `+63${digits}`;
+  return cleanText(value, 40);
+}
+
+function isValidPhilippineMobile(value = "") {
+  return /^\+639\d{9}$/.test(value);
+}
+
+function parseDeliveryLocation(input = {}, address = "", landmark = "") {
+  const lat = Number(input?.lat);
+  const lng = Number(input?.lng);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+  const accuracy = Number(input?.accuracy || 0);
+  return {
+    lat,
+    lng,
+    address: cleanText(input.address || address, 300),
+    landmark: cleanText(input.landmark || landmark, 160),
+    source: cleanText(input.source || "map-picker", 40),
+    accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? Math.min(accuracy, 10000) : 0,
+    confirmedAt: Date.now()
+  };
+}
+
 function slugifyId(value) {
   return cleanText(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 }
@@ -114,6 +142,14 @@ export async function createOrderRecord(db, user, input) {
   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
   const isWalkIn = user.role !== "customer";
   const deliveryType = isWalkIn ? "walk-in" : input.deliveryType === "pickup" ? "pickup" : "delivery";
+  const phone = normalizePhilippinePhone(input.phone);
+  const landmark = cleanText(input.landmark, 160);
+  const address = isWalkIn ? "Counter" : deliveryType === "pickup" ? "Store pickup" : cleanText(input.address, 300);
+  const deliveryLocation = deliveryType === "delivery" ? parseDeliveryLocation(input.deliveryLocation, address, landmark) : null;
+  const profilePhone = normalizePhilippinePhone(profile.phone || "");
+  const phoneVerified = Boolean(!isWalkIn && isValidPhilippineMobile(phone) && profilePhone === phone && profile.phoneVerified);
+  const smsNotificationsRequested = Boolean(input.smsNotifications);
+  const smsNotifications = Boolean(phoneVerified && smsNotificationsRequested);
   const discount = isWalkIn ? Math.max(0, Math.min(subtotal, Number(input.discount || 0))) : 0;
   if (!Number.isFinite(discount)) throw new HttpError(400, "Enter a valid discount.");
   const fee = deliveryType === "delivery" ? deliveryFee : 0;
@@ -135,8 +171,14 @@ export async function createOrderRecord(db, user, input) {
     customerId,
     customerName,
     customerEmail: isWalkIn ? "" : user.email || profile.email || "",
-    phone: cleanText(input.phone, 40),
-    address: isWalkIn ? "Counter" : deliveryType === "pickup" ? "Store pickup" : cleanText(input.address, 300),
+    phone,
+    phoneVerified,
+    phoneVerifiedAt: phoneVerified ? Number(profile.phoneVerifiedAt || Date.now()) : null,
+    smsNotifications,
+    smsNotificationsRequested,
+    address,
+    landmark,
+    deliveryLocation,
     deliveryType,
     notes: cleanText(input.notes, 300),
     paymentMethod: input.paymentMethod,
@@ -158,8 +200,9 @@ export async function createOrderRecord(db, user, input) {
     paymentConfirmedAt: onlinePayment ? null : createdAt,
     source: isWalkIn ? "walk-in-pos" : "online"
   };
-  if (!isWalkIn && !order.phone) throw new HttpError(400, "A phone number is required.");
+  if (!isWalkIn && !isValidPhilippineMobile(order.phone)) throw new HttpError(400, "Enter a valid Philippine mobile number.");
   if (deliveryType === "delivery" && !order.address) throw new HttpError(400, "A delivery address is required.");
+  if (user.role === "customer" && deliveryType === "delivery" && !order.deliveryLocation) throw new HttpError(400, "Confirm the delivery pin before placing the order.");
 
   let transactionError;
   const transaction = await transactionWithInitial(inventoryRef, inventorySnapshot.val(), (inventory) => {

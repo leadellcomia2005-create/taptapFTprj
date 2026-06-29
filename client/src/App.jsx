@@ -576,6 +576,9 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
 
 function TrackingView({ order, onClose }) {
   const [rider, setRider] = useState(null);
+  const customerPin = order?.deliveryLocation?.lat && order?.deliveryLocation?.lng
+    ? [Number(order.deliveryLocation.lat), Number(order.deliveryLocation.lng)]
+    : null;
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -594,7 +597,7 @@ function TrackingView({ order, onClose }) {
       <div className="modal-dialog modal-xl modal-dialog-centered">
         <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
           <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
-          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={rider} /></Suspense></div>
+          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={rider} customer={customerPin} /></Suspense></div>
         </div>
       </div>
     </div>
@@ -866,7 +869,7 @@ export default function App() {
       )}
       {user.role === "customer" && view === "profile" && (
         <Suspense fallback={<SectionLoader label="Loading profile..." />}>
-          <CustomerProfile user={currentUser} profile={profile} notify={setNotice} />
+          <CustomerProfile user={currentUser} profile={profile} notify={setNotice} smsProviderEnabled={serviceStatus.twilio} />
         </Suspense>
       )}
       {user.role !== "customer" && (
@@ -876,7 +879,7 @@ export default function App() {
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
-          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />
+          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />
         </Suspense>
       )}
       {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}

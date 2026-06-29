@@ -87,6 +87,10 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
   const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
   const addressLabel = (value) => value || "Counter pickup";
+  const deliveryPin = active?.deliveryLocation?.lat && active?.deliveryLocation?.lng
+    ? [Number(active.deliveryLocation.lat), Number(active.deliveryLocation.lng)]
+    : null;
+  const hasDeliveryPin = (order) => Boolean(order?.deliveryLocation?.lat && order?.deliveryLocation?.lng);
   const reportDeliveryIssue = async (reason) => {
     if (!active) return;
     await updateOrder(active.id, { deliveryIssue: reason });
@@ -94,7 +98,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   };
 
   const googleMapsUrl = active
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(active.address)}&travelmode=driving`
+    ? `https://www.google.com/maps/dir/?api=1&destination=${deliveryPin ? `${deliveryPin[0]},${deliveryPin[1]}` : encodeURIComponent(active.address)}&travelmode=driving`
     : "#";
 
   if (section === "rider-cod") {
@@ -186,7 +190,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
               <span className="rider-order-copy">
                 <span><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></span>
                 <small>{order.customerName}</small>
-                <em><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</em>
+                <em><MapPin size={13} aria-hidden="true" /> {hasDeliveryPin(order) ? "Pin confirmed" : addressLabel(order.address)}</em>
               </span>
               <span className="rider-order-total">{currency(order.total)}</span>
             </button>
@@ -204,7 +208,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                   <div>
                     <strong>{order.id}</strong>
                     <small>{orderItems(order)}</small>
-                    <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
+                    <span><MapPin size={13} aria-hidden="true" /> {hasDeliveryPin(order) ? "Pin confirmed" : addressLabel(order.address)}</span>
                   </div>
                   <button onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> Accept</button>
                 </article>
@@ -228,7 +232,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <i />
                 <div>
                   <span className="rider-route-dot drop"><MapPin size={15} aria-hidden="true" /></span>
-                  <p><small>Drop off</small><strong>{addressLabel(active.address)}</strong></p>
+                  <p><small>Drop off {deliveryPin ? "with confirmed pin" : "address only"}</small><strong>{addressLabel(active.address)}</strong>{active.landmark && <span>{active.landmark}</span>}</p>
                 </div>
               </div>
 
@@ -236,9 +240,10 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Customer</small><strong>{active.customerName}</strong></div>
                 <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
+                <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
               </div>
 
-              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={location} /></Suspense></div>
+              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={location} customer={deliveryPin} /></Suspense></div>
 
               <div className="rider-action-grid">
                 <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>

@@ -526,7 +526,7 @@ button { font: inherit; }
 .rider-route-dot { width: 34px; height: 34px; display: grid; place-items: center; color: white; border-radius: 8px; }
 .rider-route-dot.pickup { background: var(--ink); }
 .rider-route-dot.drop { background: var(--red); }
-.rider-active-details { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.rider-active-details { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
 .rider-active-details div { min-width: 0; padding: 11px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 8px; }
 .rider-active-details strong,.rider-active-details span { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 .rider-map-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
@@ -548,6 +548,13 @@ button { font: inherit; }
 .pos-remove { grid-column: 1 / -1; justify-self: start; padding: 0; color: var(--red); border: 0; background: transparent; font-size: 8px; font-weight: 800; }
 .pos-payment-panel { display: grid; gap: 12px; margin-top: 16px; padding: 14px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 10px; }
 .pos-payment-panel .form-label { margin-bottom: 0; }
+.checkout-sms-panel,.checkout-location-panel { display: grid; gap: 10px; margin: 12px 0; padding: 13px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 10px; }
+.checkout-sms-panel label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 10px; font-weight: 800; }
+.checkout-sms-panel small,.checkout-location-panel small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.checkout-location-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.checkout-location-map { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.checkout-location-map .delivery-map-wrap { height: 250px; }
+.pin-coordinate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pos-totals { margin: 14px 0; padding: 12px 14px; background: white; border: 1px solid var(--line); border-radius: 10px; }
 .pos-totals > div:last-child { border-bottom: 0; }
 .pos-totals > div:nth-last-child(2) dd,.pos-totals > div:nth-last-child(2) dt { color: var(--red); font-weight: 900; }
@@ -691,6 +698,9 @@ button { font: inherit; }
   .menu-add-panel { margin-inline: -2px; padding: 12px; }
   .checkout-total { align-items: flex-start; flex-direction: column; gap: 5px; }
   .checkout-total strong { font-size: 30px; }
+  .checkout-location-actions,.pin-coordinate-grid { grid-template-columns: 1fr; }
+  .checkout-location-actions .btn { width: 100%; }
+  .checkout-location-map .delivery-map-wrap { height: 220px; }
   .order-card { flex-direction: column; }.order-card .text-end { text-align: left !important; }.order-card .text-end strong,.order-card .text-end button { margin-left: 0; }
   .receipt-card { grid-template-columns: 42px 1fr; }.receipt-total { grid-column: 1 / -1; justify-items: stretch; }.receipt-total strong { text-align: right; }
   .brand-lockup .brand-mark { width: 40px; height: 40px; flex-basis: 40px; }

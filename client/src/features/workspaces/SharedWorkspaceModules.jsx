@@ -512,7 +512,7 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
     }
     const next = flow[Math.min(flow.indexOf(order.status) + 1, flow.length - 1)];
     await updateOrder(order.id, { status: next, updatedAt: Date.now() });
-    api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
+    if (order.phoneVerified && order.smsNotifications) api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
   };
   const cancelOrder = async (order, reason) => {
@@ -530,6 +530,7 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
     }, user);
     notify(`${order.id} void request sent to owner approval.`);
   };
+  const pinStatus = (order) => order.deliveryLocation?.lat && order.deliveryLocation?.lng ? "Pin confirmed" : order.deliveryType === "delivery" ? "No pin" : "No pin needed";
   // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
   return (
     <div className="dashboard-card">
@@ -537,7 +538,7 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}{user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}</div>}</td></tr>)}</tbody>
+          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}<small className="d-block text-secondary">{order.phone || "No phone"}</small>{order.smsNotifications ? <small className="d-block text-success">SMS ready</small> : <small className="d-block text-secondary">SMS not verified</small>}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType} - {pinStatus(order)}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.landmark && <small className="d-block text-secondary">Landmark: {order.landmark}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}{user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}</div>}</td></tr>)}</tbody>
         </table>
       </div>
       {cancelTarget && <ReasonModal title={`Cancel ${cancelTarget.id}`} label="Cancellation reason" placeholder="Example: Customer changed order, unavailable item, duplicate order..." confirmText="Cancel order" onClose={() => setCancelTarget(null)} onSubmit={async (reason) => { await cancelOrder(cancelTarget, reason); setCancelTarget(null); }} />}

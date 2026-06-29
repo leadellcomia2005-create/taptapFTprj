@@ -335,7 +335,13 @@ export function subscribeUserProfile(user, callback) {
     name: user.name,
     email: user.email,
     phone: "",
+    phoneVerified: false,
+    phoneVerifiedAt: null,
+    smsNotifications: false,
+    smsNotificationsRequested: false,
     address: "",
+    landmark: "",
+    deliveryLocation: null,
     city: "Las Pinas City",
     notificationPreferences: { orderUpdates: true, promotions: true }
   };
@@ -721,6 +727,9 @@ export async function createOrder(order) {
     const result = await api.createOrder({
       phone: order.phone,
       address: order.address,
+      landmark: order.landmark,
+      deliveryLocation: order.deliveryLocation,
+      smsNotifications: order.smsNotifications,
       deliveryType: order.deliveryType,
       notes: order.notes,
       discount: order.discount,

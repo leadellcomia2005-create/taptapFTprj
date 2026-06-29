@@ -32,10 +32,19 @@ function MapViewport({ store, rider, customer, focusRequest }) {
   return null;
 }
 
-export default function DeliveryMap({ rider, customer = null }) {
+function toPoint(value) {
+  if (!value) return null;
+  if (Array.isArray(value)) return value;
+  const lat = Number(value.lat);
+  const lng = Number(value.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+}
+
+export default function DeliveryMap({ rider, customer = null, editableCustomer = false, onCustomerChange = () => {} }) {
   const [focusRequest, setFocusRequest] = useState(0);
   const store = [storeLocation.lat, storeLocation.lng];
   const riderPosition = rider ? [rider.lat, rider.lng] : null;
+  const customerPosition = toPoint(customer);
   return (
     <div className="delivery-map-wrap">
       <MapContainer center={store} zoom={18} className="delivery-map">
@@ -43,10 +52,20 @@ export default function DeliveryMap({ rider, customer = null }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapViewport store={store} rider={riderPosition} customer={customer} focusRequest={focusRequest} />
+        <MapViewport store={store} rider={riderPosition} customer={customerPosition} focusRequest={focusRequest} />
         <Marker position={store} icon={markerIcon("T", "#d93624")}><Popup><strong>{storeLocation.name}</strong><br />{storeLocation.address}</Popup></Marker>
         {riderPosition && <Marker position={riderPosition} icon={markerIcon("R", "#d5a94d")}><Popup>Live rider location</Popup></Marker>}
-        {customer && <Marker position={customer} icon={markerIcon("C", "#2b714d")}><Popup>Customer address</Popup></Marker>}
+        {customerPosition && <Marker
+          position={customerPosition}
+          draggable={editableCustomer}
+          eventHandlers={editableCustomer ? {
+            dragend: (event) => {
+              const next = event.target.getLatLng();
+              onCustomerChange({ lat: next.lat, lng: next.lng });
+            }
+          } : undefined}
+          icon={markerIcon("C", "#2b714d")}
+        ><Popup>{editableCustomer ? "Drag to adjust delivery pin" : "Customer delivery pin"}</Popup></Marker>}
       </MapContainer>
       <button className="focus-store-button" type="button" onClick={() => setFocusRequest((current) => current + 1)}>Focus Taptap shop</button>
     </div>

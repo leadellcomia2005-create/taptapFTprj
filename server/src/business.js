@@ -45,6 +45,36 @@ function parseDeliveryLocation(input = {}, address = "", landmark = "") {
   };
 }
 
+function parseAvailability(input = {}) {
+  const mode = input?.mode === "schedule" ? "schedule" : "always";
+  const allowedDays = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  const days = Array.isArray(input?.days) ? input.days.map((day) => cleanText(day, 8)).filter((day) => allowedDays.has(day)).slice(0, 7) : [];
+  const timePattern = /^\d{2}:\d{2}$/;
+  const start = timePattern.test(String(input?.start || "")) ? input.start : "00:00";
+  const end = timePattern.test(String(input?.end || "")) ? input.end : "23:59";
+  return { mode, days, start, end };
+}
+
+function deliveryOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function parseProofHandoff(input = {}, order = {}) {
+  const handoff = input || {};
+  const otp = cleanText(handoff.otp, 12).replace(/\D/g, "").slice(0, 6);
+  if (otp && order.handoffOtp && otp !== order.handoffOtp) throw new HttpError(409, "Delivery OTP does not match this order.");
+  const proof = {
+    customerName: cleanText(handoff.customerName, 80),
+    signature: cleanText(handoff.signature, 80),
+    otpVerified: Boolean(otp && order.handoffOtp && otp === order.handoffOtp),
+    capturedAt: Date.now()
+  };
+  if (!proof.customerName && !proof.signature && !proof.otpVerified) {
+    throw new HttpError(400, "Add customer name, typed signature, or the correct OTP before delivery proof.");
+  }
+  return proof;
+}
+
 function slugifyId(value) {
   return cleanText(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 }
@@ -198,6 +228,7 @@ export async function createOrderRecord(db, user, input) {
     paymentProvider: onlinePayment ? "paymongo" : input.paymentMethod,
     paymentRequiredAt: onlinePayment ? createdAt : null,
     paymentConfirmedAt: onlinePayment ? null : createdAt,
+    handoffOtp: deliveryType === "delivery" ? deliveryOtp() : null,
     source: isWalkIn ? "walk-in-pos" : "online"
   };
   if (!isWalkIn && !isValidPhilippineMobile(order.phone)) throw new HttpError(400, "Enter a valid Philippine mobile number.");
@@ -473,6 +504,7 @@ export async function createMenuItemRecord(db, user, input = {}) {
     price,
     stock,
     reorderPoint,
+    availability: parseAvailability(input.availability),
     allergens: Array.isArray(input.allergens) ? input.allergens.map((value) => cleanText(value, 40)).filter(Boolean).slice(0, 8) : [],
     featured: Boolean(input.featured),
     walkInOnly: Boolean(input.walkInOnly),
@@ -486,7 +518,7 @@ export async function createMenuItemRecord(db, user, input = {}) {
   };
   await db.ref().update({
     [`public/menu/${id}`]: item,
-    [`inventory/${id}`]: { name, category, price, stock, reorderPoint, unavailable: item.unavailable, createdAt },
+    [`inventory/${id}`]: { name, category, price, stock, reorderPoint, availability: item.availability, unavailable: item.unavailable, createdAt },
     [`stockHistory/${id}/${db.ref(`stockHistory/${id}`).push().key}`]: stockHistoryEntry({
       item,
       itemId: id,
@@ -538,6 +570,7 @@ export async function updateMenuItemRecord(db, user, itemId, input = {}) {
     price,
     stock,
     reorderPoint,
+    availability: input.availability !== undefined ? parseAvailability(input.availability) : currentMenu.availability || { mode: "always", days: [], start: "00:00", end: "23:59" },
     walkInOnly: input.walkInOnly !== undefined ? Boolean(input.walkInOnly) : Boolean(currentMenu.walkInOnly),
     unavailable: input.unavailable !== undefined ? Boolean(input.unavailable) : Boolean(currentMenu.unavailable),
     updatedAt: Date.now(),
@@ -552,6 +585,7 @@ export async function updateMenuItemRecord(db, user, itemId, input = {}) {
       price,
       stock,
       reorderPoint,
+      availability: item.availability,
       unavailable: item.unavailable,
       updatedAt: item.updatedAt
     },
@@ -559,7 +593,7 @@ export async function updateMenuItemRecord(db, user, itemId, input = {}) {
       action: "menu_item_updated",
       itemId,
       itemName: name,
-      details: auditDetails({ ...currentMenu, stock: currentInventory.stock }, item, ["name", "category", "description", "price", "stock", "reorderPoint", "walkInOnly", "unavailable"]),
+      details: auditDetails({ ...currentMenu, stock: currentInventory.stock }, item, ["name", "category", "description", "price", "stock", "reorderPoint", "availability", "walkInOnly", "unavailable"]),
       actorId: user.uid,
       actorName: user.name || user.email,
       actorRole: user.role,
@@ -606,6 +640,97 @@ export async function updateReviewRecord(db, user, reviewId, input = {}) {
     }
   });
   return { review: { id: reviewId, ...review, moderationStatus: status, reply, moderatedAt: updatedAt, moderatedBy: user.uid } };
+}
+
+export async function listComplaintsRecord(db, user) {
+  const complaints = Object.entries((await db.ref("complaints").once("value")).val() || {})
+    .map(([id, complaint]) => ({ id, ...complaint }))
+    .filter((complaint) => user.role !== "customer" || complaint.customerId === user.uid)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (!["owner", "staff", "customer"].includes(user.role)) throw new HttpError(403, "Complaint access requires an operations or customer role.");
+  return { complaints };
+}
+
+export async function createComplaintRecord(db, user, input = {}) {
+  if (user.role !== "customer") throw new HttpError(403, "Customer access required.");
+  const orderId = cleanText(input.orderId, 128);
+  if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
+  const order = (await db.ref(`orders/${orderId}`).once("value")).val();
+  if (!order || order.customerId !== user.uid) throw new HttpError(403, "This order is not yours.");
+  const type = cleanText(input.type, 40);
+  if (!["wrong-item", "missing-item", "late-order", "bad-food"].includes(type)) throw new HttpError(400, "Unsupported complaint type.");
+  const details = cleanText(input.details, 700);
+  if (!details) throw new HttpError(400, "Complaint details are required.");
+  const now = Date.now();
+  const id = db.ref("complaints").push().key;
+  const complaint = {
+    orderId,
+    customerId: user.uid,
+    customerName: order.customerName || user.name || user.email,
+    type,
+    details,
+    requestedResolution: cleanText(input.requestedResolution, 220),
+    status: "pending",
+    items: (order.items || []).map((item) => item.name).slice(0, 20),
+    createdAt: now
+  };
+  const staffAndOwnerIds = await userIdsForRoles(db, ["owner", "staff"]);
+  await db.ref().update({
+    [`complaints/${id}`]: complaint,
+    [`auditLogs/AUD-${now}-${id}`]: {
+      action: "complaint_created",
+      complaintId: id,
+      orderId,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      createdAt: now
+    },
+    ...notificationUpdates(db, staffAndOwnerIds, {
+      title: "New order complaint",
+      message: `${complaint.customerName} reported ${orderId}.`,
+      type: "complaint",
+      orderId
+    })
+  });
+  return { id, complaint };
+}
+
+export async function updateComplaintRecord(db, user, complaintId, input = {}) {
+  if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
+  if (!validRecordId(complaintId)) throw new HttpError(400, "Invalid complaint ID.");
+  const complaint = (await db.ref(`complaints/${complaintId}`).once("value")).val();
+  if (!complaint) throw new HttpError(404, "Complaint not found.");
+  const status = cleanText(input.status || complaint.status || "pending", 40);
+  if (!["pending", "reviewed", "resolved"].includes(status)) throw new HttpError(400, "Unsupported complaint status.");
+  const now = Date.now();
+  const updates = {
+    [`complaints/${complaintId}/status`]: status,
+    [`complaints/${complaintId}/resolution`]: cleanText(input.resolution, 700),
+    [`complaints/${complaintId}/updatedAt`]: now,
+    [`complaints/${complaintId}/resolvedBy`]: user.uid,
+    [`complaints/${complaintId}/resolverName`]: user.name || user.email,
+    [`auditLogs/AUD-${now}-${complaintId}`]: {
+      action: "complaint_updated",
+      complaintId,
+      orderId: complaint.orderId,
+      status,
+      actorId: user.uid,
+      actorName: user.name || user.email,
+      actorRole: user.role,
+      createdAt: now
+    },
+    ...notificationUpdates(db, [complaint.customerId], {
+      title: "Complaint updated",
+      message: `${complaint.orderId} is now ${status}.`,
+      type: "complaint",
+      orderId: complaint.orderId
+    })
+  };
+  if (status === "reviewed") updates[`complaints/${complaintId}/reviewedAt`] = now;
+  if (status === "resolved") updates[`complaints/${complaintId}/resolvedAt`] = now;
+  await db.ref().update(updates);
+  return { id: complaintId, complaint: { id: complaintId, ...complaint, status, resolution: cleanText(input.resolution, 700), updatedAt: now } };
 }
 
 export async function adjustInventoryRecord(db, user, itemId, input) {
@@ -696,13 +821,15 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
   if (!order) throw new HttpError(404, "Order not found.");
   if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
   if (order.status !== "arrived") throw new HttpError(409, "Proof can be captured only after arrival.");
+  const handoff = parseProofHandoff(input.handoff, order);
   const proofOfDeliveryRef = `deliveryProofs/${orderId}`;
   await db.ref(proofOfDeliveryRef).set({
     dataUrl: validateDeliveryProof(input.dataUrl),
+    handoff,
     riderId: user.uid,
     createdAt: Date.now()
   });
-  return { proofOfDeliveryRef };
+  return { proofOfDeliveryRef, proofOfDeliveryMeta: handoff };
 }
 
 export async function saveShiftLogRecord(db, user, input) {

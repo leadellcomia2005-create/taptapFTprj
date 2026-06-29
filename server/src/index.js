@@ -17,7 +17,9 @@ import {
   createMenuItemRecord,
   createOrderRecord,
   getActiveShiftRecord,
+  createComplaintRecord,
   listApprovalRequestsRecord,
+  listComplaintsRecord,
   listOrdersForUser,
   resolveApprovalRequestRecord,
   saveDeliveryProofRecord,
@@ -25,6 +27,7 @@ import {
   saveShiftLogRecord,
   startShiftRecord,
   updateMenuItemRecord,
+  updateComplaintRecord,
   updateOrderRecord,
   updateReviewRecord
 } from "./business.js";
@@ -328,6 +331,22 @@ app.patch("/api/reviews/:reviewId", authenticate, requireRoles("owner", "staff")
   res.json(await updateReviewRecord(db(), req.user, req.params.reviewId, req.body));
 }));
 
+app.get("/api/complaints", authenticate, requireRoles("owner", "staff", "customer"), asyncRoute(async (req, res) => {
+  res.json(await listComplaintsRecord(db(), req.user));
+}));
+
+app.post("/api/complaints", authenticate, requireRoles("customer"), asyncRoute(async (req, res) => {
+  const result = await createComplaintRecord(db(), req.user, req.body);
+  io.to("role:owner").to("role:staff").emit("complaint:created", result);
+  res.status(201).json(result);
+}));
+
+app.patch("/api/complaints/:complaintId", authenticate, requireRoles("owner", "staff"), asyncRoute(async (req, res) => {
+  const result = await updateComplaintRecord(db(), req.user, req.params.complaintId, req.body);
+  io.to(`user:${result.complaint.customerId}`).to("role:owner").to("role:staff").emit("complaint:updated", result);
+  res.json(result);
+}));
+
 app.post("/api/riders/location", authenticate, requireRoles("rider"), asyncRoute(async (req, res) => {
   const result = await saveRiderLocationRecord(db(), req.user, req.body.orderId, req.body);
   io.to(`order:${req.body.orderId}`).to("role:owner").to("role:staff").emit("rider:location", {
@@ -383,18 +402,20 @@ app.post("/api/admin/archive-orders", authenticate, requireRoles("owner"), async
 app.post("/api/admin/roles", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
   if (!validRecordId(req.body.uid)) throw new HttpError(400, "Invalid account ID.");
   if (!["owner", "staff", "rider", "customer"].includes(req.body.role)) throw new HttpError(400, "Unsupported role.");
+  const staffRole = ["manager", "cashier", "kitchen", "inventory"].includes(req.body.staffRole) ? req.body.staffRole : "manager";
   const currentRole = (await db().ref(`users/${req.body.uid}/role`).once("value")).val() || "customer";
   await getAuth().setCustomUserClaims(req.body.uid, { role: req.body.role });
   const createdAt = Date.now();
   await db().ref().update({
     [`users/${req.body.uid}/role`]: req.body.role,
+    [`users/${req.body.uid}/staffRole`]: req.body.role === "staff" ? staffRole : null,
     [`auditLogs/AUD-${createdAt}-${req.body.uid}-role`]: {
       action: "role_changed",
       targetUserId: req.body.uid,
       actorId: req.user.uid,
       actorName: req.user.name || req.user.email,
       actorRole: req.user.role,
-      details: { before: { role: currentRole }, after: { role: req.body.role } },
+      details: { before: { role: currentRole }, after: { role: req.body.role, staffRole: req.body.role === "staff" ? staffRole : null } },
       createdAt
     }
   });
@@ -417,6 +438,7 @@ app.get("/api/admin/users", authenticate, requireRoles("owner"), asyncRoute(asyn
       email: record.email || profile.email || "",
       name: profile.name || record.displayName || record.email || record.uid,
       role: record.customClaims?.role || profile.role || "customer",
+      staffRole: profile.staffRole || "manager",
       twoFactorEnabled: Boolean(status.enabled),
       twoFactorMethod: status.method || null,
       twoFactorLocked: Boolean(status.locked)

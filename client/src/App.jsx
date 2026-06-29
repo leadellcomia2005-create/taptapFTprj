@@ -4,7 +4,7 @@ import { Bell, LogOut, Menu, Trash2, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
-import { defaultViewForRole, roleNavigation } from "./config/appConfig";
+import { defaultViewForRole, navigationForUser, staffCanAccess, staffRoleLabels } from "./config/appConfig";
 import { fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
 import {
@@ -12,6 +12,7 @@ import {
   logout,
   observeAuth,
   subscribeAuditLogs,
+  subscribeComplaints,
   subscribeInventory,
   subscribeMenu,
   subscribeNotifications,
@@ -23,8 +24,9 @@ import {
   subscribeSupportMessages,
   subscribeUserProfile
 } from "./services/firebase";
-import { disconnectSocket, getSocket, joinOrderRoom } from "./services/socket";
+import { disconnectSocket, getSocket, subscribeSocketRiderLocation } from "./services/socket";
 import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
+import { menuAvailability } from "./utils/operations";
 import { assistantSourceLabel, currency, relativeTime, statusLabel } from "./utils/display";
 
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
@@ -66,6 +68,11 @@ const isRevenueOrder = (order) => {
 };
 const isOutstandingCod = (order) => order?.paymentMethod === "cod" && order.status !== "cancelled" && !isRevenueOrder(order);
 const isUnremittedCod = (order) => order?.paymentMethod === "cod" && order.status === "delivered" && !order.codRemittedAt;
+const locationToPoint = (location) => {
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+};
 const topSellingItems = (orders) => {
   const items = new Map();
   for (const order of orders) {
@@ -352,7 +359,7 @@ const printReceipt = (order) => {
 };
 
 function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications }) {
-  const navigation = roleNavigation[user.role] || [];
+  const navigation = navigationForUser(user);
   const homeView = defaultViewForRole(user.role);
   const customerNavigation = user.role === "customer";
   const workspaceDrawerNavigation = user.role === "owner" || user.role === "staff";
@@ -410,7 +417,7 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
       <div className="header-actions">
         {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}
         <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
-        <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div>
+        <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
         <button className="btn btn-danger btn-sm logout-button" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
       </div>
@@ -448,7 +455,7 @@ function NotificationCenter({ notifications, onClose }) {
 
 const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
-  const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && !item.unavailable), [menu]);
+  const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && menuAvailability(item).available), [menu]);
   const categories = useMemo(() => ["All", ...new Set(customerMenu.map((item) => item.category))], [customerMenu]);
   const visible = useMemo(() => (
     category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category)
@@ -508,7 +515,7 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
                       <h3>{product.name}</h3>
                       <p>{product.description}</p>
                     </div>
-                    <small>Allergens: {product.allergens?.join(", ") || "none listed"}</small>
+                    <small>Allergens: {product.allergens?.join(", ") || "none listed"} - {menuAvailability(product).label}</small>
                   </div>
                   <div className="menu-item-action">
                     <strong>{currency(product.price)}</strong>
@@ -576,9 +583,17 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
 
 function TrackingView({ order, onClose }) {
   const [rider, setRider] = useState(null);
-  const customerPin = order?.deliveryLocation?.lat && order?.deliveryLocation?.lng
-    ? [Number(order.deliveryLocation.lat), Number(order.deliveryLocation.lng)]
-    : null;
+  const customerPin = locationToPoint(order?.deliveryLocation);
+  const riderPin = locationToPoint(rider);
+  const trackingOrderId = order?.id;
+  const orderRiderLocation = order?.riderLocation || null;
+  const trackingStatus = riderPin
+    ? "Rider location is live"
+    : order?.riderId
+      ? "Waiting for rider GPS"
+      : order?.deliveryType === "delivery"
+        ? "Waiting for rider assignment"
+        : "Store pickup order";
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -587,17 +602,37 @@ function TrackingView({ order, onClose }) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
   useEffect(() => {
-    if (!order?.riderId) return undefined;
-    joinOrderRoom(order.id).catch(() => {});
-    return subscribeRiderLocation(order.id, setRider);
-  }, [order]);
+    setRider(orderRiderLocation);
+  }, [trackingOrderId, orderRiderLocation]);
+  useEffect(() => {
+    if (!trackingOrderId) {
+      setRider(null);
+      return undefined;
+    }
+    let stopped = false;
+    let stopSocket = () => {};
+    const stopDatabase = subscribeRiderLocation(trackingOrderId, (location) => {
+      if (!stopped) setRider(location || null);
+    });
+    subscribeSocketRiderLocation(trackingOrderId, (location) => {
+      if (!stopped) setRider(location || null);
+    }).then((cleanup) => {
+      if (stopped) cleanup();
+      else stopSocket = cleanup;
+    }).catch(() => {});
+    return () => {
+      stopped = true;
+      stopDatabase?.();
+      stopSocket();
+    };
+  }, [trackingOrderId]);
   if (!order) return null;
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-xl modal-dialog-centered">
         <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
-          <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
-          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={rider} customer={customerPin} /></Suspense></div>
+          <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5><span className="tracking-status-text">{trackingStatus}{order.handoffOtp && ["out-for-delivery", "arrived"].includes(order.status) ? ` - Delivery OTP ${order.handoffOtp}` : ""}</span></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
+          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={riderPin} customer={customerPin} /></Suspense></div>
         </div>
       </div>
     </div>
@@ -666,6 +701,7 @@ export default function App() {
   const [shiftLogs, setShiftLogs] = useState([]);
   const [supportMessages, setSupportMessages] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [complaints, setComplaints] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [cart, setCart] = useState([]);
   const [view, setView] = useState("store");
@@ -703,7 +739,7 @@ export default function App() {
     return subscribeMenu(fallbackMenu, setMenu);
   }, [activeUser]);
   useEffect(() => {
-    const staffInventoryView = activeUser?.role === "staff" && ["staff-dashboard", "staff-pos", "staff-inventory"].includes(view);
+    const staffInventoryView = activeUser?.role === "staff" && ["staff-overview", "staff-pos", "staff-inventory"].includes(view);
     const shouldLoadInventory = activeUser?.role === "owner" || staffInventoryView;
     if (!shouldLoadInventory) {
       setInventory(menu.map((item) => ({ ...item, reorderPoint: item.reorderPoint ?? 10 })));
@@ -715,8 +751,8 @@ export default function App() {
     const shouldLoadOrders = Boolean(activeUser) && (
       activeUser.role === "rider" ||
       (activeUser.role === "customer" && (["orders", "receipts", "feedback"].includes(view) || checkoutOpen || trackingOrder)) ||
-      (activeUser.role === "owner" && ["owner-dashboard", "owner-sales", "owner-reports", "owner-settings"].includes(view)) ||
-      (activeUser.role === "staff" && ["staff-dashboard", "staff-pos", "staff-orders", "staff-kitchen", "staff-shifts"].includes(view))
+      (activeUser.role === "owner" && ["owner-overview", "owner-sales", "owner-reports", "owner-settings"].includes(view)) ||
+      (activeUser.role === "staff" && ["staff-overview", "staff-pos", "staff-orders", "staff-kitchen", "staff-shifts"].includes(view))
     );
     if (!shouldLoadOrders) {
       previousOrderCount.current = 0;
@@ -729,6 +765,18 @@ export default function App() {
     setOrders(nextOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     });
   }, [activeUser, checkoutOpen, trackingOrder, view]);
+  useEffect(() => {
+    const shouldLoadComplaints = Boolean(activeUser) && (
+      activeUser.role === "owner" ||
+      activeUser.role === "staff" ||
+      (activeUser.role === "customer" && view === "orders")
+    );
+    if (!shouldLoadComplaints) {
+      setComplaints([]);
+      return undefined;
+    }
+    return subscribeComplaints(activeUser, setComplaints);
+  }, [activeUser, view]);
   useEffect(() => {
     if (activeUser?.role !== "owner" || view !== "owner-audit") {
       setAuditLogs([]);
@@ -817,11 +865,27 @@ export default function App() {
   }
   if (!user.mfaVerified) return <TwoFactorPanel user={user} onComplete={setUser} />;
 
-  const currentUser = { ...user, name: profile?.name || user.name };
+  const currentUser = { ...user, name: profile?.name || user.name, staffRole: profile?.staffRole || user.staffRole || (user.role === "staff" ? "manager" : undefined) };
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
-  const allowedViews = roleNavigation[user.role]?.map(([roleView]) => roleView) || [];
+  const allowedViews = navigationForUser(currentUser).map(([roleView]) => roleView);
   const navigate = (nextView) => {
     if (allowedViews.includes(nextView)) setView(nextView);
+  };
+  const reorder = (order) => {
+    const nextCart = (order.items || []).map((item) => {
+      const product = menu.find((candidate) => candidate.id === item.id);
+      if (!product || product.walkInOnly || !menuAvailability(product).available) return null;
+      const stock = Number(product.stock ?? item.stock ?? 0);
+      const qty = Math.min(Number(item.qty || 1), stock);
+      return qty > 0 ? { ...product, stock, qty } : null;
+    }).filter(Boolean);
+    if (nextCart.length === 0) {
+      setNotice("Those items are not available right now.");
+      return;
+    }
+    setCart(nextCart);
+    setView("store");
+    setNotice(`${order.id} added back to your cart.`);
   };
   const workspaceHelpers = {
     buildDailyReport,
@@ -840,12 +904,15 @@ export default function App() {
     sumByTotal
   };
   const workspace = user.role === "owner"
-    ? <OwnerWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
+    ? <OwnerWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
     : user.role === "staff"
-      ? <StaffWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
+      ? <StaffWorkspace helpers={workspaceHelpers} section={staffCanAccess(currentUser, view) ? view : defaultViewForRole("staff")} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
       : user.role === "rider"
         ? <RiderWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} notify={setNotice} />
         : null;
+  const activeTrackingOrder = trackingOrder
+    ? orders.find((order) => order.id === trackingOrder.id) || trackingOrder
+    : null;
 
   return (
     <div className="app-shell">
@@ -854,7 +921,7 @@ export default function App() {
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
-          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} />
+          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} />
         </Suspense>
       )}
       {user.role === "customer" && view === "receipts" && (
@@ -882,7 +949,7 @@ export default function App() {
           <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />
         </Suspense>
       )}
-      {trackingOrder && <TrackingView order={trackingOrder} onClose={() => setTrackingOrder(null)} />}
+      {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}

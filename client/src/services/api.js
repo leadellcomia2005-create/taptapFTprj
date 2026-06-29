@@ -107,15 +107,26 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(values),
     }),
+  listComplaints: () => request("/complaints"),
+  createComplaint: (values) =>
+    request("/complaints", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
+  updateComplaint: (complaintId, values) =>
+    request(`/complaints/${encodeURIComponent(complaintId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(values),
+    }),
   updateRiderLocation: (orderId, location) =>
     request("/riders/location", {
       method: "POST",
       body: JSON.stringify({ orderId, ...location }),
     }),
-  uploadDeliveryProof: (orderId, dataUrl) =>
+  uploadDeliveryProof: (orderId, dataUrl, handoff = {}) =>
     request(`/orders/${encodeURIComponent(orderId)}/proof`, {
       method: "POST",
-      body: JSON.stringify({ dataUrl }),
+      body: JSON.stringify({ dataUrl, handoff }),
     }),
   saveShiftLog: (entry) =>
     request("/shift-logs", {
@@ -168,10 +179,10 @@ export const api = {
       method: "DELETE",
     }),
   clearNotifications: () => request("/notifications", { method: "DELETE" }),
-  assignRole: (uid, role) =>
+  assignRole: (uid, role, staffRole = "") =>
     request("/admin/roles", {
       method: "POST",
-      body: JSON.stringify({ uid, role }),
+      body: JSON.stringify({ uid, role, staffRole }),
     }),
   listUsers: () => request("/admin/users"),
   resetUserTwoFactor: (uid) =>

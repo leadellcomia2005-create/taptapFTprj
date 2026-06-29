@@ -40,6 +40,21 @@ export async function sendRiderLocation(orderId, location) {
   });
 }
 
+export async function subscribeSocketRiderLocation(orderId, callback) {
+  const activeSocket = await getSocket();
+  const handler = (payload) => {
+    if (payload?.orderId === orderId) callback(payload);
+  };
+  const join = () => joinOrderRoom(orderId).catch(() => {});
+  activeSocket.on("rider:location", handler);
+  activeSocket.on("connect", join);
+  join();
+  return () => {
+    activeSocket.off("rider:location", handler);
+    activeSocket.off("connect", join);
+  };
+}
+
 export function disconnectSocket() {
   socket?.disconnect();
   socket = null;

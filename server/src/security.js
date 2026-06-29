@@ -130,6 +130,8 @@ export function authorizeOrderUpdate(user, order, input = {}) {
       }
       changes.status = input.status;
       changes.updatedAt = now;
+      if (input.status === "preparing" && !order.prepStartedAt) changes.prepStartedAt = now;
+      if (input.status === "ready") changes.readyAt = now;
     }
     if (input.riderId !== undefined) {
       if (input.riderId !== null && !validRecordId(input.riderId)) throw new HttpError(400, "Invalid rider ID.");
@@ -205,6 +207,14 @@ export function authorizeOrderUpdate(user, order, input = {}) {
     }
     if (secureUrl) changes.proofOfDeliveryUrl = input.proofOfDeliveryUrl;
     if (storedProof) changes.proofOfDeliveryRef = input.proofOfDeliveryRef;
+    if (input.proofOfDeliveryMeta && typeof input.proofOfDeliveryMeta === "object") {
+      changes.proofOfDeliveryMeta = {
+        customerName: String(input.proofOfDeliveryMeta.customerName || "").slice(0, 80),
+        signature: String(input.proofOfDeliveryMeta.signature || "").slice(0, 80),
+        otpVerified: Boolean(input.proofOfDeliveryMeta.otpVerified),
+        capturedAt: Number(input.proofOfDeliveryMeta.capturedAt || now)
+      };
+    }
     changes.deliveredAt = now;
     if (order.paymentMethod === "cod") {
       changes.codCollectedAt = now;

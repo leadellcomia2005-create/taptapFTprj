@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import MenuPhoto from "../../components/MenuPhoto";
 import { staffPosCategories } from "../../config/appConfig";
 import { createOrder, getActiveShift, startShift } from "../../services/firebase";
-import { InventoryModule, KitchenQueue, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule, SupportChat } from "./SharedWorkspaceModules";
+import { ComplaintResolutionModule, InventoryModule, KitchenQueue, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule, SupportChat } from "./SharedWorkspaceModules";
 import { currency, inRange, isRevenueOrder, localDateInputValue, printReceipt, reportDateRange, setWorkspaceHelpers } from "./workspaceHelpers";
 
-function StaffWorkspaceContent({ section, user, orders, inventory: staffInventory, reviews, shiftLogs, messages, serviceStatus, notify }) {
+function StaffWorkspaceContent({ section, user, orders, inventory: staffInventory, reviews, complaints = [], shiftLogs, messages, serviceStatus, notify }) {
   const [posCart, setPosCart] = useState([]);
   const [posCategory, setPosCategory] = useState("all");
   const [posDiscount, setPosDiscount] = useState(0);
@@ -172,12 +172,12 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       </section>
     </main>
   );
-  if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><OrderManagement orders={orders} canAdvance notify={notify} user={user} /></main>;
+  if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><div className="row g-3"><div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} user={user} /></div><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div></div></main>;
   if (section === "staff-kitchen") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Kitchen preparation</p><h2>Kitchen Queue</h2></div></div><KitchenQueue orders={orders.filter((order) => ["received", "preparing", "ready"].includes(order.status))} notify={notify} /></main>;
   if (section === "staff-inventory") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Receiving, wastage and availability</p><h2>Inventory</h2></div></div><InventoryModule inventory={inventory} user={user} notify={notify} /></main>;
   if (section === "staff-shifts") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and cash control</p><h2>Shift Logs</h2></div></div><ShiftLogsModule orders={orders} logs={shiftLogs} user={user} notify={notify} activeShift={activeShift} onShiftChange={setActiveShift} /></main>;
   if (section === "staff-chat") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Live communication</p><h2>Chat Support</h2></div></div><SupportChat messages={messages} user={user} notify={notify} /></main>;
-  if (section === "staff-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
+  if (section === "staff-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
   const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));

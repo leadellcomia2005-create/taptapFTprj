@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { api } from "../../services/api";
-import { createOrder, resendReceiptEmail, saveUserProfile, submitReview, updateOrder } from "../../services/firebase";
+import { createOrder, resendReceiptEmail, saveUserProfile, submitComplaint, submitReview, updateOrder } from "../../services/firebase";
 import { currency, statusLabel } from "../../utils/display";
 
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));
@@ -36,6 +36,13 @@ function phoneIsVerified(profile, phone) {
   const normalized = normalizePhilippinePhone(phone);
   return Boolean(profile?.phoneVerified && normalizePhilippinePhone(profile?.phone || "") === normalized);
 }
+
+const complaintTypes = [
+  ["wrong-item", "Wrong item"],
+  ["missing-item", "Missing item"],
+  ["late-order", "Late order"],
+  ["bad-food", "Bad food"]
+];
 
 export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
   const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
@@ -207,12 +214,57 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
   );
 }
 
-export function OrdersView({ orders, onTrack, isRevenueOrder, notify }) {
+function ComplaintModal({ order, user, onClose, onDone, notify }) {
+  const [type, setType] = useState("wrong-item");
+  const [details, setDetails] = useState("");
+  const [requestedResolution, setRequestedResolution] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!details.trim()) return;
+    setBusy(true);
+    try {
+      await submitComplaint(order, user, { type, details: details.trim(), requestedResolution: requestedResolution.trim() });
+      notify?.(`${order.id} complaint submitted.`);
+      onDone();
+    } catch (error) {
+      notify?.(error.message || "Complaint could not be submitted.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+  return (
+    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-dialog modal-dialog-centered">
+        <form className="modal-content reason-modal" onSubmit={submit}>
+          <div className="modal-header"><h5 className="modal-title">Report {order.id}</h5><button className="btn-close" type="button" aria-label="Close complaint" onClick={onClose} /></div>
+          <div className="modal-body">
+            <label className="form-label">Issue type<select className="form-select" value={type} onChange={(event) => setType(event.target.value)}>{complaintTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="form-label">Details<textarea className="form-control" rows="4" required value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Tell us what happened with this order." /></label>
+            <label className="form-label">Requested resolution<input className="form-control" value={requestedResolution} onChange={(event) => setRequestedResolution(event.target.value)} placeholder="Replacement, refund review, missing item delivery..." /></label>
+          </div>
+          <div className="modal-footer"><button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button><button className="btn btn-danger" disabled={busy || !details.trim()}>{busy ? "Submitting..." : "Submit complaint"}</button></div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder }) {
   const revenueCheck = isRevenueOrder || (() => false);
   const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
   const pastOrders = orders.filter((order) => ["delivered", "cancelled"].includes(order.status));
   const totalSpent = orders.filter(revenueCheck).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
+  const [complaintTarget, setComplaintTarget] = useState(null);
+  const complaintByOrder = useMemo(() => new Map(complaints.map((complaint) => [complaint.orderId, complaint])), [complaints]);
   const cancelOrder = async (order) => {
     const reason = window.prompt(`Why do you want to cancel ${order.id}?`);
     if (!reason?.trim()) return;
@@ -247,9 +299,9 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify }) {
             </div>
             <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
             <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
-            <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}</div>
+            <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}{complaintByOrder.has(order.id) && <small className="d-block text-danger">Complaint: {complaintByOrder.get(order.id).status}</small>}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button>{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
+            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button><button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}>Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}>Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
           </article>
         ))}
       </div>
@@ -279,6 +331,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify }) {
           <div className="summary-metric"><span>Latest update</span><strong>{latestOrder ? statusLabel(latestOrder.status) : "-"}</strong></div>
         </aside>
       </div>
+      {complaintTarget && <ComplaintModal order={complaintTarget} user={user} notify={notify} onClose={() => setComplaintTarget(null)} onDone={() => setComplaintTarget(null)} />}
     </main>
   );
 }

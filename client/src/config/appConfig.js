@@ -47,6 +47,27 @@ export const roleNavigation = {
   ]
 };
 
+export const staffRoleLabels = {
+  manager: "Manager",
+  cashier: "Cashier",
+  kitchen: "Kitchen",
+  inventory: "Inventory"
+};
+
+export const staffRoleCapabilities = {
+  manager: ["staff-overview", "staff-pos", "staff-kitchen", "staff-orders", "staff-inventory", "staff-shifts", "staff-chat", "staff-reviews", "staff-settings"],
+  cashier: ["staff-overview", "staff-pos", "staff-orders", "staff-shifts", "staff-chat", "staff-settings"],
+  kitchen: ["staff-overview", "staff-kitchen", "staff-orders", "staff-settings"],
+  inventory: ["staff-overview", "staff-inventory", "staff-orders", "staff-settings"]
+};
+
+export const staffRoleForUser = (user = {}) => staffRoleCapabilities[user.staffRole] ? user.staffRole : "manager";
+export const staffCanAccess = (user, view) => user?.role !== "staff" || staffRoleCapabilities[staffRoleForUser(user)].includes(view);
+export const navigationForUser = (user = {}) => {
+  const navigation = roleNavigation[user.role] || [];
+  return user.role === "staff" ? navigation.filter(([view]) => staffCanAccess(user, view)) : navigation;
+};
+
 export const defaultViewForRole = (role) => ({
   customer: "store",
   owner: "owner-overview",

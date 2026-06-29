@@ -111,6 +111,7 @@ function readDemoData() {
     approvalRequests: {},
     activeShifts: {},
     messages: {},
+    complaints: {},
     shiftLogs: {},
     reviews: {},
     notifications: {},
@@ -131,6 +132,8 @@ function addDemoStockHistory(data, itemId, entry) {
     createdAt: Date.now()
   };
 }
+
+const handoffOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 export function observeAuth(callback) {
   if (firebaseEnabled) {
@@ -479,6 +482,96 @@ export async function moderateReview(review, values, actor) {
   return { review: { id, ...data.reviews[id] } };
 }
 
+export function subscribeComplaints(user, callback) {
+  if (!user) {
+    callback([]);
+    return () => {};
+  }
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, complaint]) => ({ id, ...complaint }))
+      .filter((complaint) => user.role !== "customer" || complaint.customerId === user.uid)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+  );
+  if (firebaseEnabled) {
+    let active = true;
+    const load = () => api.listComplaints().then((result) => {
+      if (active) callback(result.complaints || []);
+    }).catch(() => active && callback([]));
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }
+  const emit = () => normalize(readDemoData().complaints);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
+export async function submitComplaint(order, user, values) {
+  const complaint = {
+    orderId: order.id,
+    customerId: user.uid,
+    customerName: user.name,
+    type: values.type,
+    details: values.details,
+    requestedResolution: values.requestedResolution || "",
+    status: "pending",
+    items: order.items?.map((item) => item.name) || [],
+    createdAt: Date.now()
+  };
+  if (firebaseEnabled) return api.createComplaint(complaint);
+  const data = readDemoData();
+  const id = `COM-${Date.now()}`;
+  data.complaints[id] = complaint;
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "complaint_created",
+    complaintId: id,
+    orderId: order.id,
+    actorId: user.uid,
+    actorName: user.name,
+    actorRole: user.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  await createNotification({ targetUserId: "demo-staff", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id });
+  await createNotification({ targetUserId: "demo-owner", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id });
+  return { id, complaint: data.complaints[id] };
+}
+
+export async function updateComplaintStatus(complaintId, values, actor) {
+  if (firebaseEnabled) return api.updateComplaint(complaintId, values);
+  const data = readDemoData();
+  const complaint = data.complaints[complaintId];
+  if (!complaint) throw new Error("Complaint not found.");
+  data.complaints[complaintId] = {
+    ...complaint,
+    status: values.status || complaint.status,
+    resolution: values.resolution || complaint.resolution || "",
+    reviewedAt: values.status === "reviewed" ? Date.now() : complaint.reviewedAt,
+    resolvedAt: values.status === "resolved" ? Date.now() : complaint.resolvedAt,
+    resolvedBy: actor.uid,
+    resolverName: actor.name,
+    updatedAt: Date.now()
+  };
+  data.auditLogs[`AUD-${Date.now()}`] = {
+    action: "complaint_updated",
+    complaintId,
+    orderId: complaint.orderId,
+    status: data.complaints[complaintId].status,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    createdAt: Date.now()
+  };
+  writeDemoData(data);
+  await createNotification({ targetUserId: complaint.customerId, title: "Complaint updated", message: `${complaint.orderId} is now ${data.complaints[complaintId].status}.`, type: "complaint", orderId: complaint.orderId });
+  return { id: complaintId, complaint: data.complaints[complaintId] };
+}
+
 export function subscribeMenu(fallback, callback) {
   if (firebaseEnabled) {
     return onValue(ref(db, "public/menu"), (snapshot) => {
@@ -572,6 +665,7 @@ export async function updateMenuItem(item, values, actor) {
     price: Number(values.price),
     stock: Number(values.stock),
     reorderPoint: Number(values.reorderPoint),
+    availability: values.availability || item.availability || { mode: "always", days: [], start: "00:00", end: "23:59" },
     walkInOnly: Boolean(values.walkInOnly),
     unavailable: Boolean(values.unavailable),
     updatedAt: Date.now(),
@@ -585,6 +679,7 @@ export async function updateMenuItem(item, values, actor) {
     price: updated.price,
     stock: updated.stock,
     reorderPoint: updated.reorderPoint,
+    availability: updated.availability,
     unavailable: updated.unavailable
   };
   addDemoStockHistory(data, item.id, {
@@ -631,6 +726,7 @@ export async function createMenuItem(values, actor) {
     price: Number(values.price || 0),
     stock: Number(values.stock || 0),
     reorderPoint: Number(values.reorderPoint ?? 10),
+    availability: values.availability || { mode: "always", days: [], start: "00:00", end: "23:59" },
     allergens: [],
     featured: Boolean(values.featured),
     walkInOnly: Boolean(values.walkInOnly),
@@ -649,6 +745,7 @@ export async function createMenuItem(values, actor) {
     price: item.price,
     stock: item.stock,
     reorderPoint: item.reorderPoint,
+    availability: item.availability,
     unavailable: item.unavailable,
     createdAt: item.createdAt
   };
@@ -753,7 +850,8 @@ export async function createOrder(order) {
     paymentStatus: onlinePayment ? "pending" : order.paymentMethod === "cod" ? "cod-pending" : "paid",
     paymentProvider: onlinePayment ? "paymongo" : order.paymentMethod,
     paymentRequiredAt: onlinePayment ? Date.now() : null,
-    paymentConfirmedAt: onlinePayment ? null : Date.now()
+    paymentConfirmedAt: onlinePayment ? null : Date.now(),
+    handoffOtp: order.deliveryType === "delivery" ? handoffOtp() : null
   };
   for (const item of order.items) {
     const beforeStock = Number(data.inventory[item.id]?.stock ?? item.stock ?? 0);
@@ -808,6 +906,8 @@ export async function updateOrder(orderId, values) {
     nextValues.paymentStatus = "cod-collected";
     nextValues.codCollectedAt = Date.now();
   }
+  if (values.status === "preparing" && !currentOrder?.prepStartedAt) nextValues.prepStartedAt = Date.now();
+  if (values.status === "ready") nextValues.readyAt = Date.now();
   if (values.codRemitted && currentOrder?.paymentMethod === "cod") {
     nextValues.paymentStatus = "paid";
     nextValues.paymentConfirmedAt = Date.now();
@@ -1171,12 +1271,18 @@ export function subscribeRiderLocation(orderId, callback) {
   return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
-export async function uploadProof(orderId, blob) {
-  if (!firebaseEnabled) return { proofOfDeliveryUrl: URL.createObjectURL(blob) };
+export async function uploadProof(orderId, blob, handoff = {}) {
+  const proofOfDeliveryMeta = {
+    customerName: String(handoff.customerName || "").trim().slice(0, 80),
+    signature: String(handoff.signature || "").trim().slice(0, 80),
+    otp: String(handoff.otp || "").replace(/\D/g, "").slice(0, 6),
+    capturedAt: Date.now()
+  };
+  if (!firebaseEnabled) return { proofOfDeliveryUrl: URL.createObjectURL(blob), proofOfDeliveryMeta };
   if (firebaseStorageEnabled) {
     const fileRef = storageRef(storage, `proof-of-delivery/${orderId}/${Date.now()}.jpg`);
     await uploadBytes(fileRef, blob, { contentType: "image/jpeg" });
-    return { proofOfDeliveryUrl: await getDownloadURL(fileRef) };
+    return { proofOfDeliveryUrl: await getDownloadURL(fileRef), proofOfDeliveryMeta };
   }
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1184,7 +1290,7 @@ export async function uploadProof(orderId, blob) {
     reader.onerror = () => reject(new Error("The delivery photo could not be read."));
     reader.readAsDataURL(blob);
   });
-  return api.uploadDeliveryProof(orderId, dataUrl);
+  return api.uploadDeliveryProof(orderId, dataUrl, proofOfDeliveryMeta);
 }
 
 export { auth, db, storage, ref, set, push, update };

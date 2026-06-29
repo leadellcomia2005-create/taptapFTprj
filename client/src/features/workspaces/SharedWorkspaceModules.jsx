@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateMenuItem, updateOrder } from "../../services/firebase";
+import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateComplaintStatus, updateMenuItem, updateOrder } from "../../services/firebase";
+import { orderPrepClock } from "../../utils/operations";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
 
 export function ReviewModerationModule({ reviews, user, notify }) {
@@ -55,6 +56,75 @@ export function ReviewModerationModule({ reviews, user, notify }) {
           })}
         </div>
       </div></div>
+    </div>
+  );
+}
+
+const complaintTypeLabels = {
+  "wrong-item": "Wrong item",
+  "missing-item": "Missing item",
+  "late-order": "Late order",
+  "bad-food": "Bad food"
+};
+
+const scheduleDays = [
+  ["mon", "Mon"],
+  ["tue", "Tue"],
+  ["wed", "Wed"],
+  ["thu", "Thu"],
+  ["fri", "Fri"],
+  ["sat", "Sat"],
+  ["sun", "Sun"]
+];
+
+export function ComplaintResolutionModule({ complaints = [], user, notify }) {
+  const [drafts, setDrafts] = useState({});
+  const grouped = {
+    pending: complaints.filter((complaint) => (complaint.status || "pending") === "pending"),
+    reviewed: complaints.filter((complaint) => complaint.status === "reviewed"),
+    resolved: complaints.filter((complaint) => complaint.status === "resolved")
+  };
+  const updateDraft = (complaint, field, value) => setDrafts((current) => ({
+    ...current,
+    [complaint.id]: { status: complaint.status || "pending", resolution: complaint.resolution || "", ...(current[complaint.id] || {}), [field]: value }
+  }));
+  const save = async (complaint, status = null) => {
+    const draft = { status: complaint.status || "pending", resolution: complaint.resolution || "", ...(drafts[complaint.id] || {}) };
+    await updateComplaintStatus(complaint.id, {
+      status: status || draft.status,
+      resolution: draft.resolution
+    }, user);
+    notify(`${complaint.orderId} complaint marked ${status || draft.status}.`);
+  };
+  return (
+    <div className="dashboard-card complaint-module">
+      <div className="module-heading">
+        <div><p className="eyebrow text-danger">Customer care</p><h3>Order returns and complaints</h3></div>
+        <span className="module-note">{grouped.pending.length} pending, {grouped.reviewed.length} reviewed, {grouped.resolved.length} resolved</span>
+      </div>
+      <div className="complaint-list">
+        {complaints.length === 0 && <div className="empty-chat">No order complaints yet.</div>}
+        {complaints.map((complaint) => {
+          const draft = { status: complaint.status || "pending", resolution: complaint.resolution || "", ...(drafts[complaint.id] || {}) };
+          return (
+            <article className="complaint-card" key={complaint.id}>
+              <div>
+                <strong>{complaint.orderId} - {complaintTypeLabels[complaint.type] || complaint.type}</strong>
+                <small>{complaint.customerName} - {(complaint.items || []).join(", ")}</small>
+                <p>{complaint.details}</p>
+                {complaint.requestedResolution && <em>Requested: {complaint.requestedResolution}</em>}
+              </div>
+              <label className="form-label">Status<select className="form-select form-select-sm" value={draft.status} onChange={(event) => updateDraft(complaint, "status", event.target.value)}><option value="pending">Pending</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option></select></label>
+              <label className="form-label">Resolution<textarea className="form-control" rows="2" value={draft.resolution} onChange={(event) => updateDraft(complaint, "resolution", event.target.value)} placeholder="Replacement, refund review, staff note..." /></label>
+              <div className="review-actions">
+                <button className="btn btn-sm btn-outline-dark" onClick={() => save(complaint, "reviewed")}>Mark reviewed</button>
+                <button className="btn btn-sm btn-success" onClick={() => save(complaint, "resolved")}>Resolve</button>
+                <button className="btn btn-sm btn-danger" onClick={() => save(complaint)}>Save</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -125,6 +195,7 @@ export function MenuManagementModule({ inventory, user, notify }) {
     price: 0,
     stock: 0,
     reorderPoint: 10,
+    availability: { mode: "always", days: [], start: "00:00", end: "23:59" },
     unavailable: false,
     walkInOnly: false,
     featured: false
@@ -136,6 +207,12 @@ export function MenuManagementModule({ inventory, user, notify }) {
     price: Number(item.price || 0),
     stock: Number(item.stock || 0),
     reorderPoint: Number(item.reorderPoint ?? 10),
+    availability: {
+      mode: item.availability?.mode || "always",
+      days: Array.isArray(item.availability?.days) ? item.availability.days : [],
+      start: item.availability?.start || "00:00",
+      end: item.availability?.end || "23:59"
+    },
     unavailable: Boolean(item.unavailable),
     walkInOnly: Boolean(item.walkInOnly)
   }), []);
@@ -167,6 +244,7 @@ export function MenuManagementModule({ inventory, user, notify }) {
       price: Number(draft.price || 0),
       stock: Number(draft.stock || 0),
       reorderPoint: Number(draft.reorderPoint || 0),
+      availability: draft.availability,
       unavailable: Boolean(draft.unavailable),
       walkInOnly: Boolean(draft.walkInOnly)
     }, user);
@@ -184,6 +262,23 @@ export function MenuManagementModule({ inventory, user, notify }) {
     notify(`${result.item.name} added to the menu inventory.`);
     setNewItem(blankItem);
     setAdding(false);
+  };
+  const updateAvailability = (item, field, value) => updateDraft(item, "availability", {
+    ...(drafts[item.id]?.availability || draftFor(item).availability),
+    [field]: value
+  });
+  const updateNewAvailability = (field, value) => setNewItem((current) => ({
+    ...current,
+    availability: { ...(current.availability || blankItem.availability), [field]: value }
+  }));
+  const toggleDay = (item, day) => {
+    const availability = drafts[item.id]?.availability || draftFor(item).availability;
+    const days = availability.days.includes(day) ? availability.days.filter((value) => value !== day) : [...availability.days, day];
+    updateAvailability(item, "days", days);
+  };
+  const toggleNewDay = (day) => {
+    const days = newItem.availability.days.includes(day) ? newItem.availability.days.filter((value) => value !== day) : [...newItem.availability.days, day];
+    updateNewAvailability("days", days);
   };
 
   return (
@@ -207,12 +302,16 @@ export function MenuManagementModule({ inventory, user, notify }) {
               <label className="menu-admin-check"><input type="checkbox" checked={newItem.walkInOnly} onChange={(event) => setNewItem((current) => ({ ...current, walkInOnly: event.target.checked }))} /><span>Walk-in only</span></label>
               <label className="menu-admin-check"><input type="checkbox" checked={newItem.featured} onChange={(event) => setNewItem((current) => ({ ...current, featured: event.target.checked }))} /><span>Featured</span></label>
             </div>
+            <label className="form-label col-md-3">Availability<select className="form-select" value={newItem.availability.mode} onChange={(event) => updateNewAvailability("mode", event.target.value)}><option value="always">Always</option><option value="schedule">Scheduled</option></select></label>
+            <label className="form-label col-md-2">From<input className="form-control" type="time" value={newItem.availability.start} onChange={(event) => updateNewAvailability("start", event.target.value)} /></label>
+            <label className="form-label col-md-2">Until<input className="form-control" type="time" value={newItem.availability.end} onChange={(event) => updateNewAvailability("end", event.target.value)} /></label>
+            <div className="col-md-5 availability-days">{scheduleDays.map(([day, label]) => <label key={day}><input type="checkbox" checked={newItem.availability.days.includes(day)} onChange={() => toggleNewDay(day)} /> {label}</label>)}</div>
           </div>
         </form>
       )}
       <div className="table-responsive">
         <table className="table align-middle menu-admin-table">
-          <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder</th><th>Visible</th><th>Walk-in only</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder</th><th>Schedule</th><th>Visible</th><th>Walk-in only</th><th /></tr></thead>
           <tbody>{inventory.map((item) => {
             const draft = drafts[item.id] || draftFor(item);
             const categories = menuCategoryOptions.includes(draft.category) ? menuCategoryOptions : [draft.category, ...menuCategoryOptions];
@@ -223,6 +322,7 @@ export function MenuManagementModule({ inventory, user, notify }) {
                 <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.price} onChange={(event) => updateDraft(item, "price", event.target.value)} /></td>
                 <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.stock} onChange={(event) => updateDraft(item, "stock", event.target.value)} /></td>
                 <td><input className="form-control form-control-sm inventory-input" type="number" min="0" value={draft.reorderPoint} onChange={(event) => updateDraft(item, "reorderPoint", event.target.value)} /></td>
+                <td className="menu-schedule-cell"><select className="form-select form-select-sm" value={draft.availability.mode} onChange={(event) => updateAvailability(item, "mode", event.target.value)}><option value="always">Always</option><option value="schedule">Scheduled</option></select><div className="schedule-time-row"><input className="form-control form-control-sm" type="time" value={draft.availability.start} onChange={(event) => updateAvailability(item, "start", event.target.value)} /><input className="form-control form-control-sm" type="time" value={draft.availability.end} onChange={(event) => updateAvailability(item, "end", event.target.value)} /></div><div className="availability-days compact">{scheduleDays.map(([day, label]) => <label key={day}><input type="checkbox" checked={draft.availability.days.includes(day)} onChange={() => toggleDay(item, day)} /> {label}</label>)}</div></td>
                 <td><label className="menu-admin-check"><input type="checkbox" checked={!draft.unavailable} onChange={(event) => updateDraft(item, "unavailable", !event.target.checked)} /><span>Show</span></label></td>
                 <td><label className="menu-admin-check"><input type="checkbox" checked={draft.walkInOnly} onChange={(event) => updateDraft(item, "walkInOnly", event.target.checked)} /><span>POS</span></label></td>
                 <td><button className="btn btn-sm btn-danger" onClick={() => save(item)}>Save</button></td>
@@ -547,6 +647,11 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
 }
 
 export function KitchenQueue({ orders, notify }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
   const lanes = [
     { status: "received", title: "New orders", next: "preparing", action: "Start prep" },
     { status: "preparing", title: "Preparing", next: "ready", action: "Mark ready" },
@@ -569,7 +674,7 @@ export function KitchenQueue({ orders, notify }) {
   };
   const move = async (order, next) => {
     if (!next) return;
-    await updateOrder(order.id, { status: next, updatedAt: Date.now() });
+    await updateOrder(order.id, { status: next, updatedAt: Date.now(), ...(next === "preparing" ? { prepStartedAt: Date.now() } : {}), ...(next === "ready" ? { readyAt: Date.now() } : {}) });
     notify(`${order.id} moved to ${statusLabel(next)}.`);
   };
   return (
@@ -581,8 +686,9 @@ export function KitchenQueue({ orders, notify }) {
             <header><div><p className="eyebrow text-danger">Kitchen</p><h3>{lane.title}</h3></div><span>{laneOrders.length}</span></header>
             {laneOrders.length === 0 && <div className="empty-chat">No orders here.</div>}
             {laneOrders.map((order) => (
-              <article className="kitchen-ticket" key={order.id}>
+              <article className={`kitchen-ticket ${orderPrepClock(order, now).delayed ? "delayed" : ""}`} key={order.id}>
                 <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
+                <b className="prep-timer">{orderPrepClock(order, now).label}{orderPrepClock(order, now).delayed ? " waiting - delayed" : " waiting"}</b>
                 <small>{order.customerName} · {orderServiceLabel(order)}</small>
                 <p>{orderItemText(order)}</p>
                 {order.notes && <em>Note: {order.notes}</em>}

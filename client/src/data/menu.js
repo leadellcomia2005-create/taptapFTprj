@@ -116,7 +116,7 @@ export const fallbackMenu = [
   item("softdrinks", "SoftDrinks", "Drinks", 15, 46),
   item("bottled-water", "Bottled Water", "Drinks", 15, 47),
 
-  item("dinuguan-meal", "Dinuguan Meal", "Special Meal", 85, 48),
+  item("dinuguan-meal", "Dinuguan Meal", "Special Meal", 85, 48, { availability: { mode: "schedule", days: ["sat", "sun"], start: "00:00", end: "23:59" } }),
   item("papaitan-meal", "Papaitan Meal", "Special Meal", 85, 49)
 ];
 

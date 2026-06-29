@@ -3,11 +3,22 @@ import { Bike, Camera, CheckCircle2, Clock, MapPin, Navigation, Package as Packa
 import { SectionLoader } from "../../components/Loaders";
 import { saveRiderLocation, updateOrder, uploadProof } from "../../services/firebase";
 import { getSocket, sendRiderLocation } from "../../services/socket";
+import { estimateDeliveryRoute } from "../../utils/operations";
 import { ReasonModal } from "./SharedWorkspaceModules";
 import { currency, isUnremittedCod, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
 
 const CameraProof = lazy(() => import("../../components/CameraProof"));
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));
+const storePoint = [
+  Number(import.meta.env.VITE_STORE_LATITUDE || 14.4509229),
+  Number(import.meta.env.VITE_STORE_LONGITUDE || 120.9764514)
+];
+
+function locationToPoint(location) {
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+}
 
 function RiderWorkspaceContent({ section, user, orders, notify }) {
   const assignedOrders = orders.filter((order) => order.riderId === user.uid);
@@ -19,6 +30,11 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const watchRef = useRef(null);
+  const activeOrderIdRef = useRef("");
+
+  useEffect(() => {
+    activeOrderIdRef.current = active?.id || "";
+  }, [active?.id]);
 
   useEffect(() => () => {
     if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
@@ -36,10 +52,11 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
     watchRef.current = navigator.geolocation.watchPosition(async ({ coords }) => {
       const next = { lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy };
       setLocation(next);
-      if (!active?.id) return;
+      const activeOrderId = activeOrderIdRef.current;
+      if (!activeOrderId) return;
       try {
-        if (socket?.connected) await sendRiderLocation(active.id, next);
-        else await saveRiderLocation(active.id, next);
+        if (socket?.connected) await sendRiderLocation(activeOrderId, next);
+        else await saveRiderLocation(activeOrderId, next);
       } catch (error) {
         notify(error.message);
       }
@@ -68,8 +85,8 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
     notify("Arrival recorded. You can now capture proof of delivery.");
   };
 
-  const capture = async (blob) => {
-    const proof = await uploadProof(active.id, blob);
+  const capture = async (blob, handoff) => {
+    const proof = await uploadProof(active.id, blob, handoff);
     await updateOrder(active.id, { status: "delivered", ...proof });
     setCameraOpen(false);
     navigator.vibrate?.(180);
@@ -87,10 +104,10 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
   const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
   const addressLabel = (value) => value || "Counter pickup";
-  const deliveryPin = active?.deliveryLocation?.lat && active?.deliveryLocation?.lng
-    ? [Number(active.deliveryLocation.lat), Number(active.deliveryLocation.lng)]
-    : null;
-  const hasDeliveryPin = (order) => Boolean(order?.deliveryLocation?.lat && order?.deliveryLocation?.lng);
+  const deliveryPin = locationToPoint(active?.deliveryLocation);
+  const visibleRiderLocation = location || active?.riderLocation || null;
+  const routeEstimate = estimateDeliveryRoute({ store: storePoint, rider: visibleRiderLocation, customer: deliveryPin });
+  const hasDeliveryPin = (order) => Boolean(locationToPoint(order?.deliveryLocation));
   const reportDeliveryIssue = async (reason) => {
     if (!active) return;
     await updateOrder(active.id, { deliveryIssue: reason });
@@ -241,9 +258,10 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
                 <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
+                <div><small>Route ETA</small><strong>{routeEstimate ? routeEstimate.label : "Address only"}</strong><span>{routeEstimate ? routeEstimate.distanceLabel : "Open navigation for route"}</span></div>
               </div>
 
-              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={location} customer={deliveryPin} /></Suspense></div>
+              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
 
               <div className="rider-action-grid">
                 <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>

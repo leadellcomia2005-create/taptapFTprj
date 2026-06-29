@@ -1,17 +1,24 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { SectionLoader } from "../../components/Loaders";
-import { securityMethodLabels } from "../../config/appConfig";
+import { securityMethodLabels, staffRoleLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
 import { updateOrder } from "../../services/firebase";
-import { AdminCleanupModule, ApprovalQueueModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
+import { bestSellers, forecastRunouts, peakOrderHours, slowMovingItems } from "../../utils/operations";
+import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
 import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
 
-function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serviceStatus, auditLogs, shiftLogs, notify }) {
+function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const estimatedProfit = totalSales * 0.58;
+  const bestSellerRows = bestSellers(revenueOrders, inventory, 5);
+  const slowMovingRows = slowMovingItems(revenueOrders, inventory, 5);
+  const peakHours = peakOrderHours(orders);
+  const runoutForecast = forecastRunouts(revenueOrders, inventory, 5);
+  const shiftPerformance = [...shiftLogs].sort((a, b) => Number(b.orderCount || 0) - Number(a.orderCount || 0)).slice(0, 5);
   const salesTrend = Array.from({ length: 7 }, (_, index) => {
     const day = new Date();
     day.setHours(0, 0, 0, 0);
@@ -24,7 +31,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
   });
   const [insight, setInsight] = useState("Generate a free best-seller and stock recommendation.");
   const [salesGoal, setSalesGoal] = useState(100000);
-  const [roleForm, setRoleForm] = useState({ uid: "", role: "staff" });
+  const [roleForm, setRoleForm] = useState({ uid: "", role: "staff", staffRole: "manager" });
   const [managedUsers, setManagedUsers] = useState([]);
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
@@ -64,9 +71,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
   const updateRole = async (event) => {
     event.preventDefault();
     try {
-      await api.assignRole(roleForm.uid, roleForm.role);
-      notify(`User role updated to ${roleForm.role}.`);
-      setRoleForm({ uid: "", role: "staff" });
+      await api.assignRole(roleForm.uid, roleForm.role, roleForm.staffRole);
+      notify(`User role updated to ${roleForm.role}${roleForm.role === "staff" ? ` / ${staffRoleLabels[roleForm.staffRole]}` : ""}.`);
+      setRoleForm({ uid: "", role: "staff", staffRole: "manager" });
       await refreshUsers();
     } catch (error) {
       notify(error.message);
@@ -110,6 +117,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Strategy controls</h3><label className="form-label">Sales goal threshold<input className="form-control" type="number" value={salesGoal} onChange={(event) => setSalesGoal(Number(event.target.value))} /></label><label className="form-label">Active promotion<select className="form-select"><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={() => notify("Sales strategy saved.")}>Save strategy</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
+        <div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div>
       </div>
     </main>
   );
@@ -145,12 +153,12 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
   );
   if (section === "owner-users") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div><div className="row g-3">
-      <div className="col-12"><div className="dashboard-card"><h3>User accounts and security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
-      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign user role</h3><p className="module-note">Enter the user account ID and choose the role.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label><button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
+      <div className="col-12"><div className="dashboard-card"><h3>User accounts and security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
+      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign user role</h3><p className="module-note">Enter the user account ID and choose the role.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label>{roleForm.role === "staff" && <label className="form-label">Staff access scope<select className="form-select" value={roleForm.staffRole} onChange={(event) => setRoleForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}<button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
     </div></main>
   );
-  if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews</h2></div></div><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></main>;
+  if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;
   if (section === "owner-audit") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div></main>
   );
@@ -185,9 +193,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
 
         <div className="owner-stat-grid">
           <div className="metric-card owner-metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div>
+          <div className="metric-card owner-metric-card"><small>Profit estimate</small><strong>{currency(estimatedProfit)}</strong><span>After estimated food and ops cost</span></div>
           <div className="metric-card owner-metric-card"><small>Awaiting action</small><strong>{orders.filter((order) => !["delivered", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live workload</span></div>
           <div className="metric-card owner-metric-card"><small>Low stock</small><strong>{inventory.filter((item) => item.stock <= item.reorderPoint).length}</strong><span>Needs attention</span></div>
-          <div className="metric-card owner-metric-card"><small>Ready features</small><strong>{Object.values(serviceStatus || {}).filter(Boolean).length}</strong><span>System health</span></div>
         </div>
       </section>
 
@@ -211,6 +219,11 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, serv
           {inventory.filter((item) => item.stock <= item.reorderPoint).slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}
           {inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}
         </div>
+        <div className="dashboard-card"><h3>Best sellers</h3>{bestSellerRows.length === 0 && <div className="empty-chat">Sales will appear here.</div>}{bestSellerRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold</small></span><b>{currency(item.sales)}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Slow-moving items</h3>{slowMovingRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold, {item.stock} in stock</small></span><b>{item.qty}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{hour.count}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.dailyVelocity.toFixed(1)} sold/day</small></span><b>{item.daysLeft.toFixed(1)}d</b></div>)}</div>
+        <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{shift.orderCount} orders - variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)}</b></div>)}</div>
       </section>
     </main>
   );

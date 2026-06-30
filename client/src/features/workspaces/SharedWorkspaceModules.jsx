@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateComplaintStatus, updateMenuItem, updateOrder } from "../../services/firebase";
+import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, getDeliveryProof, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateComplaintStatus, updateMenuItem, updateOrder } from "../../services/firebase";
 import { orderPrepClock } from "../../utils/operations";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
 
@@ -601,8 +601,83 @@ export function ReasonModal({ title, label, placeholder, confirmText, onClose, o
   );
 }
 
+export function DeliveryProofModal({ order, onClose }) {
+  const [proof, setProof] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    getDeliveryProof(order)
+      .then((result) => {
+        if (active) setProof(result);
+      })
+      .catch((proofError) => {
+        if (active) setError(proofError.message || "The delivery proof could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [order]);
+
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const handoff = proof?.handoff || order.proofOfDeliveryMeta || {};
+  const capturedAt = handoff.capturedAt || proof?.createdAt || order.deliveredAt || order.updatedAt;
+
+  return (
+    <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-dialog modal-dialog-centered modal-lg">
+        <div className="modal-content proof-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="proof-viewer-title">
+          <div className="modal-header">
+            <div>
+              <p className="eyebrow text-danger">Delivery evidence</p>
+              <h5 className="modal-title" id="proof-viewer-title">Proof for {order.id}</h5>
+            </div>
+            <button className="btn-close" type="button" aria-label="Close" onClick={onClose} />
+          </div>
+          <div className="modal-body">
+            {loading && <div className="empty-chat proof-loading">Loading delivery proof...</div>}
+            {error && <div className="alert alert-danger">{error}</div>}
+            {!loading && !error && (
+              <div className="proof-viewer-layout">
+                <figure className="proof-photo-frame">
+                  <img src={proof.dataUrl} alt={`Delivery proof for ${order.id}`} />
+                </figure>
+                <dl className="proof-detail-grid">
+                  <div><dt>Customer</dt><dd>{order.customerName || handoff.customerName || "Customer"}</dd></div>
+                  <div><dt>Receiver</dt><dd>{handoff.customerName || "Not entered"}</dd></div>
+                  <div><dt>Typed signature</dt><dd>{handoff.signature || "Not entered"}</dd></div>
+                  <div><dt>OTP check</dt><dd>{handoff.otpVerified ? "Verified" : handoff.otp ? "Code entered" : "Not used"}</dd></div>
+                  <div><dt>Captured</dt><dd>{capturedAt ? new Date(capturedAt).toLocaleString("en-PH") : "No timestamp"}</dd></div>
+                  <div><dt>Rider</dt><dd>{order.riderName || proof.riderName || proof.riderId || "Assigned rider"}</dd></div>
+                </dl>
+              </div>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OrderManagement({ orders, canAdvance, notify, user = null }) {
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [proofTarget, setProofTarget] = useState(null);
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const cancellableStatuses = ["pending-payment", "received", "preparing"];
   const advance = async (order) => {
@@ -630,18 +705,53 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
     }, user);
     notify(`${order.id} void request sent to owner approval.`);
   };
+  const hasProof = (order) => Boolean(order.proofOfDeliveryRef || order.proofOfDeliveryUrl);
   const pinStatus = (order) => order.deliveryLocation?.lat && order.deliveryLocation?.lng ? "Pin confirmed" : order.deliveryType === "delivery" ? "No pin" : "No pin needed";
-  // erick: dinagdag ang Items column (+ address) para makita ng staff ang in-order.
+
   return (
     <div className="dashboard-card">
       <h3>Live order ledger</h3>
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
-          <tbody>{orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}{orders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}<small className="d-block text-secondary">{order.phone || "No phone"}</small>{order.smsNotifications ? <small className="d-block text-success">SMS ready</small> : <small className="d-block text-secondary">SMS not verified</small>}</td><td className="order-items-cell"><span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>{order.deliveryType && <small className="d-block text-secondary">{order.deliveryType} - {pinStatus(order)}</small>}{order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}{order.landmark && <small className="d-block text-secondary">Landmark: {order.landmark}</small>}{order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}</td><td>{orderPaymentLabel(order)}</td><td>{currency(order.total)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{canAdvance && <div className="order-action-stack">{flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}{cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}{user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}</div>}</td></tr>)}</tbody>
+          <tbody>
+            {orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}
+            {orders.map((order) => (
+              <tr key={order.id}>
+                <td>{order.id}</td>
+                <td>
+                  {order.customerName}
+                  <small className="d-block text-secondary">{order.phone || "No phone"}</small>
+                  {order.smsNotifications ? <small className="d-block text-success">SMS ready</small> : <small className="d-block text-secondary">SMS not verified</small>}
+                </td>
+                <td className="order-items-cell">
+                  <span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>
+                  {order.deliveryType && <small className="d-block text-secondary">{order.deliveryType} - {pinStatus(order)}</small>}
+                  {hasProof(order) && <small className="d-block text-success">Proof of delivery saved</small>}
+                  {order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}
+                  {order.landmark && <small className="d-block text-secondary">Landmark: {order.landmark}</small>}
+                  {order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}
+                </td>
+                <td>{orderPaymentLabel(order)}</td>
+                <td>{currency(order.total)}</td>
+                <td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td>
+                <td>
+                  {(canAdvance || hasProof(order)) && (
+                    <div className="order-action-stack">
+                      {canAdvance && flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}
+                      {canAdvance && cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}
+                      {canAdvance && user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}
+                      {hasProof(order) && <button className="btn btn-sm btn-dark" type="button" onClick={() => setProofTarget(order)}>View proof</button>}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
       {cancelTarget && <ReasonModal title={`Cancel ${cancelTarget.id}`} label="Cancellation reason" placeholder="Example: Customer changed order, unavailable item, duplicate order..." confirmText="Cancel order" onClose={() => setCancelTarget(null)} onSubmit={async (reason) => { await cancelOrder(cancelTarget, reason); setCancelTarget(null); }} />}
+      {proofTarget && <DeliveryProofModal order={proofTarget} onClose={() => setProofTarget(null)} />}
     </div>
   );
 }

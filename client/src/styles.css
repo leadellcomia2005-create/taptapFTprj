@@ -360,6 +360,17 @@ button { font: inherit; }
 .camera-modal { z-index: 1100; }
 .proof-handoff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; padding: 12px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 8px; }
 .proof-signature { grid-column: 1 / -1; }
+.proof-viewer-modal { overflow: hidden; border: 0; border-radius: 14px; }
+.proof-viewer-modal .modal-header { align-items: flex-start; background: var(--paper-soft); border-bottom: 1px solid var(--line); }
+.proof-viewer-modal .modal-title { margin: 2px 0 0; font: 700 24px var(--display); }
+.proof-viewer-layout { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(260px,.85fr); gap: 18px; align-items: start; }
+.proof-photo-frame { min-height: 320px; display: grid; place-items: center; overflow: hidden; margin: 0; background: #17130f; border: 1px solid var(--line); border-radius: 12px; }
+.proof-photo-frame img { width: 100%; max-height: 68vh; object-fit: contain; }
+.proof-detail-grid { display: grid; gap: 10px; margin: 0; }
+.proof-detail-grid div { padding: 13px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 10px; }
+.proof-detail-grid dt { color: var(--muted); font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.proof-detail-grid dd { margin: 5px 0 0; color: var(--ink); font-size: 12px; font-weight: 800; overflow-wrap: anywhere; }
+.proof-loading { padding: 35px 18px; }
 
 .order-history-page { padding: 28px clamp(16px,3vw,42px) 52px; }
 .order-history-layout { width: min(1380px,100%); display: grid; grid-template-columns: minmax(0,1fr) 290px; gap: 24px; align-items: start; margin: 0 auto; }
@@ -717,6 +728,11 @@ button { font: inherit; }
   .checkout-mode-grid { grid-template-columns: 1fr; }
   .last-receipt-card .btn { width: 100%; }
   .menu-add-panel { margin-inline: -2px; padding: 12px; }
+  .proof-viewer-modal .modal-title { font-size: 21px; }
+  .proof-viewer-layout { grid-template-columns: 1fr; }
+  .proof-photo-frame { min-height: 240px; }
+  .proof-photo-frame img { max-height: 54vh; }
+  .proof-detail-grid { grid-template-columns: 1fr; }
   .checkout-total { align-items: flex-start; flex-direction: column; gap: 5px; }
   .checkout-total strong { font-size: 30px; }
   .checkout-location-actions,.pin-coordinate-grid { grid-template-columns: 1fr; }

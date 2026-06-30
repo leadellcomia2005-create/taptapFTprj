@@ -1293,4 +1293,31 @@ export async function uploadProof(orderId, blob, handoff = {}) {
   return api.uploadDeliveryProof(orderId, dataUrl, proofOfDeliveryMeta);
 }
 
+export async function getDeliveryProof(order = {}) {
+  const fallbackMeta = order.proofOfDeliveryMeta || {};
+  if (order.proofOfDeliveryUrl) {
+    return {
+      dataUrl: order.proofOfDeliveryUrl,
+      handoff: fallbackMeta,
+      createdAt: fallbackMeta.capturedAt || order.deliveredAt || order.updatedAt,
+      riderId: order.riderId || "",
+      orderId: order.id
+    };
+  }
+  if (!order.proofOfDeliveryRef) throw new Error("No delivery proof has been attached to this order yet.");
+  if (firebaseEnabled) {
+    const snapshot = await get(ref(db, order.proofOfDeliveryRef));
+    const proof = snapshot.val();
+    if (!proof?.dataUrl) throw new Error("The delivery proof photo could not be found.");
+    return {
+      ...proof,
+      handoff: proof.handoff || fallbackMeta,
+      orderId: order.id
+    };
+  }
+  const proof = readDemoData().deliveryProofs?.[order.id];
+  if (!proof?.dataUrl) throw new Error("The delivery proof photo could not be found.");
+  return { ...proof, handoff: proof.handoff || fallbackMeta, orderId: order.id };
+}
+
 export { auth, db, storage, ref, set, push, update };

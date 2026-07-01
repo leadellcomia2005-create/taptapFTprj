@@ -61,6 +61,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
   const normalizedPhone = useMemo(() => normalizePhilippinePhone(phone), [phone]);
   const validPhone = isValidPhilippineMobile(normalizedPhone);
   const verifiedPhone = phoneIsVerified(profile, normalizedPhone);
+  const smsReady = Boolean(verifiedPhone && smsProviderEnabled);
   const deliveryMarker = locationToMarker(deliveryLocation);
   useEffect(() => {
     const closeOnEscape = (event) => {
@@ -125,8 +126,8 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
         phone: normalizedPhone,
         phoneVerified: verifiedPhone,
         phoneVerifiedAt: verifiedPhone ? profile?.phoneVerifiedAt || Date.now() : null,
-        smsNotifications: Boolean(verifiedPhone && smsOptIn),
-        smsNotificationsRequested: Boolean(smsOptIn),
+        smsNotifications: Boolean(smsReady && smsOptIn),
+        smsNotificationsRequested: Boolean(smsReady && smsOptIn),
         address: deliveryType === "delivery" ? address : "Store pickup",
         landmark: deliveryType === "delivery" ? landmark : "",
         deliveryLocation: deliveryType === "delivery" ? {
@@ -160,11 +161,16 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
       setBusy(false);
     }
   };
+  const verifyPhone = () => {
+    if (!validPhone) return notify("Enter a valid Philippine mobile number before verification.");
+    if (!smsProviderEnabled) return notify("Phone OTP verification is not connected yet.");
+    notify("Phone OTP verification will open here once the SMS provider is enabled.");
+  };
 
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <div className="modal-content checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
           <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
           <div className="modal-body">
             {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
@@ -175,17 +181,22 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
             <label className="form-label mt-3">Mobile number<input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
             <div className="checkout-sms-panel">
               <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
-              <label><input type="checkbox" checked={smsOptIn} onChange={(event) => setSmsOptIn(event.target.checked)} /> Send me SMS order updates</label>
-              <small>{smsProviderEnabled ? "SMS updates will send after phone OTP verification." : "SMS provider is not configured yet. We will save this preference without sending paid SMS."}</small>
+              <div className="checkout-sms-actions">
+                <label className="checkout-sms-checkbox"><input type="checkbox" disabled={!smsReady} checked={Boolean(smsReady && smsOptIn)} onChange={(event) => setSmsOptIn(event.target.checked)} /> Send me SMS order updates</label>
+                {!verifiedPhone && <button className="btn btn-sm btn-outline-dark" type="button" disabled={!validPhone || !smsProviderEnabled} onClick={verifyPhone}>Verify phone</button>}
+              </div>
+              <small>{smsReady ? "SMS order updates can be sent to this verified number." : smsProviderEnabled ? "Verify this phone first before SMS updates can be enabled." : "Phone OTP and SMS updates are not connected yet."}</small>
             </div>
             {deliveryType === "delivery" && <>
-              <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
-              <label className="form-label">Landmark<input className="form-control" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></label>
+              <div className="checkout-address-stack">
+                <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
+                <label className="form-label">Landmark<input className="form-control" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></label>
+              </div>
               <div className="checkout-location-panel">
                 <div className="module-heading"><div><p className="eyebrow text-danger">Delivery pin</p><h3>Confirm exact drop-off</h3></div><span className="module-note">Use GPS on HTTPS/Cloudflare, then drag the pin if needed.</span></div>
                 <div className="checkout-location-actions">
                   <button className="btn btn-outline-dark btn-sm" type="button" disabled={locating} onClick={useCurrentLocation}>{locating ? "Getting location..." : "Use my current location"}</button>
-                  <button className="btn btn-danger btn-sm" type="button" onClick={confirmManualPin}>{deliveryMarker ? "Reconfirm pin" : "Start with map pin"}</button>
+                  <button className="btn btn-danger btn-sm" type="button" onClick={confirmManualPin}>{deliveryMarker ? "Update map pin" : "Choose pin on map"}</button>
                 </div>
                 {deliveryMarker ? (
                   <>
@@ -196,12 +207,12 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
                     </div>
                     <small className="text-secondary">Pin source: {deliveryLocation?.source || "map-picker"}{deliveryLocation?.accuracy ? ` - accuracy about ${Math.round(deliveryLocation.accuracy)}m` : ""}</small>
                   </>
-                ) : <div className="empty-chat">No delivery pin yet. Tap current location or start with the store map pin.</div>}
+                ) : <div className="empty-chat checkout-pin-empty">No pin selected yet. Use GPS or choose a pin on the map.</div>}
               </div>
             </>}
             <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: landmark, extra request, or pickup note" /></label>
             <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "Not ready"}</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "GCash unavailable right now"}</small></button></div>
               <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
             </div>
             <div className="checkout-total"><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>

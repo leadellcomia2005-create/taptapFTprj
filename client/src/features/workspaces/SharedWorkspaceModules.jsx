@@ -635,6 +635,18 @@ export function DeliveryProofModal({ order, onClose }) {
 
   const handoff = proof?.handoff || order.proofOfDeliveryMeta || {};
   const capturedAt = handoff.capturedAt || proof?.createdAt || order.deliveredAt || order.updatedAt;
+  const riderLabel = order.riderName || proof?.riderName || "Assigned rider";
+  const escapeText = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
+  const printProof = () => {
+    if (!proof?.dataUrl) return;
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=920,height=720");
+    if (!printWindow) {
+      setError("Allow popups so the proof can open for printing.");
+      return;
+    }
+    printWindow.document.write(`<!doctype html><html><head><title>Proof ${escapeText(order.id)}</title><style>body{font-family:Arial,sans-serif;margin:28px;color:#211d19}h1{margin:0 0 4px;font-size:28px}.meta{display:grid;grid-template-columns:140px 1fr;gap:8px;margin:22px 0}.meta strong{color:#6d6258}.photo{max-width:100%;max-height:680px;border:1px solid #ddd;border-radius:10px}</style></head><body><h1>Proof of Delivery</h1><p>Order ${escapeText(order.id)}</p><img class="photo" src="${proof.dataUrl}" alt="Delivery proof" /><div class="meta"><strong>Customer</strong><span>${escapeText(order.customerName || "Customer")}</span><strong>Receiver</strong><span>${escapeText(handoff.customerName || "Not recorded")}</span><strong>Signature</strong><span>${escapeText(handoff.signature || "Not recorded")}</span><strong>OTP</strong><span>${handoff.otpVerified ? "Verified" : "Not required / not used"}</span><strong>Captured</strong><span>${capturedAt ? escapeText(new Date(capturedAt).toLocaleString("en-PH")) : "No timestamp"}</span><strong>Rider</strong><span>${escapeText(riderLabel)}</span></div><script>window.onload=()=>{window.print();}</script></body></html>`);
+    printWindow.document.close();
+  };
 
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -643,7 +655,8 @@ export function DeliveryProofModal({ order, onClose }) {
           <div className="modal-header">
             <div>
               <p className="eyebrow text-danger">Delivery evidence</p>
-              <h5 className="modal-title" id="proof-viewer-title">Proof for {order.id}</h5>
+              <h5 className="modal-title" id="proof-viewer-title">Proof of Delivery</h5>
+              <small className="proof-order-id">Order {order.id}</small>
             </div>
             <button className="btn-close" type="button" aria-label="Close" onClick={onClose} />
           </div>
@@ -656,17 +669,20 @@ export function DeliveryProofModal({ order, onClose }) {
                   <img src={proof.dataUrl} alt={`Delivery proof for ${order.id}`} />
                 </figure>
                 <dl className="proof-detail-grid">
+                  <div><dt>Order ID</dt><dd>{order.id}</dd></div>
                   <div><dt>Customer</dt><dd>{order.customerName || handoff.customerName || "Customer"}</dd></div>
-                  <div><dt>Receiver</dt><dd>{handoff.customerName || "Not entered"}</dd></div>
-                  <div><dt>Typed signature</dt><dd>{handoff.signature || "Not entered"}</dd></div>
-                  <div><dt>OTP check</dt><dd>{handoff.otpVerified ? "Verified" : handoff.otp ? "Code entered" : "Not used"}</dd></div>
+                  <div><dt>Receiver</dt><dd>{handoff.customerName || "Not recorded"}</dd></div>
+                  <div><dt>Typed signature</dt><dd>{handoff.signature || "Not recorded"}</dd></div>
+                  <div><dt>OTP check</dt><dd>{handoff.otpVerified ? "Verified" : "Not required / not used"}</dd></div>
                   <div><dt>Captured</dt><dd>{capturedAt ? new Date(capturedAt).toLocaleString("en-PH") : "No timestamp"}</dd></div>
-                  <div><dt>Rider</dt><dd>{order.riderName || proof.riderName || proof.riderId || "Assigned rider"}</dd></div>
+                  <div><dt>Rider</dt><dd>{riderLabel}</dd></div>
                 </dl>
               </div>
             )}
           </div>
           <div className="modal-footer">
+            {proof?.dataUrl && <a className="btn btn-outline-dark" href={proof.dataUrl} download={`${order.id}-delivery-proof.jpg`}>Download photo</a>}
+            <button className="btn btn-dark" type="button" disabled={!proof?.dataUrl} onClick={printProof}>Print proof</button>
             <button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button>
           </div>
         </div>

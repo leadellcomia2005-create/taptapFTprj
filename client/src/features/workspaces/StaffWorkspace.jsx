@@ -14,6 +14,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   const [lastReceipt, setLastReceipt] = useState(null);
   const [activeShift, setActiveShift] = useState(null);
   const [openingCash, setOpeningCash] = useState(2000);
+  const [openingShift, setOpeningShift] = useState(false);
   useEffect(() => {
     if (!["staff-dashboard", "staff-pos", "staff-shifts"].includes(section)) return undefined;
     let mounted = true;
@@ -88,19 +89,37 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     notify(`Walk-in receipt ${orderId} completed.`);
   };
   const openShiftFromPos = async () => {
-    const result = await startShift({ openingCash: Number(openingCash || 0) }, user);
-    setActiveShift(result.shift);
-    notify("Shift opened. Walk-in POS is ready.");
+    setOpeningShift(true);
+    try {
+      const result = await startShift({ openingCash: Number(openingCash || 0) }, user);
+      setActiveShift(result.shift);
+      notify("Shift opened. Walk-in POS is ready.");
+    } catch (error) {
+      notify(error.message || "Shift could not be started.");
+    } finally {
+      setOpeningShift(false);
+    }
   };
+  const paymentBlocker = !activeShift
+    ? "Start a staff shift to accept payment."
+    : !posCart.length
+      ? "Add at least one item to the cart."
+      : Number(posCashReceived || 0) < posTotal
+        ? "Cash received must cover the total."
+        : "";
 
   if (section === "staff-pos") return (
     <main className="container-fluid dashboard-page staff-pos-page">
       {!activeShift && (
-        <section className="dashboard-card mb-3">
-          <div className="module-heading"><div><p className="eyebrow text-danger">Required before sales</p><h3>Open staff shift</h3></div><span className="module-note">Walk-in POS is locked until a shift is active.</span></div>
-          <div className="row g-2 align-items-end">
-            <label className="form-label col-sm-4">Opening cash<input className="form-control" type="number" min="0" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
-            <div className="col-sm-8"><button className="btn btn-danger" onClick={openShiftFromPos}>Start shift</button></div>
+        <section className="pos-shift-banner">
+          <div>
+            <p className="eyebrow text-danger">Required before sales</p>
+            <h3>Open staff shift</h3>
+            <span>Walk-in payments are locked until a cashier shift is active.</span>
+          </div>
+          <div className="pos-shift-controls">
+            <label className="form-label">Opening cash<input className="form-control" type="number" min="0" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
+            <button className="btn btn-danger" disabled={openingShift} onClick={openShiftFromPos}>{openingShift ? "Starting..." : "Start shift"}</button>
           </div>
         </section>
       )}
@@ -153,6 +172,16 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
             ))}
           </div>
           <div className="pos-payment-panel">
+            {!activeShift && (
+              <div className="pos-shift-inline">
+                <strong>Shift required</strong>
+                <span>Open a staff shift before taking payment.</span>
+                <div className="pos-shift-inline-actions">
+                  <input className="form-control" type="number" min="0" aria-label="Opening cash" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} />
+                  <button className="btn btn-danger btn-sm" disabled={openingShift} onClick={openShiftFromPos}>{openingShift ? "Starting..." : "Start shift"}</button>
+                </div>
+              </div>
+            )}
             <div className="checkout-mode-grid" aria-label="Walk-in type">
               <button className={diningOption === "dine-in" ? "active" : ""} type="button" aria-pressed={diningOption === "dine-in"} onClick={() => setDiningOption("dine-in")}><strong>Dine-in</strong><small>Counter order</small></button>
               <button className={diningOption === "takeout" ? "active" : ""} type="button" aria-pressed={diningOption === "takeout"} onClick={() => setDiningOption("takeout")}><strong>Takeout</strong><small>Pack to go</small></button>
@@ -167,6 +196,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
             <div><dt>Change</dt><dd>{currency(posChange)}</dd></div>
           </dl>
           <button className="btn btn-danger w-100" disabled={!activeShift || !posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
+          {paymentBlocker && <small className="pos-payment-lock">{paymentBlocker}</small>}
           {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} - {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
         </aside>
       </section>

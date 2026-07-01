@@ -69,8 +69,8 @@ function parseProofHandoff(input = {}, order = {}) {
     otpVerified: Boolean(otp && order.handoffOtp && otp === order.handoffOtp),
     capturedAt: Date.now()
   };
-  if (!proof.customerName && !proof.signature && !proof.otpVerified) {
-    throw new HttpError(400, "Add customer name, typed signature, or the correct OTP before delivery proof.");
+  if (!proof.customerName && !proof.signature) {
+    throw new HttpError(400, "Add the receiver name or typed signature before delivery proof.");
   }
   return proof;
 }
@@ -827,6 +827,7 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
     dataUrl: validateDeliveryProof(input.dataUrl),
     handoff,
     riderId: user.uid,
+    riderName: user.name || user.email || "Rider",
     createdAt: Date.now()
   });
   return { proofOfDeliveryRef, proofOfDeliveryMeta: handoff };

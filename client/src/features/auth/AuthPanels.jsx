@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { demoAccounts } from "../../data/menu";
+import { gsap, prefersReducedMotion, useGSAP } from "../../lib/gsap";
 import { api } from "../../services/api";
 import {
   completeTwoFactorSession,
@@ -23,6 +24,47 @@ const loginRoleOptions = [
   { id: "rider", label: "Rider", detail: "Deliver food" }
 ];
 
+const popularMeals = [
+  { name: "Porkchop Meal", detail: "Crispy comfort meal with rice, egg, and soup.", price: "Starts at ₱99", image: "/assets/menu/porkchop.png" },
+  { name: "Tapa Meal", detail: "Pinoy tapsilog favorite for breakfast, lunch, or late cravings.", price: "Starts at ₱99", image: "/assets/menu/tapa.png" },
+  { name: "Sisig Meal", detail: "Savory house-style sisig served as a filling rice meal.", price: "Starts at ₱99", image: "/assets/menu/sisig.png" },
+  { name: "Chicken Wings Meal", detail: "Golden chicken wings with rice and a familiar Pinoy bite.", price: "Starts at ₱99", image: "/assets/menu/chicken-wings.png" },
+  { name: "Boneless Chicken Meal", detail: "Easy-to-eat boneless chicken for quick dine-in or delivery.", price: "Starts at ₱99", image: "/assets/menu/boneless-chicken.png" },
+  { name: "Dinuguan Meal", detail: "Special weekend-style Filipino comfort dish.", price: "Starts at ₱85", image: "/assets/menu/dinuguan.png" }
+];
+
+const tapTapStrengths = [
+  { title: "Affordable Pinoy meals", detail: "Budget-friendly rice meals, solo servings, drinks, and add-ons for everyday foodtrips." },
+  { title: "Freshly prepared favorites", detail: "Meals are prepared for fast service while keeping the familiar TapTap taste." },
+  { title: "Pickup and delivery ready", detail: "Customers can choose pickup or delivery, while staff and riders keep orders moving." },
+  { title: "Friendly local service", detail: "Built for students, workers, families, and nearby customers who want sulit meals." }
+];
+
+const orderSteps = [
+  { title: "Choose your meal", detail: "Browse tapsilog, rice meals, alacarte, solo, drinks, and specials." },
+  { title: "Confirm pickup or delivery", detail: "Add your phone, address, landmark, and delivery pin when needed." },
+  { title: "Receive your order", detail: "Track updates from kitchen preparation to pickup, delivery, or counter handoff." }
+];
+
+const serviceOptions = [
+  { title: "Delivery", detail: "Customers can save their address, landmark, phone number, and delivery pin for rider handoff." },
+  { title: "Pickup", detail: "Order ahead and collect meals without waiting through the full counter line." },
+  { title: "Walk-in", detail: "Staff can serve dine-in and takeout customers using the same TapTap menu and receipt flow." }
+];
+
+const homepageHighlights = [
+  { value: "P69+", label: "Budget-friendly meals" },
+  { value: "3 ways", label: "Delivery, pickup, walk-in" },
+  { value: "4 roles", label: "Customer, staff, rider, owner" }
+];
+
+const roleAccess = [
+  { role: "Customer", detail: "Order food, save delivery details, track purchases, view receipts, and leave reviews." },
+  { role: "Staff", detail: "Handle walk-in POS, kitchen queue, order queue, stock movement, and support messages." },
+  { role: "Rider", detail: "Manage assigned deliveries, open navigation, collect COD, and submit proof of delivery." },
+  { role: "Owner", detail: "Monitor sales, reports, inventory, user access, reviews, audit logs, and operations." }
+];
+
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
@@ -41,6 +83,93 @@ function LoginPanel({ onLoggedIn }) {
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
   const [registrationResult, setRegistrationResult] = useState(null);
+  const [loginModalOpen, setLoginModalOpen] = useState(registrationRequested);
+  const loginHomeRef = useRef(null);
+  const loginModalRef = useRef(null);
+  const lastFocusedElementRef = useRef(null);
+
+  useGSAP(() => {
+    if (prefersReducedMotion()) return;
+
+    gsap.from("[data-login-nav], [data-login-hero]", {
+      y: 24,
+      autoAlpha: 0,
+      duration: 0.72,
+      stagger: 0.08,
+      ease: "power3.out"
+    });
+
+    gsap.to("[data-login-float]", {
+      y: -10,
+      rotate: 1.5,
+      duration: 2.2,
+      stagger: 0.18,
+      repeat: -1,
+      yoyo: true,
+      ease: "sine.inOut"
+    });
+
+    gsap.utils.toArray("[data-login-section]").forEach((section) => {
+      const revealItems = section.querySelectorAll("[data-login-reveal]");
+      if (!revealItems.length) return;
+      gsap.from(revealItems, {
+        y: 34,
+        scale: 0.985,
+        autoAlpha: 0,
+        duration: 0.58,
+        stagger: 0.07,
+        ease: "power2.out",
+        scrollTrigger: {
+          trigger: section,
+          start: "top 84%",
+          once: true
+        }
+      });
+    });
+  }, { scope: loginHomeRef });
+
+  useGSAP(() => {
+    if (!loginModalOpen || prefersReducedMotion()) return;
+
+    gsap.from("[data-login-modal-panel]", {
+      y: 28,
+      scale: 0.98,
+      autoAlpha: 0,
+      duration: 0.32,
+      ease: "power3.out"
+    });
+
+    gsap.from("[data-login-modal-scrim]", {
+      autoAlpha: 0,
+      duration: 0.24,
+      ease: "power2.out"
+    });
+  }, { dependencies: [loginModalOpen], scope: loginModalRef });
+
+  useEffect(() => {
+    if (!loginModalOpen) return undefined;
+
+    document.body.classList.add("login-modal-open");
+    const focusableSelector = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+    const focusTimer = window.setTimeout(() => {
+      const firstFocusable = loginModalRef.current?.querySelector(focusableSelector);
+      firstFocusable?.focus();
+    }, 80);
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setLoginModalOpen(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.classList.remove("login-modal-open");
+      window.setTimeout(() => {
+        lastFocusedElementRef.current?.focus?.();
+      }, 0);
+    };
+  }, [loginModalOpen]);
 
   const updateRegistrationStep = (id, status, detail) => {
     setRegistrationSteps((current) => current.map((step) => (
@@ -78,6 +207,16 @@ function LoginPanel({ onLoggedIn }) {
     setRegistrationSteps(registrationStepDefaults);
   };
 
+  const openLoginModal = (preferredRole) => {
+    lastFocusedElementRef.current = document.activeElement;
+    if (preferredRole && !registering) selectRole(preferredRole);
+    setLoginModalOpen(true);
+  };
+
+  const closeLoginModal = () => {
+    setLoginModalOpen(false);
+  };
+
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
@@ -102,107 +241,272 @@ function LoginPanel({ onLoggedIn }) {
     }
   };
 
+  const loginCard = (
+    <form className="login-card" onSubmit={submit} data-login-modal-panel>
+      <div className="login-card-header">
+        <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
+        <span>{registering ? "Customer signup" : loginRoleOptions.find((item) => item.id === role)?.label}</span>
+      </div>
+      <p className="eyebrow text-danger">TapTap account</p>
+      <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
+      <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Sample accounts are ready for this preview."}</p>
+      {!registering && (
+        <div className="role-tabs" aria-label="Choose account role">
+          {loginRoleOptions.map((item) => (
+            <button type="button" key={item.id} className={role === item.id ? "active" : ""} aria-pressed={role === item.id} onClick={() => selectRole(item.id)}>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </button>
+          ))}
+        </div>
+      )}
+      {registering && (
+        <label className="form-label">Full name
+          <input className="form-control" required value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+      )}
+      <label className="form-label">Email
+        <input className="form-control" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+      </label>
+      <label className="form-label">Password
+        <span className="login-password-field">
+          <input className="form-control" type={showPassword ? "text" : "password"} minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
+          <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((current) => !current)}>
+            {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+          </button>
+        </span>
+      </label>
+      {registering && (
+        <div className="firebase-registration-flow" aria-live="polite">
+          <div className="registration-flow-heading">
+            <div><strong>Creating your account</strong><small>Setting up your secure customer profile.</small></div>
+            <span>{registrationResult ? "Complete" : busy ? "Working" : "Ready"}</span>
+          </div>
+          {registrationSteps.map((step) => (
+            <div className={`registration-step registration-${step.status}`} key={step.id}>
+              <span className="registration-step-icon" aria-hidden="true" />
+              <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+            </div>
+          ))}
+          {registrationResult && (
+            <div className="registration-result">
+              <strong>Customer account created</strong>
+              <span>Your account is ready. Please check your email to verify it.</span>
+              <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
+        {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
+      </button>
+      <div className="login-secondary-actions">
+        <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
+          {registering ? "Back to sign in" : "Customer registration"}
+        </button>
+        {!registering && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
+      </div>
+    </form>
+  );
+
   return (
-    <div className="login-screen">
+    <main className="login-home" ref={loginHomeRef}>
+      <header className="login-home-header" data-login-nav>
+        <a className="brand-lockup login-home-brand" href="#home" aria-label="TapTap Foodtrip home">
+          <BrandMark />
+          <div><strong>TapTap</strong><small>FOODTRIP</small></div>
+        </a>
+        <nav className="login-home-nav" aria-label="Homepage sections">
+          <a href="#about-taptap">About</a>
+          <a href="#popular-meals">Meals</a>
+          <a href="#service-options">Services</a>
+          <a href="#role-access">Roles</a>
+        </nav>
+        <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal()}>
+          Sign in
+        </button>
+      </header>
+
+      <section className="login-screen" id="home" aria-label="TapTap Foodtrip homepage">
       <div className="login-visual">
-        <div className="login-restaurant-top">
+        <div className="login-restaurant-top" data-login-hero>
           <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
           <span>Fresh from the kitchen</span>
         </div>
         <div className="login-restaurant-copy">
-          <p className="eyebrow">Pinoy tapsilog house</p>
-          <h1>Traditional Pinoy comfort, served fast.</h1>
-          <p>We sell traditional Pinoy Style Tapsilog at the lowest price with quality taste and service.</p>
+          <p className="eyebrow" data-login-hero>Pinoy tapsilog house</p>
+          <h1 data-login-hero>Traditional Pinoy comfort, served fast.</h1>
+          <p data-login-hero>We sell traditional Pinoy Style Tapsilog at the lowest price with quality taste and service.</p>
+          <div className="login-hero-actions" data-login-hero>
+            <button type="button" className="btn btn-danger" onClick={() => openLoginModal()}>Sign in</button>
+            <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>Order now</button>
+            <a className="btn btn-outline-light" href="#popular-meals">View meals</a>
+          </div>
           <div className="login-plate-row" aria-label="TapTap favorite meals">
-            <article>
+            <article data-login-hero data-login-float>
               <img src="/assets/menu/tapa.png" alt="Tapa meal" />
               <span>Tapa Meal</span>
             </article>
-            <article>
+            <article data-login-hero data-login-float>
               <img src="/assets/menu/porkchop.png" alt="Porkchop meal" />
               <span>Porkchop</span>
             </article>
-            <article>
+            <article data-login-hero data-login-float>
               <img src="/assets/menu/sisig.png" alt="Sisig meal" />
               <span>Sisig Meal</span>
             </article>
           </div>
         </div>
-        <div className="login-special-card" aria-label="TapTap service promise">
+        <div className="login-special-card" aria-label="TapTap service promise" data-login-hero data-login-float>
           <span>TapTap promise</span>
           <strong>Hot meals, clear orders, friendly service.</strong>
           <small>For customers, staff, riders, and owners.</small>
         </div>
       </div>
-      <div className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
-          <div className="login-card-header">
-            <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
-            <span>{registering ? "Customer signup" : loginRoleOptions.find((item) => item.id === role)?.label}</span>
-          </div>
-          <p className="eyebrow text-danger">TapTap account</p>
-          <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-          <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Sample accounts are ready for this preview."}</p>
-          {!registering && (
-            <div className="role-tabs" aria-label="Choose account role">
-              {loginRoleOptions.map((item) => (
-                <button type="button" key={item.id} className={role === item.id ? "active" : ""} aria-pressed={role === item.id} onClick={() => selectRole(item.id)}>
-                  <strong>{item.label}</strong>
-                  <small>{item.detail}</small>
-                </button>
-              ))}
-            </div>
-          )}
-          {registering && (
-            <label className="form-label">Full name
-              <input className="form-control" required value={name} onChange={(event) => setName(event.target.value)} />
-            </label>
-          )}
-          <label className="form-label">Email
-            <input className="form-control" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
-          </label>
-          <label className="form-label">Password
-            <span className="login-password-field">
-              <input className="form-control" type={showPassword ? "text" : "password"} minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
-              <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((current) => !current)}>
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </span>
-          </label>
-          {registering && (
-            <div className="firebase-registration-flow" aria-live="polite">
-              <div className="registration-flow-heading">
-                <div><strong>Creating your account</strong><small>Setting up your secure customer profile.</small></div>
-                <span>{registrationResult ? "Complete" : busy ? "Working" : "Ready"}</span>
-              </div>
-              {registrationSteps.map((step) => (
-                <div className={`registration-step registration-${step.status}`} key={step.id}>
-                  <span className="registration-step-icon" aria-hidden="true" />
-                  <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-                </div>
-              ))}
-              {registrationResult && (
-                <div className="registration-result">
-                  <strong>Customer account created</strong>
-                  <span>Your account is ready. Please check your email to verify it.</span>
-                  <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
-                </div>
-              )}
-            </div>
-          )}
-          {error && <div className="alert alert-danger py-2 small">{error}</div>}
-          <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
-            {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
-          </button>
-          <div className="login-secondary-actions">
-            <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
-              {registering ? "Back to sign in" : "Customer registration"}
-            </button>
-            {!registering && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
-          </div>
-        </form>
+      <div className="login-home-panel" data-login-hero>
+        <p className="eyebrow text-danger">Ready for orders</p>
+        <h2>Order your TapTap favorites without leaving the homepage.</h2>
+        <p>Browse the story, check the service options, then sign in only when you are ready to order, manage the store, serve customers, or deliver meals.</p>
+        <div className="login-highlight-list">
+          {homepageHighlights.map((item) => (
+            <article key={item.label} data-login-float>
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+            </article>
+          ))}
+        </div>
+        <button type="button" className="btn btn-danger w-100 login-panel-cta" onClick={() => openLoginModal("customer")}>
+          Start foodtrip
+        </button>
       </div>
-    </div>
+      </section>
+
+      <section className="login-business-section login-business-intro" id="about-taptap" data-login-section>
+        <div className="login-section-heading" data-login-reveal>
+          <p className="eyebrow text-danger">Local Filipino food business</p>
+          <h2>Affordable TapTap meals for everyday cravings.</h2>
+          <p>TapTap Foodtrip serves classic Filipino rice meals, alacarte servings, solo meals, drinks, and specials for customers who want fast, sulit, and familiar comfort food.</p>
+        </div>
+        <div className="login-business-grid">
+          <article data-login-reveal>
+            <strong>Rice meals</strong>
+            <span>Tapsilog-style favorites with egg, rice, soup, and hearty ulam choices.</span>
+          </article>
+          <article data-login-reveal>
+            <strong>Ala carte and solo</strong>
+            <span>Flexible servings for dine-in, takeout, delivery, or lighter meals.</span>
+          </article>
+          <article data-login-reveal>
+            <strong>Drinks and add-ons</strong>
+            <span>Simple add-ons for walk-in customers and quick meal pairings.</span>
+          </article>
+        </div>
+      </section>
+
+      <section className="login-business-section" id="popular-meals" data-login-section>
+        <div className="login-section-heading compact" data-login-reveal>
+          <p className="eyebrow text-danger">Popular choices</p>
+          <h2>Foodtrip favorites customers can quickly recognize.</h2>
+        </div>
+        <div className="login-meal-showcase">
+          {popularMeals.map((meal) => (
+            <article className="login-meal-card" key={meal.name} data-login-reveal>
+              <img src={meal.image} alt={meal.name} loading="lazy" />
+              <div>
+                <strong>{meal.name}</strong>
+                <p>{meal.detail}</p>
+                <span>{meal.price}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="login-business-section login-why-section" data-login-section>
+        <div className="login-section-heading" data-login-reveal>
+          <p className="eyebrow text-danger">Why customers choose TapTap</p>
+          <h2>Simple food service, built around speed and value.</h2>
+        </div>
+        <div className="login-strength-grid">
+          {tapTapStrengths.map((item) => (
+            <article key={item.title} data-login-reveal>
+              <strong>{item.title}</strong>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="login-business-section login-service-section" id="service-options" data-login-section>
+        <div className="login-section-heading" data-login-reveal>
+          <p className="eyebrow text-danger">Service options</p>
+          <h2>Built for nearby cravings, counter sales, and rider handoff.</h2>
+          <p>TapTap keeps the food journey simple: customers choose how they want to receive the order, staff prepares it, and riders get the right delivery details when needed.</p>
+        </div>
+        <div className="login-service-grid">
+          {serviceOptions.map((item) => (
+            <article key={item.title} data-login-reveal>
+              <strong>{item.title}</strong>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="login-business-section login-order-flow-section" id="how-ordering-works" data-login-section>
+        <div className="login-section-heading compact" data-login-reveal>
+          <p className="eyebrow text-danger">How ordering works</p>
+          <h2>Three easy steps from craving to handoff.</h2>
+        </div>
+        <div className="login-step-grid">
+          {orderSteps.map((step, index) => (
+            <article key={step.title} data-login-reveal>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{step.title}</strong>
+              <p>{step.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="login-business-section login-role-section" id="role-access" data-login-section>
+        <div className="login-section-heading" data-login-reveal>
+          <p className="eyebrow text-danger">One system for the whole foodtrip</p>
+          <h2>Customers, staff, riders, and owners each get the right access.</h2>
+        </div>
+        <div className="login-role-grid">
+          {roleAccess.map((item) => (
+            <article key={item.role} data-login-reveal>
+              <strong>{item.role}</strong>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+        <button type="button" className="btn btn-danger login-bottom-cta" onClick={() => openLoginModal()} data-login-reveal>Sign in to continue</button>
+      </section>
+
+      {loginModalOpen && (
+        <div
+          className="login-modal-shell"
+          aria-labelledby="login-modal-title"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeLoginModal();
+          }}
+          ref={loginModalRef}
+          role="dialog"
+        >
+          <div className="login-modal-scrim" data-login-modal-scrim onMouseDown={closeLoginModal} />
+          <div className="login-modal-panel">
+            <button type="button" className="login-modal-close" aria-label="Close sign in" onClick={closeLoginModal}>x</button>
+            <span className="login-modal-kicker">Secure role access</span>
+            <h2 id="login-modal-title">Sign in to TapTap Foodtrip</h2>
+            {loginCard}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
 

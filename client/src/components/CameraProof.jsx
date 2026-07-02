@@ -1,5 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 
+function analyzePhotoQuality(canvas) {
+  const context = canvas.getContext("2d");
+  if (!context) return { warning: "" };
+  const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+  const step = Math.max(4, Math.floor(Math.min(width, height) / 28));
+  let total = 0;
+  let count = 0;
+  let min = 255;
+  let max = 0;
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const index = (y * width + x) * 4;
+      const brightness = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+      total += brightness;
+      count += 1;
+      min = Math.min(min, brightness);
+      max = Math.max(max, brightness);
+    }
+  }
+  const average = count ? total / count : 0;
+  const contrast = max - min;
+  const warning = canvas.width < 720 || canvas.height < 480
+    ? "Photo is small. Retake if the handoff is not clear."
+    : average < 35
+      ? "Photo is too dark. Retake in better lighting if possible."
+      : average > 240
+        ? "Photo is too bright. Retake if the receiver or items are washed out."
+        : contrast < 18
+          ? "Photo looks blurry or low contrast. Retake if the handoff is not visible."
+          : "";
+  return { average, contrast, warning };
+}
+
 export default function CameraProof({ onCapture, onClose }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -36,13 +69,14 @@ export default function CameraProof({ onCapture, onClose }) {
     canvas.width = Math.round(sourceWidth * scale);
     canvas.height = Math.round(sourceHeight * scale);
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const quality = analyzePhotoQuality(canvas);
     canvas.toBlob((blob) => {
       if (!blob) {
         setError("The proof photo could not be captured. Please try again.");
         return;
       }
       if (captured?.url) URL.revokeObjectURL(captured.url);
-      setCaptured({ blob, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height });
+      setCaptured({ blob, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height, quality });
     }, "image/jpeg", 0.86);
   };
   const retake = () => {
@@ -50,10 +84,10 @@ export default function CameraProof({ onCapture, onClose }) {
     setCaptured(null);
   };
   const submit = () => {
-    if (captured?.blob) onCapture(captured.blob, handoff);
+    if (captured?.blob) onCapture(captured.blob, { ...handoff, photoQualityWarning: captured.quality?.warning || "" });
   };
   const handoffReady = Boolean(handoff.customerName.trim() || handoff.signature.trim());
-  const lowQuality = captured && (captured.width < 720 || captured.height < 480);
+  const qualityWarning = captured?.quality?.warning || "";
 
   return (
     <div className="modal d-block camera-modal" tabIndex="-1">
@@ -68,9 +102,9 @@ export default function CameraProof({ onCapture, onClose }) {
             {captured
               ? <img className="proof-preview" src={captured.url} alt="Captured delivery proof preview" />
               : <video ref={videoRef} autoPlay playsInline className="w-100 rounded" onLoadedMetadata={() => setCameraReady(true)} />}
-            <small className={lowQuality ? "proof-camera-tip warning" : "proof-camera-tip"}>
+            <small className={qualityWarning ? "proof-camera-tip warning" : "proof-camera-tip"}>
               {captured
-                ? lowQuality ? "Photo is small or unclear. Retake if the delivery handoff is not visible." : "Review the photo before submitting it."
+                ? qualityWarning || "Review the photo before submitting it."
                 : cameraReady ? "Point the camera at the handoff or delivered items before capturing." : "Preparing camera..."}
             </small>
             <div className="proof-handoff-grid">

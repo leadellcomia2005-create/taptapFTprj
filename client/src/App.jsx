@@ -63,11 +63,11 @@ const isRevenueOrder = (order) => {
   if (!order || order.status === "cancelled" || order.paymentStatus === "pending" || order.status === "pending-payment") return false;
   if (order.paymentStatus === "paid") return true;
   if (order.paymentMethod === "cash") return true;
-  if (order.paymentMethod === "cod") return order.status === "delivered" || Boolean(order.deliveredAt);
+  if (order.paymentMethod === "cod") return order.status === "delivered" || order.status === "completed" || Boolean(order.deliveredAt || order.completedAt);
   return false;
 };
-const isOutstandingCod = (order) => order?.paymentMethod === "cod" && order.status !== "cancelled" && !isRevenueOrder(order);
-const isUnremittedCod = (order) => order?.paymentMethod === "cod" && order.status === "delivered" && !order.codRemittedAt;
+const isOutstandingCod = (order) => order?.paymentMethod === "cod" && order.deliveryType === "delivery" && order.status !== "cancelled" && !isRevenueOrder(order);
+const isUnremittedCod = (order) => order?.paymentMethod === "cod" && order.deliveryType === "delivery" && order.status === "delivered" && !order.codRemittedAt;
 const locationToPoint = (location) => {
   const lat = Number(location?.lat);
   const lng = Number(location?.lng);
@@ -147,6 +147,14 @@ const htmlEscape = (value = "") => String(value)
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&#39;");
 const orderItemText = (order) => (order.items || []).map((item) => `${item.qty} x ${item.name}`).join(", ") || "No items";
+const reportOrderType = (order) => {
+  if (order.deliveryType === "delivery") return "Delivery";
+  if (order.deliveryType === "pickup") return "Pickup";
+  if (order.deliveryType === "walk-in" && order.diningOption === "takeout") return "Takeout";
+  if (order.deliveryType === "walk-in" && order.diningOption === "dine-in") return "Dine-in";
+  if (order.deliveryType === "walk-in") return "Walk-in";
+  return "Other";
+};
 const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
   const range = reportDateRange(reportDate);
   const dailyOrders = orders.filter((order) => inRange(order.createdAt, range));
@@ -156,8 +164,14 @@ const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
   const codExposureOrders = dailyOrders.filter(isOutstandingCod);
   const unremittedCodOrders = dailyOrders.filter(isUnremittedCod);
   const deliveredOrders = dailyOrders.filter((order) => order.status === "delivered");
+  const completedOrders = dailyOrders.filter((order) => ["delivered", "completed"].includes(order.status));
   const closedShifts = shiftLogs.filter((log) => inRange(log.endedAt || log.createdAt, range));
   const lowStockItems = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0));
+  const orderTypeBreakdown = dailyOrders.reduce((groups, order) => {
+    const label = reportOrderType(order);
+    groups[label] = (groups[label] || 0) + 1;
+    return groups;
+  }, { Delivery: 0, Pickup: 0, "Dine-in": 0, Takeout: 0, "Walk-in": 0 });
   const paymentBreakdown = {
     cash: sumByTotal(revenueOrders.filter((order) => order.paymentMethod === "cash")),
     cod: sumByTotal(revenueOrders.filter((order) => order.paymentMethod === "cod")),
@@ -174,8 +188,10 @@ const buildDailyReport = (orders, inventory, shiftLogs, reportDate) => {
     pendingOrders,
     cancelledOrders,
     deliveredOrders,
+    completedOrders,
     codExposureOrders,
     unremittedCodOrders,
+    orderTypeBreakdown,
     closedShifts,
     lowStockItems,
     topItems: topSellingItems(revenueOrders),
@@ -221,6 +237,13 @@ const printableOwnerReportHtml = (report) => {
     { label: "Rider", value: (order) => order.riderName || order.riderId || "-" },
     { label: "Collected total", value: (order) => reportMoney(order.total) }
   ];
+  const orderTypeColumns = [
+    { label: "Order type", value: (row) => row.type },
+    { label: "Count", value: (row) => row.count }
+  ];
+  const orderTypeRows = Object.entries(report.orderTypeBreakdown || {})
+    .filter(([, count]) => Number(count || 0) > 0)
+    .map(([type, count]) => ({ type, count }));
   const table = (title, columns, rows, emptyText) => `
     <section>
       <h2>${htmlEscape(title)}</h2>
@@ -264,7 +287,7 @@ const printableOwnerReportHtml = (report) => {
   <div class="summary">
     <div class="box"><span>Gross paid sales</span><strong>${htmlEscape(reportMoney(report.grossSales))}</strong></div>
     <div class="box"><span>Total orders</span><strong>${report.dailyOrders.length}</strong></div>
-    <div class="box"><span>Completed orders</span><strong>${report.deliveredOrders.length}</strong></div>
+    <div class="box"><span>Completed orders</span><strong>${(report.completedOrders || report.deliveredOrders).length}</strong></div>
     <div class="box"><span>Pending or unpaid</span><strong>${report.pendingOrders.length}</strong></div>
     <div class="box"><span>Cancelled</span><strong>${report.cancelledOrders.length}</strong></div>
     <div class="box"><span>Cash</span><strong>${htmlEscape(reportMoney(report.paymentBreakdown.cash))}</strong></div>
@@ -274,6 +297,7 @@ const printableOwnerReportHtml = (report) => {
     <div class="box"><span>COD to remit</span><strong>${htmlEscape(reportMoney(sumByTotal(report.unremittedCodOrders)))}</strong></div>
   </div>
   ${table("Top selling items", itemColumns, report.topItems, "No paid sales for this day.")}
+  ${table("Order type breakdown", orderTypeColumns, orderTypeRows, "No orders for this day.")}
   ${table("COD waiting for owner handoff", codRemittanceColumns, report.unremittedCodOrders, "No COD collections waiting for owner handoff.")}
   ${table("Daily order ledger", orderColumns, report.dailyOrders, "No orders for this day.")}
   ${table("Closed shift reconciliation", shiftColumns, report.closedShifts, "No closed shifts for this day.")}
@@ -605,7 +629,7 @@ function TrackingView({ order, onClose }) {
     setRider(orderRiderLocation);
   }, [trackingOrderId, orderRiderLocation]);
   useEffect(() => {
-    if (!trackingOrderId) {
+    if (!trackingOrderId || order?.deliveryType !== "delivery") {
       setRider(null);
       return undefined;
     }
@@ -625,7 +649,7 @@ function TrackingView({ order, onClose }) {
       stopDatabase?.();
       stopSocket();
     };
-  }, [trackingOrderId]);
+  }, [trackingOrderId, order?.deliveryType]);
   if (!order) return null;
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>

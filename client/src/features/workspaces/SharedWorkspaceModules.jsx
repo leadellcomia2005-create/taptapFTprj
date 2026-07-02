@@ -77,6 +77,34 @@ const scheduleDays = [
   ["sun", "Sun"]
 ];
 
+const isDeliveryOrder = (order) => order?.deliveryType === "delivery";
+
+const orderTypeLabel = (order) => {
+  if (order.deliveryType === "delivery") return "Delivery";
+  if (order.deliveryType === "pickup") return "Pickup";
+  if (order.deliveryType === "walk-in" && order.diningOption === "takeout") return "Takeout";
+  if (order.deliveryType === "walk-in" && order.diningOption === "dine-in") return "Dine-in";
+  if (order.deliveryType === "walk-in") return "Walk-in";
+  return order.diningOption || "Order";
+};
+
+const nextStaffStatus = (order) => {
+  if (isDeliveryOrder(order)) {
+    return ({ received: "preparing", preparing: "ready" })[order.status] || "";
+  }
+  return ({ received: "preparing", preparing: "ready", ready: "completed" })[order.status] || "";
+};
+
+const downloadCsv = (filename, rows) => {
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
 export function ComplaintResolutionModule({ complaints = [], user, notify }) {
   const [drafts, setDrafts] = useState({});
   const grouped = {
@@ -131,6 +159,7 @@ export function ComplaintResolutionModule({ complaints = [], user, notify }) {
 
 export function InventoryModule({ inventory, user, notify }) {
   const [drafts, setDrafts] = useState({});
+  const lowStockCount = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0)).length;
   const updateDraft = (id, field, value) => setDrafts((current) => ({
     ...current,
     [id]: { quantity: 1, reason: "New delivery", countedStock: "", ...(current[id] || {}), [field]: value }
@@ -160,7 +189,11 @@ export function InventoryModule({ inventory, user, notify }) {
     <div className="dashboard-card">
       <div className="module-heading">
         <div><p className="eyebrow text-danger">Menu item stock control</p><h3>Inventory levels and adjustments</h3></div>
-        <span className="module-note">Every adjustment is written to the audit trail.</span>
+        <span className="module-note">{lowStockCount} low-stock item(s). Daily count corrections go to owner approval.</span>
+      </div>
+      <div className="inventory-guardrail">
+        <strong>Inventory control</strong>
+        <span>Use Receive/Deduct for normal movement. Use Request count for physical count corrections, shortages, or major stock fixes.</span>
       </div>
       <div className="table-responsive">
         <table className="table align-middle inventory-table">
@@ -170,13 +203,13 @@ export function InventoryModule({ inventory, user, notify }) {
             const draft = drafts[item.id] || { quantity: 1, reason: "New delivery", countedStock: "" };
             return (
               <tr key={item.id}>
-                <td><strong>{item.name}</strong><small>{item.category}</small></td>
+                <td><strong>{item.name}</strong><small>{item.category}</small>{item.lastAdjustedAt && <small>Last movement: {new Date(item.lastAdjustedAt).toLocaleString("en-PH")}</small>}</td>
                 <td>{item.stock}</td>
                 <td>{item.reorderPoint}</td>
                 <td><span className={`stock-badge ${lowStock ? "low" : "healthy"}`}>{lowStock ? "Low stock" : "Healthy"}</span></td>
-                <td><input className="form-control form-control-sm inventory-input" type="number" min="1" value={draft.quantity} onChange={(event) => updateDraft(item.id, "quantity", event.target.value)} /></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" inputMode="numeric" min="1" value={draft.quantity} onChange={(event) => updateDraft(item.id, "quantity", event.target.value)} /></td>
                 <td><select className="form-select form-select-sm" value={draft.reason} onChange={(event) => updateDraft(item.id, "reason", event.target.value)}><option>New delivery</option><option>Physical count correction</option><option>Wastage</option><option>Spoilage</option><option>Staff meal</option></select></td>
-                <td><input className="form-control form-control-sm inventory-input" type="number" min="0" placeholder={String(item.stock)} value={draft.countedStock} onChange={(event) => updateDraft(item.id, "countedStock", event.target.value)} /></td>
+                <td><input className="form-control form-control-sm inventory-input" type="number" inputMode="numeric" min="0" placeholder={String(item.stock)} value={draft.countedStock} onChange={(event) => updateDraft(item.id, "countedStock", event.target.value)} /></td>
                 <td><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-success" onClick={() => applyAdjustment(item, 1)}>Receive</button><button className="btn btn-sm btn-outline-danger" onClick={() => applyAdjustment(item, -1)}>Deduct</button><button className="btn btn-sm btn-dark" onClick={() => requestCountApproval(item)}>Request count</button></div></td>
               </tr>
             );
@@ -214,7 +247,8 @@ export function MenuManagementModule({ inventory, user, notify }) {
       end: item.availability?.end || "23:59"
     },
     unavailable: Boolean(item.unavailable),
-    walkInOnly: Boolean(item.walkInOnly)
+    walkInOnly: Boolean(item.walkInOnly),
+    featured: Boolean(item.featured)
   }), []);
   const [drafts, setDrafts] = useState({});
   const [adding, setAdding] = useState(false);
@@ -246,7 +280,8 @@ export function MenuManagementModule({ inventory, user, notify }) {
       reorderPoint: Number(draft.reorderPoint || 0),
       availability: draft.availability,
       unavailable: Boolean(draft.unavailable),
-      walkInOnly: Boolean(draft.walkInOnly)
+      walkInOnly: Boolean(draft.walkInOnly),
+      featured: Boolean(draft.featured)
     }, user);
     notify(`${draft.name || item.name} menu settings saved.`);
   };
@@ -520,21 +555,50 @@ export function ApprovalQueueModule({ user, notify }) {
   );
 }
 
-export function AdminCleanupModule({ user, orders, notify }) {
+export function AdminCleanupModule({ user, orders, inventory = [], auditLogs = [], shiftLogs = [], notify }) {
   const [olderThanDays, setOlderThanDays] = useState(30);
-  const exportCsv = () => {
-    const rows = [
+  const exportOrdersCsv = () => {
+    downloadCsv(`taptap-orders-${Date.now()}.csv`, [
       ["Order", "Customer", "Status", "Payment", "Total", "Created"],
       ...orders.map((order) => [order.id, order.customerName || "", order.status || "", order.paymentMethod || "", Number(order.total || 0), order.createdAt ? new Date(order.createdAt).toLocaleString("en-PH") : ""])
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `taptap-orders-${Date.now()}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    ]);
     notify("Orders CSV exported.");
+  };
+  const exportInventoryCsv = () => {
+    downloadCsv(`taptap-inventory-${Date.now()}.csv`, [
+      ["Item", "Category", "Price", "Stock", "Reorder point", "Unavailable", "Walk-in only"],
+      ...inventory.map((item) => [item.name, item.category, Number(item.price || 0), Number(item.stock || 0), Number(item.reorderPoint || 0), item.unavailable ? "Yes" : "No", item.walkInOnly ? "Yes" : "No"])
+    ]);
+    notify("Inventory CSV exported.");
+  };
+  const exportProofIndexCsv = () => {
+    downloadCsv(`taptap-proof-index-${Date.now()}.csv`, [
+      ["Order", "Customer", "Status", "Rider", "Captured", "Storage", "Quality warning"],
+      ...orders.filter((order) => order.proofOfDeliveryRef || order.proofOfDeliveryUrl || order.proofOfDeliveryMeta).map((order) => [
+        order.id,
+        order.customerName || "",
+        order.status || "",
+        order.riderName || order.riderId || "",
+        order.proofOfDeliveryMeta?.capturedAt ? new Date(order.proofOfDeliveryMeta.capturedAt).toLocaleString("en-PH") : "",
+        order.proofOfDeliveryRef || order.proofOfDeliveryUrl || "",
+        order.proofOfDeliveryMeta?.photoQualityWarning || ""
+      ])
+    ]);
+    notify("Delivery proof index exported.");
+  };
+  const exportAuditCsv = () => {
+    downloadCsv(`taptap-audit-log-${Date.now()}.csv`, [
+      ["Time", "Action", "Actor", "Role", "Record", "Reason"],
+      ...auditLogs.map((entry) => [entry.createdAt ? new Date(entry.createdAt).toLocaleString("en-PH") : "", entry.action || "", entry.actorName || "", entry.actorRole || "", entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || "", entry.reason || entry.status || ""])
+    ]);
+    notify("Audit log CSV exported.");
+  };
+  const exportShiftCsv = () => {
+    downloadCsv(`taptap-shift-logs-${Date.now()}.csv`, [
+      ["Staff", "Started", "Closed", "Opening cash", "Cash sales", "Expected", "Actual", "Variance", "Notes"],
+      ...shiftLogs.map((log) => [log.staffName || "Staff", log.startedAt ? new Date(log.startedAt).toLocaleString("en-PH") : "", log.endedAt ? new Date(log.endedAt).toLocaleString("en-PH") : "", Number(log.openingCash || 0), Number(log.cashSales || 0), Number(log.expectedCash || 0), Number(log.actualCash || 0), Number(log.variance || 0), log.notes || ""])
+    ]);
+    notify("Shift logs CSV exported.");
   };
   const archive = async () => {
     const result = await archiveCompletedOrders(olderThanDays, user);
@@ -544,11 +608,18 @@ export function AdminCleanupModule({ user, orders, notify }) {
     <div className="dashboard-card">
       <div className="module-heading">
         <div><p className="eyebrow text-danger">Data cleanup</p><h3>Export and archive tools</h3></div>
-        <span className="module-note">Archived orders leave active queues; delivery proof records are preserved for evidence.</span>
+        <span className="module-note">Exports exclude passwords and app secrets. Delivery proof records are preserved when orders are archived.</span>
       </div>
-      <div className="row g-2 align-items-end">
+      <div className="backup-export-grid">
+        <button className="btn btn-outline-dark" onClick={exportOrdersCsv}>Export orders</button>
+        <button className="btn btn-outline-dark" onClick={exportInventoryCsv}>Export inventory</button>
+        <button className="btn btn-outline-dark" onClick={exportProofIndexCsv}>Export proof index</button>
+        <button className="btn btn-outline-dark" onClick={exportAuditCsv}>Export audit logs</button>
+        <button className="btn btn-outline-dark" onClick={exportShiftCsv}>Export shift logs</button>
+      </div>
+      <div className="row g-2 align-items-end mt-2">
         <label className="form-label col-md-4">Archive completed/cancelled older than<input className="form-control" type="number" min="1" max="365" value={olderThanDays} onChange={(event) => setOlderThanDays(event.target.value)} /></label>
-        <div className="col-md-8 d-flex flex-wrap gap-2"><button className="btn btn-outline-dark" onClick={exportCsv}>Export orders CSV</button><button className="btn btn-danger" onClick={archive}>Archive old orders</button></div>
+        <div className="col-md-8 d-flex flex-wrap gap-2"><button className="btn btn-danger" onClick={archive}>Archive old orders</button></div>
       </div>
     </div>
   );
@@ -641,6 +712,7 @@ export function DeliveryProofModal({ order, onClose }) {
   const proofStorageLabel = proof?.storageMode === "storage" ? "Optimized storage" : proof?.downloadUrl || order.proofOfDeliveryUrl ? "Photo link" : "Database fallback";
   const capturedAt = handoff.capturedAt || proof?.createdAt || order.deliveredAt || order.updatedAt;
   const riderLabel = order.riderName || proof?.riderName || "Assigned rider";
+  const qualityWarning = handoff.photoQualityWarning || proof?.photoQualityWarning || "";
   const escapeText = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
   const printProof = () => {
     if (!proofImage) return;
@@ -649,7 +721,7 @@ export function DeliveryProofModal({ order, onClose }) {
       setError("Allow popups so the proof can open for printing.");
       return;
     }
-    printWindow.document.write(`<!doctype html><html><head><title>Proof ${escapeText(order.id)}</title><style>body{font-family:Arial,sans-serif;margin:28px;color:#211d19}h1{margin:0 0 4px;font-size:28px}.meta{display:grid;grid-template-columns:140px 1fr;gap:8px;margin:22px 0}.meta strong{color:#6d6258}.photo{max-width:100%;max-height:680px;border:1px solid #ddd;border-radius:10px}</style></head><body><h1>Proof of Delivery</h1><p>Order ${escapeText(order.id)}</p><img class="photo" src="${proofImage}" alt="Delivery proof" /><div class="meta"><strong>Customer</strong><span>${escapeText(order.customerName || "Customer")}</span><strong>Receiver</strong><span>${escapeText(handoff.customerName || "Not recorded")}</span><strong>Signature</strong><span>${escapeText(handoff.signature || "Not recorded")}</span><strong>OTP</strong><span>${handoff.otpVerified ? "Verified" : "Not required / not used"}</span><strong>Captured</strong><span>${capturedAt ? escapeText(new Date(capturedAt).toLocaleString("en-PH")) : "No timestamp"}</span><strong>Rider</strong><span>${escapeText(riderLabel)}</span></div><script>window.onload=()=>{window.print();}</script></body></html>`);
+    printWindow.document.write(`<!doctype html><html><head><title>Proof ${escapeText(order.id)}</title><style>body{font-family:Arial,sans-serif;margin:28px;color:#211d19}h1{margin:0 0 4px;font-size:28px}.meta{display:grid;grid-template-columns:140px 1fr;gap:8px;margin:22px 0}.meta strong{color:#6d6258}.photo{max-width:100%;max-height:680px;border:1px solid #ddd;border-radius:10px}</style></head><body><h1>Proof of Delivery</h1><p>Order ${escapeText(order.id)}</p><img class="photo" src="${proofImage}" alt="Delivery proof" /><div class="meta"><strong>Customer</strong><span>${escapeText(order.customerName || "Customer")}</span><strong>Receiver</strong><span>${escapeText(handoff.customerName || "Not recorded")}</span><strong>Signature</strong><span>${escapeText(handoff.signature || "Not recorded")}</span><strong>OTP</strong><span>${handoff.otpVerified ? "Verified" : "Not required / not used"}</span><strong>Captured</strong><span>${capturedAt ? escapeText(new Date(capturedAt).toLocaleString("en-PH")) : "No timestamp"}</span><strong>Rider</strong><span>${escapeText(riderLabel)}</span><strong>Total</strong><span>${escapeText(currency(order.total))}</span><strong>Drop-off</strong><span>${escapeText(order.address || "Address not recorded")}</span><strong>Photo check</strong><span>${escapeText(qualityWarning || "No warning")}</span></div><script>window.onload=()=>{window.print();}</script></body></html>`);
     printWindow.document.close();
   };
 
@@ -676,12 +748,15 @@ export function DeliveryProofModal({ order, onClose }) {
                 <dl className="proof-detail-grid">
                   <div><dt>Order ID</dt><dd>{order.id}</dd></div>
                   <div><dt>Customer</dt><dd>{order.customerName || handoff.customerName || "Customer"}</dd></div>
+                  <div><dt>Order total</dt><dd>{currency(order.total)}</dd></div>
+                  <div><dt>Drop-off</dt><dd>{order.address || "Address not recorded"}{order.landmark ? ` - ${order.landmark}` : ""}</dd></div>
                   <div><dt>Receiver</dt><dd>{handoff.customerName || "Not recorded"}</dd></div>
                   <div><dt>Typed signature</dt><dd>{handoff.signature || "Not recorded"}</dd></div>
                   <div><dt>OTP check</dt><dd>{handoff.otpVerified ? "Verified" : "Not required / not used"}</dd></div>
                   <div><dt>Captured</dt><dd>{capturedAt ? new Date(capturedAt).toLocaleString("en-PH") : "No timestamp"}</dd></div>
                   <div><dt>Rider</dt><dd>{riderLabel}</dd></div>
                   <div><dt>Photo storage</dt><dd>{proofStorageLabel}</dd></div>
+                  {qualityWarning && <div className="proof-quality-card"><dt>Photo check</dt><dd>{qualityWarning}</dd></div>}
                 </dl>
               </div>
             )}
@@ -702,7 +777,6 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
   const [proofTarget, setProofTarget] = useState(null);
   const [visibleOrderCount, setVisibleOrderCount] = useState(30);
   const [orderDateFilter, setOrderDateFilter] = useState("");
-  const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const cancellableStatuses = ["pending-payment", "received", "preparing"];
   const localDateKey = (timestamp) => {
     const date = new Date(timestamp);
@@ -716,11 +790,11 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
     : orders;
   const visibleOrders = filteredOrders.slice(0, visibleOrderCount);
   const advance = async (order) => {
-    if (!flow.includes(order.status)) {
-      notify("This order is waiting for payment confirmation.");
+    const next = nextStaffStatus(order);
+    if (!next) {
+      notify(isDeliveryOrder(order) && order.status === "ready" ? "This delivery is ready for rider pickup." : "This order has no next counter action.");
       return;
     }
-    const next = flow[Math.min(flow.indexOf(order.status) + 1, flow.length - 1)];
     await updateOrder(order.id, { status: next, updatedAt: Date.now() });
     if (order.phoneVerified && order.smsNotifications) api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
@@ -755,8 +829,11 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
           <tbody>
             {filteredOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}
-            {visibleOrders.map((order) => (
-              <tr key={order.id}>
+            {visibleOrders.map((order) => {
+              const next = nextStaffStatus(order);
+              const waitingForRider = isDeliveryOrder(order) && order.status === "ready";
+              return (
+                <tr key={order.id}>
                 <td>{order.id}</td>
                 <td>
                   {order.customerName}
@@ -765,7 +842,8 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
                 </td>
                 <td className="order-items-cell">
                   <span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>
-                  {order.deliveryType && <small className="d-block text-secondary">{order.deliveryType} - {pinStatus(order)}</small>}
+                  {order.deliveryType && <small className="d-block text-secondary">{orderTypeLabel(order)} - {pinStatus(order)}</small>}
+                  {waitingForRider && <small className="d-block text-danger">Ready for rider assignment</small>}
                   {hasProof(order) && <small className="d-block text-success">Proof of delivery saved</small>}
                   {order.address && order.address !== "Counter" && <small className="d-block text-secondary">{order.address}</small>}
                   {order.landmark && <small className="d-block text-secondary">Landmark: {order.landmark}</small>}
@@ -777,15 +855,16 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
                 <td>
                   {(canAdvance || hasProof(order)) && (
                     <div className="order-action-stack">
-                      {canAdvance && flow.includes(order.status) && order.status !== "delivered" && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance</button>}
+                      {canAdvance && next && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance to {statusLabel(next)}</button>}
                       {canAdvance && cancellableStatuses.includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => setCancelTarget(order)}>Cancel</button>}
-                      {canAdvance && user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}
+                      {canAdvance && user?.role === "staff" && !cancellableStatuses.includes(order.status) && !["delivered", "completed", "cancelled"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => requestVoid(order)}>Request void</button>}
                       {hasProof(order) && <button className="btn btn-sm btn-dark" type="button" onClick={() => setProofTarget(order)}>View proof</button>}
                     </div>
                   )}
                 </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -839,7 +918,7 @@ export function KitchenQueue({ orders, notify }) {
               <article className={`kitchen-ticket ${orderPrepClock(order, now).delayed ? "delayed" : ""}`} key={order.id}>
                 <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
                 <b className="prep-timer">{orderPrepClock(order, now).label}{orderPrepClock(order, now).delayed ? " waiting - delayed" : " waiting"}</b>
-                <small>{order.customerName} · {orderServiceLabel(order)}</small>
+                <small>{order.customerName} - {orderServiceLabel(order)}</small>
                 <p>{orderItemText(order)}</p>
                 {order.notes && <em>Note: {order.notes}</em>}
                 <button className={lane.next ? "btn btn-sm btn-danger" : "btn btn-sm btn-outline-dark"} disabled={!lane.next} onClick={() => move(order, lane.next)}>{lane.next ? lane.action : readyActionLabel(order)}</button>

@@ -43,12 +43,18 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       notify(`Only ${product.stock} ${product.name} item(s) are available.`);
       return current;
     }
+    if (!found && Number(product.stock || 0) <= Number(product.reorderPoint || 0)) {
+      notify(`${product.name} is low stock. Check inventory after this sale.`);
+    }
     return found ? current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1 } : item) : [...current, { ...product, qty: 1 }];
   });
   const decrease = (productId) => setPosCart((current) => current
     .map((item) => item.id === productId ? { ...item, qty: item.qty - 1 } : item)
     .filter((item) => item.qty > 0));
   const remove = (productId) => setPosCart((current) => current.filter((item) => item.id !== productId));
+  const clearCart = () => {
+    if (!posCart.length || window.confirm("Clear the current walk-in order?")) setPosCart([]);
+  };
   const complete = async () => {
     if (!activeShift) {
       notify("Start a shift before accepting walk-in payments.");
@@ -95,7 +101,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       setActiveShift(result.shift);
       notify("Shift opened. Walk-in POS is ready.");
     } catch (error) {
-      notify(error.message || "Shift could not be started.");
+      notify(error.message || "Shift could not be started. Restart the app server if this keeps happening.");
     } finally {
       setOpeningShift(false);
     }
@@ -110,19 +116,6 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
 
   if (section === "staff-pos") return (
     <main className="container-fluid dashboard-page staff-pos-page">
-      {!activeShift && (
-        <section className="pos-shift-banner">
-          <div>
-            <p className="eyebrow text-danger">Required before sales</p>
-            <h3>Open staff shift</h3>
-            <span>Walk-in payments are locked until a cashier shift is active.</span>
-          </div>
-          <div className="pos-shift-controls">
-            <label className="form-label">Opening cash<input className="form-control" type="number" min="0" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} /></label>
-            <button className="btn btn-danger" disabled={openingShift} onClick={openShiftFromPos}>{openingShift ? "Starting..." : "Start shift"}</button>
-          </div>
-        </section>
-      )}
       <section className="staff-pos-hero">
         <div>
           <p className="eyebrow">Fast counter entry</p>
@@ -159,7 +152,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
         </div>
 
         <aside className="dashboard-card sticky-pos staff-checkout-panel">
-          <div className="module-heading"><div><p className="eyebrow text-danger">Order cart</p><h3>Current walk-in order</h3></div>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={() => setPosCart([])}>Clear cart</button>}</div>
+          <div className="module-heading"><div><p className="eyebrow text-danger">Order cart</p><h3>Current walk-in order</h3></div>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={clearCart}>Clear cart</button>}</div>
           <div className="staff-cart-list">
             {posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}
             {posCart.map((item) => (
@@ -197,7 +190,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
           </dl>
           <button className="btn btn-danger w-100" disabled={!activeShift || !posCart.length || Number(posCashReceived || 0) < posTotal} onClick={complete}>Accept payment and print receipt</button>
           {paymentBlocker && <small className="pos-payment-lock">{paymentBlocker}</small>}
-          {lastReceipt && <div className="last-receipt-card"><strong>Last receipt</strong><span>{lastReceipt.id} - {currency(lastReceipt.total)}</span><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
+          {lastReceipt && <div className="last-receipt-card receipt-preview-card"><strong>Last receipt preview</strong><span>{lastReceipt.id} - {lastReceipt.items?.map((item) => `${item.qty}x ${item.name}`).join(", ")}</span><b>{currency(lastReceipt.total)}</b><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
         </aside>
       </section>
     </main>
@@ -210,7 +203,9 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   if (section === "staff-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;
   if (section === "staff-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Workstation preferences</p><h2>Settings</h2></div></div><SettingsModule title="Staff alerts, receipts and workstation" serviceStatus={serviceStatus} staff notify={notify} /></main>;
 
-  const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
+  const activeOrders = orders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
+  const readyDeliveryOrders = orders.filter((order) => order.status === "ready" && order.deliveryType === "delivery");
+  const readyCounterOrders = orders.filter((order) => order.status === "ready" && order.deliveryType !== "delivery");
   const todayRange = reportDateRange(localDateInputValue());
   const todaySales = orders.filter((order) => inRange(order.createdAt, todayRange) && isRevenueOrder(order)).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const lowStock = inventory.filter((item) => item.stock <= item.reorderPoint);
@@ -227,7 +222,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       <div className="row g-3">
         <div className="col-md-3"><div className="metric-card"><small>Active orders</small><strong>{activeOrders.length}</strong><span>Kitchen and delivery queue</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Today's sales</small><strong>{currency(todaySales)}</strong><span>Online and walk-in</span></div></div>
-        <div className="col-md-3"><div className="metric-card"><small>Pending pickup</small><strong>{orders.filter((order) => order.status === "ready").length}</strong><span>Waiting for rider</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Ready handoffs</small><strong>{readyDeliveryOrders.length + readyCounterOrders.length}</strong><span>{readyDeliveryOrders.length} rider, {readyCounterOrders.length} counter</span></div></div>
         <div className="col-md-3"><div className="metric-card"><small>Low stock alerts</small><strong>{lowStock.length}</strong><span>Requires staff action</span></div></div>
         <div className="col-lg-8"><OrderManagement orders={activeOrders.slice(0, 6)} canAdvance notify={notify} user={user} /></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Quick actions</h3><div className="d-grid gap-2"><button className="btn btn-danger" onClick={() => notify("Open Walk-in POS from the navigation.")}>New walk-in order</button><button className="btn btn-outline-dark" onClick={() => notify(`${lowStock.length} product(s) need inventory attention.`)}>Review low stock</button><button className="btn btn-outline-dark" onClick={() => notify("Shift reconciliation is available in Shift Logs.")}>Prepare shift close</button></div><h3 className="mt-4">Critical stock</h3>{lowStock.slice(0, 4).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder at {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}</div></div>

@@ -69,6 +69,7 @@ function parseProofHandoff(input = {}, order = {}) {
     customerName: cleanText(handoff.customerName, 80),
     signature: cleanText(handoff.signature, 80),
     otpVerified: Boolean(otp && order.handoffOtp && otp === order.handoffOtp),
+    photoQualityWarning: cleanText(handoff.photoQualityWarning, 160),
     capturedAt: Date.now()
   };
   if (!proof.customerName && !proof.signature) {
@@ -946,7 +947,7 @@ export async function closeActiveShiftRecord(db, user, input = {}) {
     .filter((order) => Number(order.createdAt || 0) >= Number(activeShift.startedAt || 0))
     .filter((order) => order.cashierId === user.uid || (user.role === "owner" && order.source === "walk-in-pos"));
   const cashSales = orders
-    .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && order.status === "delivered"))
+    .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && ["delivered", "completed"].includes(order.status)))
     .reduce((sum, order) => sum + Number(order.total || 0), 0);
   const cashIn = Number(input.cashIn || 0);
   const cashOut = Number(input.cashOut || 0);

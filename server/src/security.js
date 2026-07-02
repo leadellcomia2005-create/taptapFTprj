@@ -1,5 +1,6 @@
 export const roles = ["owner", "staff", "rider", "customer"];
 export const orderStatusFlow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
+export const counterStatusFlow = ["received", "preparing", "ready", "completed"];
 export const cancellableOrderStatuses = ["pending-payment", "received", "preparing"];
 
 export class HttpError extends Error {
@@ -47,9 +48,17 @@ export function canAccessOrder(user, order, { allowAvailableRiderOrder = false }
   if (user.role === "customer") return order.customerId === user.uid;
   if (user.role === "rider") {
     return order.riderId === user.uid ||
-      (allowAvailableRiderOrder && order.status === "ready" && !order.riderId);
+      (allowAvailableRiderOrder && order.deliveryType === "delivery" && order.status === "ready" && !order.riderId);
   }
   return false;
+}
+
+function isDeliveryOrder(order) {
+  return order?.deliveryType === "delivery";
+}
+
+function staffStatusFlowForOrder(order) {
+  return isDeliveryOrder(order) ? ["received", "preparing", "ready"] : counterStatusFlow;
 }
 
 export function validateOrderItems(items) {
@@ -122,9 +131,10 @@ export function authorizeOrderUpdate(user, order, input = {}) {
       changes.updatedAt = now;
     }
     if (input.status !== undefined) {
-      const currentIndex = orderStatusFlow.indexOf(order.status);
+      const flow = staffStatusFlowForOrder(order);
+      const currentIndex = flow.indexOf(order.status);
       if (currentIndex < 0) throw new HttpError(409, "This order no longer accepts status updates.");
-      const nextStatus = orderStatusFlow[currentIndex + 1];
+      const nextStatus = flow[currentIndex + 1];
       if (!nextStatus || input.status !== nextStatus) {
         throw new HttpError(409, `The next valid status is ${nextStatus || "none"}.`);
       }
@@ -132,9 +142,17 @@ export function authorizeOrderUpdate(user, order, input = {}) {
       changes.updatedAt = now;
       if (input.status === "preparing" && !order.prepStartedAt) changes.prepStartedAt = now;
       if (input.status === "ready") changes.readyAt = now;
+      if (input.status === "completed") {
+        changes.completedAt = now;
+        if (["cash", "cod"].includes(order.paymentMethod)) {
+          changes.paymentStatus = "paid";
+          changes.paymentConfirmedAt = now;
+        }
+      }
     }
     if (input.riderId !== undefined) {
       if (input.riderId !== null && !validRecordId(input.riderId)) throw new HttpError(400, "Invalid rider ID.");
+      if (input.riderId !== null && !isDeliveryOrder(order)) throw new HttpError(409, "Riders can be assigned only to delivery orders.");
       if (input.riderId !== null && order.status !== "ready") throw new HttpError(409, "Riders can be assigned only when an order is ready.");
       changes.riderId = input.riderId;
       changes.assignedAt = now;
@@ -171,6 +189,7 @@ export function authorizeOrderUpdate(user, order, input = {}) {
     const reason = typeof input.deliveryIssue === "string" ? input.deliveryIssue.trim().slice(0, 160) : "";
     if (!reason) throw new HttpError(400, "A delivery issue reason is required.");
     if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
+    if (!isDeliveryOrder(order)) throw new HttpError(409, "Only delivery orders can have rider issue reports.");
     if (!["out-for-delivery", "arrived"].includes(order.status)) {
       throw new HttpError(409, "Delivery issues can be reported only while delivering.");
     }
@@ -181,6 +200,8 @@ export function authorizeOrderUpdate(user, order, input = {}) {
       updatedAt: now
     };
   }
+
+  if (!isDeliveryOrder(order)) throw new HttpError(409, "Riders can update delivery orders only.");
 
   if (!order.riderId && order.status === "ready" && input.riderId === user.uid && input.status === undefined) {
     return { riderId: user.uid, assignedAt: now };
@@ -212,7 +233,8 @@ export function authorizeOrderUpdate(user, order, input = {}) {
         customerName: String(input.proofOfDeliveryMeta.customerName || "").slice(0, 80),
         signature: String(input.proofOfDeliveryMeta.signature || "").slice(0, 80),
         otpVerified: Boolean(input.proofOfDeliveryMeta.otpVerified),
-        capturedAt: Number(input.proofOfDeliveryMeta.capturedAt || now)
+        capturedAt: Number(input.proofOfDeliveryMeta.capturedAt || now),
+        photoQualityWarning: String(input.proofOfDeliveryMeta.photoQualityWarning || "").slice(0, 160)
       };
     }
     changes.deliveredAt = now;

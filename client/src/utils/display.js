@@ -8,6 +8,7 @@ export const statusLabel = (value) => ({
   "out-for-delivery": "Out for delivery",
   arrived: "Arrived",
   delivered: "Delivered",
+  completed: "Completed",
   cancelled: "Cancelled"
 }[value] || value);
 

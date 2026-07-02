@@ -21,7 +21,10 @@ export const buildDailyReport = call("buildDailyReport", () => ({
   dailyOrders: [],
   pendingOrders: [],
   cancelledOrders: [],
+  completedOrders: [],
+  deliveredOrders: [],
   unremittedCodOrders: [],
+  orderTypeBreakdown: {},
   closedShifts: [],
   topItems: [],
   paymentBreakdown: { cash: 0, cod: 0, online: 0, pending: 0, codExposure: 0 }

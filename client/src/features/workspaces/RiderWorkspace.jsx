@@ -21,10 +21,11 @@ function locationToPoint(location) {
 }
 
 function RiderWorkspaceContent({ section, user, orders, notify }) {
-  const assignedOrders = orders.filter((order) => order.riderId === user.uid);
-  const availableOrders = orders.filter((order) => order.status === "ready" && !order.riderId);
+  const deliveryOrders = orders.filter((order) => order.deliveryType === "delivery");
+  const assignedOrders = deliveryOrders.filter((order) => order.riderId === user.uid);
+  const availableOrders = deliveryOrders.filter((order) => order.status === "ready" && !order.riderId);
   const [selectedId, setSelectedId] = useState("");
-  const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => !["delivered", "cancelled"].includes(order.status)) || assignedOrders[0];
+  const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => !["delivered", "completed", "cancelled"].includes(order.status)) || assignedOrders[0];
   const [online, setOnline] = useState(false);
   const [location, setLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -94,7 +95,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   };
 
   const firstName = (user.name || "Rider").split(" ")[0];
-  const activeDeliveries = assignedOrders.filter((order) => !["delivered", "cancelled"].includes(order.status));
+  const activeDeliveries = assignedOrders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
   const completedDeliveries = assignedOrders.filter((order) => order.status === "delivered");
   const codOrders = assignedOrders.filter((order) => order.paymentMethod === "cod");
   const collectedCod = codOrders.filter((order) => order.status === "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -257,9 +258,11 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Customer</small><strong>{active.customerName}</strong></div>
                 <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
+                <div><small>COD collection</small><strong>{active.paymentMethod === "cod" ? currency(active.total) : "Not COD"}</strong><span>{active.paymentMethod === "cod" ? active.codCollectedAt ? "Collected and logged" : "Collect before proof" : "No cash collection"}</span></div>
                 <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
                 <div><small>Route ETA</small><strong>{routeEstimate ? routeEstimate.label : "Address only"}</strong><span>{routeEstimate ? routeEstimate.distanceLabel : "Open navigation for route"}</span></div>
               </div>
+              {active.deliveryIssue && <div className="rider-issue-note"><strong>Reported issue</strong><span>{active.deliveryIssue}</span></div>}
 
               <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
 

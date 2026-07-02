@@ -906,6 +906,13 @@ export async function updateOrder(orderId, values) {
     nextValues.paymentStatus = "cod-collected";
     nextValues.codCollectedAt = Date.now();
   }
+  if (values.status === "completed") {
+    nextValues.completedAt = Date.now();
+    if (["cash", "cod"].includes(currentOrder?.paymentMethod)) {
+      nextValues.paymentStatus = "paid";
+      nextValues.paymentConfirmedAt = Date.now();
+    }
+  }
   if (values.status === "preparing" && !currentOrder?.prepStartedAt) nextValues.prepStartedAt = Date.now();
   if (values.status === "ready") nextValues.readyAt = Date.now();
   if (values.codRemitted && currentOrder?.paymentMethod === "cod") {
@@ -1102,7 +1109,7 @@ export async function closeActiveShift(values, actor) {
   const activeShift = data.activeShifts[actor.uid];
   if (!activeShift) throw new Error("Start a shift before closing one.");
   const orders = Object.values(data.orders || {}).filter((order) => Number(order.createdAt || 0) >= Number(activeShift.startedAt || 0) && order.cashierId === actor.uid);
-  const cashSales = orders.filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && order.status === "delivered")).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashSales = orders.filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && ["delivered", "completed"].includes(order.status))).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const openingCash = Number(activeShift.openingCash || 0);
   const cashIn = Number(values.cashIn || 0);
   const cashOut = Number(values.cashOut || 0);
@@ -1276,6 +1283,7 @@ export async function uploadProof(orderId, blob, handoff = {}) {
     customerName: String(handoff.customerName || "").trim().slice(0, 80),
     signature: String(handoff.signature || "").trim().slice(0, 80),
     otp: String(handoff.otp || "").replace(/\D/g, "").slice(0, 6),
+    photoQualityWarning: String(handoff.photoQualityWarning || "").trim().slice(0, 160),
     capturedAt: Date.now()
   };
   if (!firebaseEnabled) return { proofOfDeliveryUrl: URL.createObjectURL(blob), proofOfDeliveryMeta };

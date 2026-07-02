@@ -178,7 +178,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
               <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>With rider fee</small></button>
               <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>Claim at store</small></button>
             </div>
-            <label className="form-label mt-3">Mobile number<input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
+            <label className="form-label mt-3">Mobile number<input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
             <div className="checkout-sms-panel">
               <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
               <div className="checkout-sms-actions">
@@ -189,7 +189,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
             </div>
             {deliveryType === "delivery" && <>
               <div className="checkout-address-stack">
-                <label className="form-label">Delivery address<textarea className="form-control" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
+                <label className="form-label">Delivery address<textarea className="form-control" autoComplete="street-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
                 <label className="form-label">Landmark<input className="form-control" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></label>
               </div>
               <div className="checkout-location-panel">
@@ -270,8 +270,8 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
 
 export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder }) {
   const revenueCheck = isRevenueOrder || (() => false);
-  const activeOrders = orders.filter((order) => !["delivered", "cancelled"].includes(order.status));
-  const pastOrders = orders.filter((order) => ["delivered", "cancelled"].includes(order.status));
+  const activeOrders = orders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
+  const pastOrders = orders.filter((order) => ["delivered", "completed", "cancelled"].includes(order.status));
   const totalSpent = orders.filter(revenueCheck).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
   const [complaintTarget, setComplaintTarget] = useState(null);
@@ -366,7 +366,7 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
       phoneVerified: phoneChanged ? false : Boolean(profile?.phoneVerified),
       phoneVerifiedAt: phoneChanged ? null : profile?.phoneVerifiedAt || null,
       smsNotificationsRequested: Boolean(form.smsNotificationsRequested || form.smsNotifications),
-      smsNotifications: Boolean(!phoneChanged && profile?.phoneVerified && (form.smsNotificationsRequested || form.smsNotifications))
+      smsNotifications: Boolean(smsProviderEnabled && !phoneChanged && profile?.phoneVerified && (form.smsNotificationsRequested || form.smsNotifications))
     });
     notify("Personal information and saved address updated.");
   };
@@ -375,11 +375,11 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
       <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Personal info</h2></div><p>Keep your contact details and preferred delivery address ready for checkout.</p></div>
       <form className="dashboard-card profile-form" onSubmit={save}>
         <div className="row g-3">
-          <label className="form-label col-md-6">Full name<input className="form-control" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
+          <label className="form-label col-md-6">Full name<input className="form-control" autoComplete="name" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
           <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
-          <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for SMS updates." : "Phone OTP verification is prepared but not active yet."}</small></label>
+          <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for SMS updates." : "Phone OTP verification is prepared but not active yet."}</small></label>
           <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
-          <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
+          <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" autoComplete="street-address" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
           <label className="form-label col-12">Default landmark<input className="form-control" value={form.landmark || ""} onChange={(event) => setForm((current) => ({ ...current, landmark: event.target.value }))} placeholder="Example: near sari-sari store, blue gate" /></label>
         </div>
         <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS OTP can be connected to this phone readiness flow." : "SMS provider is not configured yet, so this saves the preference only."}</small></div>
@@ -429,7 +429,7 @@ export function ReceiptsView({ orders, printReceipt, notify }) {
 
 export function ReviewsView({ user, orders, reviews, notify }) {
   const reviewByOrder = new Map(reviews.map((review) => [review.orderId, review]));
-  const eligibleOrders = orders.filter((order) => order.status === "delivered" && !reviewByOrder.has(order.id));
+  const eligibleOrders = orders.filter((order) => ["delivered", "completed"].includes(order.status) && !reviewByOrder.has(order.id));
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");

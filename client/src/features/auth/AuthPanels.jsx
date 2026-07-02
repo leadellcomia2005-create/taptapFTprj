@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { demoAccounts } from "../../data/menu";
 import { api } from "../../services/api";
@@ -15,6 +16,13 @@ import {
 } from "../../services/firebase";
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "../../services/passkeys";
 
+const loginRoleOptions = [
+  { id: "customer", label: "Customer", detail: "Order meals" },
+  { id: "owner", label: "Owner", detail: "Run the store" },
+  { id: "staff", label: "Staff", detail: "Serve orders" },
+  { id: "rider", label: "Rider", detail: "Deliver food" }
+];
+
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
@@ -30,6 +38,7 @@ function LoginPanel({ onLoggedIn }) {
   const [password, setPassword] = useState(registrationRequested ? "" : demoAccounts.customer.password);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
   const [registrationResult, setRegistrationResult] = useState(null);
 
@@ -98,29 +107,48 @@ function LoginPanel({ onLoggedIn }) {
       <div className="login-visual">
         <div className="login-restaurant-top">
           <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
-          <span>Open daily</span>
+          <span>Fresh from the kitchen</span>
         </div>
         <div className="login-restaurant-copy">
           <p className="eyebrow">Pinoy tapsilog house</p>
-          <h1>Traditional taste.<br />Fast <em>foodtrip.</em></h1>
+          <h1>Traditional Pinoy comfort, served fast.</h1>
           <p>We sell traditional Pinoy Style Tapsilog at the lowest price with quality taste and service.</p>
-          <div className="login-special-card" aria-label="TapTap favorite plate">
-            <span>Best value</span>
-            <strong>Tapsilog meals from PHP 99</strong>
-            <small>Egg, soup, rice, and fresh kitchen service.</small>
+          <div className="login-plate-row" aria-label="TapTap favorite meals">
+            <article>
+              <img src="/assets/menu/tapa.png" alt="Tapa meal" />
+              <span>Tapa Meal</span>
+            </article>
+            <article>
+              <img src="/assets/menu/porkchop.png" alt="Porkchop meal" />
+              <span>Porkchop</span>
+            </article>
+            <article>
+              <img src="/assets/menu/sisig.png" alt="Sisig meal" />
+              <span>Sisig Meal</span>
+            </article>
           </div>
+        </div>
+        <div className="login-special-card" aria-label="TapTap service promise">
+          <span>TapTap promise</span>
+          <strong>Hot meals, clear orders, friendly service.</strong>
+          <small>For customers, staff, riders, and owners.</small>
         </div>
       </div>
       <div className="login-form-wrap">
         <form className="login-card" onSubmit={submit}>
+          <div className="login-card-header">
+            <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
+            <span>{registering ? "Customer signup" : loginRoleOptions.find((item) => item.id === role)?.label}</span>
+          </div>
           <p className="eyebrow text-danger">TapTap account</p>
           <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-          <p className="text-secondary small">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Preview sign-in is available."}</p>
+          <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Sample accounts are ready for this preview."}</p>
           {!registering && (
-            <div className="role-tabs">
-              {["customer", "owner", "staff", "rider"].map((item) => (
-                <button type="button" key={item} className={role === item ? "active" : ""} onClick={() => selectRole(item)}>
-                  {item}
+            <div className="role-tabs" aria-label="Choose account role">
+              {loginRoleOptions.map((item) => (
+                <button type="button" key={item.id} className={role === item.id ? "active" : ""} aria-pressed={role === item.id} onClick={() => selectRole(item.id)}>
+                  <strong>{item.label}</strong>
+                  <small>{item.detail}</small>
                 </button>
               ))}
             </div>
@@ -134,7 +162,12 @@ function LoginPanel({ onLoggedIn }) {
             <input className="form-control" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
           <label className="form-label">Password
-            <input className="form-control" type="password" minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
+            <span className="login-password-field">
+              <input className="form-control" type={showPassword ? "text" : "password"} minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
+              <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((current) => !current)}>
+                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+              </button>
+            </span>
           </label>
           {registering && (
             <div className="firebase-registration-flow" aria-live="polite">
@@ -158,11 +191,10 @@ function LoginPanel({ onLoggedIn }) {
             </div>
           )}
           {error && <div className="alert alert-danger py-2 small">{error}</div>}
-          <button className="btn btn-danger w-100" disabled={busy}>
+          <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
             {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
           </button>
-          {/* erick: dating plain links, ginawang outline buttons para clickable. */}
-          <div className="d-flex justify-content-between gap-2 mt-3">
+          <div className="login-secondary-actions">
             <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
               {registering ? "Back to sign in" : "Customer registration"}
             </button>

@@ -1298,6 +1298,7 @@ export async function getDeliveryProof(order = {}) {
   if (order.proofOfDeliveryUrl) {
     return {
       dataUrl: order.proofOfDeliveryUrl,
+      imageUrl: order.proofOfDeliveryUrl,
       handoff: fallbackMeta,
       createdAt: fallbackMeta.capturedAt || order.deliveredAt || order.updatedAt,
       riderId: order.riderId || "",
@@ -1308,16 +1309,20 @@ export async function getDeliveryProof(order = {}) {
   if (firebaseEnabled) {
     const snapshot = await get(ref(db, order.proofOfDeliveryRef));
     const proof = snapshot.val();
-    if (!proof?.dataUrl) throw new Error("The delivery proof photo could not be found.");
+    const imageUrl = proof?.downloadUrl || proof?.dataUrl;
+    if (!imageUrl) throw new Error("The delivery proof photo could not be found.");
     return {
       ...proof,
+      dataUrl: imageUrl,
+      imageUrl,
       handoff: proof.handoff || fallbackMeta,
       orderId: order.id
     };
   }
   const proof = readDemoData().deliveryProofs?.[order.id];
-  if (!proof?.dataUrl) throw new Error("The delivery proof photo could not be found.");
-  return { ...proof, handoff: proof.handoff || fallbackMeta, orderId: order.id };
+  const imageUrl = proof?.downloadUrl || proof?.dataUrl;
+  if (!imageUrl) throw new Error("The delivery proof photo could not be found.");
+  return { ...proof, dataUrl: imageUrl, imageUrl, handoff: proof.handoff || fallbackMeta, orderId: order.id };
 }
 
 export { auth, db, storage, ref, set, push, update };

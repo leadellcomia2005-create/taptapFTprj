@@ -7,7 +7,9 @@ import {
   validateLocation,
   validateOrderItems
 } from "./security.js";
+import { randomUUID } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
+import { getStorage } from "firebase-admin/storage";
 import { notificationUpdates, userIdsForRoles } from "./notifications.js";
 
 const deliveryFee = 49;
@@ -73,6 +75,32 @@ function parseProofHandoff(input = {}, order = {}) {
     throw new HttpError(400, "Add the receiver name or typed signature before delivery proof.");
   }
   return proof;
+}
+
+async function persistProofImage(orderId, dataUrl) {
+  const encoded = dataUrl.slice("data:image/jpeg;base64,".length);
+  const imageBuffer = Buffer.from(encoded, "base64");
+  const configuredBucket = String(process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, "");
+  if (!configuredBucket) {
+    return { dataUrl, sizeBytes: imageBuffer.length, storageMode: "database" };
+  }
+  try {
+    const bucket = getStorage().bucket(configuredBucket);
+    const storagePath = `proof-of-delivery/${orderId}/${Date.now()}.jpg`;
+    const token = randomUUID();
+    await bucket.file(storagePath).save(imageBuffer, {
+      resumable: false,
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: token }
+      }
+    });
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    return { downloadUrl, storagePath, storageBucket: bucket.name, sizeBytes: imageBuffer.length, storageMode: "storage" };
+  } catch (error) {
+    console.warn("Delivery proof storage fallback:", error.message);
+    return { dataUrl, sizeBytes: imageBuffer.length, storageMode: "database" };
+  }
 }
 
 function slugifyId(value) {
@@ -822,9 +850,10 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
   if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
   if (order.status !== "arrived") throw new HttpError(409, "Proof can be captured only after arrival.");
   const handoff = parseProofHandoff(input.handoff, order);
+  const image = await persistProofImage(orderId, validateDeliveryProof(input.dataUrl));
   const proofOfDeliveryRef = `deliveryProofs/${orderId}`;
   await db.ref(proofOfDeliveryRef).set({
-    dataUrl: validateDeliveryProof(input.dataUrl),
+    ...image,
     handoff,
     riderId: user.uid,
     riderName: user.name || user.email || "Rider",
@@ -1126,6 +1155,7 @@ export async function archiveCompletedOrdersRecord(db, user, input = {}) {
   const orders = (await db.ref("orders").once("value")).val() || {};
   const updates = {};
   let archived = 0;
+  let proofsPreserved = 0;
   for (const [orderId, order] of Object.entries(orders)) {
     if (order.archivedAt) continue;
     if (!["delivered", "cancelled"].includes(order.status)) continue;
@@ -1134,6 +1164,10 @@ export async function archiveCompletedOrdersRecord(db, user, input = {}) {
     archived += 1;
     updates[`orders/${orderId}/archivedAt`] = Date.now();
     updates[`orderArchive/${orderId}`] = { ...order, archivedAt: Date.now(), archivedBy: user.uid };
+    if (order.proofOfDeliveryRef) {
+      proofsPreserved += 1;
+      updates[`deliveryProofs/${orderId}/archivedWithOrderAt`] = Date.now();
+    }
   }
   const createdAt = Date.now();
   updates[`auditLogs/AUD-${createdAt}-archive-orders`] = {
@@ -1141,11 +1175,11 @@ export async function archiveCompletedOrdersRecord(db, user, input = {}) {
     actorId: user.uid,
     actorName: user.name || user.email,
     actorRole: user.role,
-    details: { after: { archived, olderThanDays } },
+    details: { after: { archived, proofsPreserved, olderThanDays } },
     createdAt
   };
   await db.ref().update(updates);
-  return { archived };
+  return { archived, proofsPreserved };
 }
 
 export async function listOrdersForUser(db, user) {

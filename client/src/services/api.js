@@ -2,19 +2,35 @@ import { getAuthToken } from "./authSession";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
+function requestErrorForStatus(status, payload = {}) {
+  if (payload.error) return payload.error;
+  if (status === 404) return "This app server is missing the latest update. Restart the backend server, then try again.";
+  if (status === 401) return "Please sign in again before continuing.";
+  if (status === 403) return "Your account is not allowed to do that yet.";
+  if (status === 413) return "That upload is too large. Try again with a smaller photo.";
+  if (status === 429) return "Too many attempts. Please wait a minute, then try again.";
+  if (status >= 500) return "The app server could not finish that request. Please try again.";
+  return `Request failed (${status})`;
+}
+
 async function request(path, options = {}) {
   const token = await getAuthToken();
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+  } catch {
+    throw new Error("The app server is unreachable. Restart the backend server or check your connection, then try again.");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    throw new Error(requestErrorForStatus(response.status, payload));
   return payload;
 }
 

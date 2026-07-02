@@ -710,7 +710,7 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [serviceStatus, setServiceStatus] = useState({ firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
+  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
   const activeUser = user?.mfaVerified ? user : null;
 
@@ -826,7 +826,9 @@ export default function App() {
   }, [activeUser]);
   useEffect(() => {
     if (!activeUser) return undefined;
-    api.status().then((result) => setServiceStatus((current) => ({ ...current, ...result.services }))).catch(() => {});
+    api.status()
+      .then((result) => setServiceStatus((current) => ({ ...current, api: true, ...result.services })))
+      .catch(() => setServiceStatus((current) => ({ ...current, api: false })));
     return undefined;
   }, [activeUser]);
   useEffect(() => {
@@ -918,6 +920,7 @@ export default function App() {
     <div className="app-shell">
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
+      {serviceStatus.api === false && <div className="offline-banner" role="status">App server is unreachable. Restart the backend server, then refresh this page.</div>}
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>

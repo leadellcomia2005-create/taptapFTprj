@@ -80,6 +80,8 @@ dotenv.config({ override: true });
 
 const app = express();
 const server = createServer(app);
+const serverStartedAt = Date.now();
+const apiVersion = process.env.APP_VERSION || process.env.npm_package_version || "local";
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173").split(",").map((value) => value.trim());
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -95,10 +97,13 @@ if (process.env.FIREBASE_DATABASE_URL) {
       ? cert(JSON.parse(readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf8")))
       : applicationDefault();
     await credential.getAccessToken();
-    initializeApp({
+    const firebaseOptions = {
       credential,
       databaseURL: process.env.FIREBASE_DATABASE_URL
-    });
+    };
+    const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET;
+    if (storageBucket) firebaseOptions.storageBucket = storageBucket.replace(/^gs:\/\//, "");
+    initializeApp(firebaseOptions);
     firebaseAdminEnabled = true;
     firebaseAdminError = "";
   } catch (error) {
@@ -161,6 +166,9 @@ function asyncRoute(handler) {
 }
 
 app.get("/api/status", (_req, res) => res.json({
+  apiVersion,
+  serverStartedAt,
+  uptimeSeconds: Math.round((Date.now() - serverStartedAt) / 1000),
   services: { ...serviceStatus(), firebase: firebaseAdminEnabled, socket: firebaseAdminEnabled },
   firebaseAdminError: firebaseAdminEnabled ? null : firebaseAdminError
 }));

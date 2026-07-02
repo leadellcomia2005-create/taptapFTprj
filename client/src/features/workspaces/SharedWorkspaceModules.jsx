@@ -342,6 +342,8 @@ export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false, 
   const [expenses, setExpenses] = useState(0);
   const [actualCash, setActualCash] = useState(0);
   const [shiftNotes, setShiftNotes] = useState("");
+  const [visibleLogCount, setVisibleLogCount] = useState(20);
+  const visibleLogs = logs.slice(0, visibleLogCount);
   const shiftStartedAt = Number(activeShift?.startedAt || 0);
   const shiftOrders = orders.filter((order) => Number(order.createdAt || 0) >= shiftStartedAt && Number(order.createdAt || 0) <= Date.now());
   const cashSales = shiftOrders
@@ -406,8 +408,9 @@ export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false, 
           <h3>{readOnly ? "Staff shift reconciliation history" : "Shift history"}</h3>
           <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Staff</th><th>Closed</th><th>Orders</th><th>Movements</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Notes</th></tr></thead><tbody>
             {logs.length === 0 && <tr><td colSpan="8" className="text-center text-secondary py-4">No closed shifts yet.</td></tr>}
-            {logs.map((log) => <tr key={log.id}><td>{log.staffName}</td><td>{new Date(log.endedAt || log.createdAt).toLocaleString("en-PH")}</td><td>{log.orderCount}</td><td>{currency(Number(log.cashIn || 0) - Number(log.cashOut || 0) - Number(log.expenses || 0))}</td><td>{currency(log.expectedCash)}</td><td>{currency(log.actualCash)}</td><td>{currency(log.variance)}</td><td>{log.notes || "-"}</td></tr>)}
+            {visibleLogs.map((log) => <tr key={log.id}><td>{log.staffName}</td><td>{new Date(log.endedAt || log.createdAt).toLocaleString("en-PH")}</td><td>{log.orderCount}</td><td>{currency(Number(log.cashIn || 0) - Number(log.cashOut || 0) - Number(log.expenses || 0))}</td><td>{currency(log.expectedCash)}</td><td>{currency(log.actualCash)}</td><td>{currency(log.variance)}</td><td>{log.notes || "-"}</td></tr>)}
           </tbody></table></div>
+          {logs.length > visibleLogCount && <button className="btn btn-outline-dark mt-3" type="button" onClick={() => setVisibleLogCount((count) => count + 20)}>Load more shift logs</button>}
         </div>
       </div>
     </div>
@@ -535,13 +538,13 @@ export function AdminCleanupModule({ user, orders, notify }) {
   };
   const archive = async () => {
     const result = await archiveCompletedOrders(olderThanDays, user);
-    notify(`${result.archived || 0} old completed/cancelled order(s) archived.`);
+    notify(`${result.archived || 0} old completed/cancelled order(s) archived. ${result.proofsPreserved || 0} proof record(s) preserved.`);
   };
   return (
     <div className="dashboard-card">
       <div className="module-heading">
         <div><p className="eyebrow text-danger">Data cleanup</p><h3>Export and archive tools</h3></div>
-        <span className="module-note">Archived orders stay in the archive record and leave the active queues.</span>
+        <span className="module-note">Archived orders leave active queues; delivery proof records are preserved for evidence.</span>
       </div>
       <div className="row g-2 align-items-end">
         <label className="form-label col-md-4">Archive completed/cancelled older than<input className="form-control" type="number" min="1" max="365" value={olderThanDays} onChange={(event) => setOlderThanDays(event.target.value)} /></label>
@@ -634,17 +637,19 @@ export function DeliveryProofModal({ order, onClose }) {
   }, [onClose]);
 
   const handoff = proof?.handoff || order.proofOfDeliveryMeta || {};
+  const proofImage = proof?.imageUrl || proof?.downloadUrl || proof?.dataUrl || "";
+  const proofStorageLabel = proof?.storageMode === "storage" ? "Optimized storage" : proof?.downloadUrl || order.proofOfDeliveryUrl ? "Photo link" : "Database fallback";
   const capturedAt = handoff.capturedAt || proof?.createdAt || order.deliveredAt || order.updatedAt;
   const riderLabel = order.riderName || proof?.riderName || "Assigned rider";
   const escapeText = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
   const printProof = () => {
-    if (!proof?.dataUrl) return;
+    if (!proofImage) return;
     const printWindow = window.open("", "_blank", "noopener,noreferrer,width=920,height=720");
     if (!printWindow) {
       setError("Allow popups so the proof can open for printing.");
       return;
     }
-    printWindow.document.write(`<!doctype html><html><head><title>Proof ${escapeText(order.id)}</title><style>body{font-family:Arial,sans-serif;margin:28px;color:#211d19}h1{margin:0 0 4px;font-size:28px}.meta{display:grid;grid-template-columns:140px 1fr;gap:8px;margin:22px 0}.meta strong{color:#6d6258}.photo{max-width:100%;max-height:680px;border:1px solid #ddd;border-radius:10px}</style></head><body><h1>Proof of Delivery</h1><p>Order ${escapeText(order.id)}</p><img class="photo" src="${proof.dataUrl}" alt="Delivery proof" /><div class="meta"><strong>Customer</strong><span>${escapeText(order.customerName || "Customer")}</span><strong>Receiver</strong><span>${escapeText(handoff.customerName || "Not recorded")}</span><strong>Signature</strong><span>${escapeText(handoff.signature || "Not recorded")}</span><strong>OTP</strong><span>${handoff.otpVerified ? "Verified" : "Not required / not used"}</span><strong>Captured</strong><span>${capturedAt ? escapeText(new Date(capturedAt).toLocaleString("en-PH")) : "No timestamp"}</span><strong>Rider</strong><span>${escapeText(riderLabel)}</span></div><script>window.onload=()=>{window.print();}</script></body></html>`);
+    printWindow.document.write(`<!doctype html><html><head><title>Proof ${escapeText(order.id)}</title><style>body{font-family:Arial,sans-serif;margin:28px;color:#211d19}h1{margin:0 0 4px;font-size:28px}.meta{display:grid;grid-template-columns:140px 1fr;gap:8px;margin:22px 0}.meta strong{color:#6d6258}.photo{max-width:100%;max-height:680px;border:1px solid #ddd;border-radius:10px}</style></head><body><h1>Proof of Delivery</h1><p>Order ${escapeText(order.id)}</p><img class="photo" src="${proofImage}" alt="Delivery proof" /><div class="meta"><strong>Customer</strong><span>${escapeText(order.customerName || "Customer")}</span><strong>Receiver</strong><span>${escapeText(handoff.customerName || "Not recorded")}</span><strong>Signature</strong><span>${escapeText(handoff.signature || "Not recorded")}</span><strong>OTP</strong><span>${handoff.otpVerified ? "Verified" : "Not required / not used"}</span><strong>Captured</strong><span>${capturedAt ? escapeText(new Date(capturedAt).toLocaleString("en-PH")) : "No timestamp"}</span><strong>Rider</strong><span>${escapeText(riderLabel)}</span></div><script>window.onload=()=>{window.print();}</script></body></html>`);
     printWindow.document.close();
   };
 
@@ -666,7 +671,7 @@ export function DeliveryProofModal({ order, onClose }) {
             {!loading && !error && (
               <div className="proof-viewer-layout">
                 <figure className="proof-photo-frame">
-                  <img src={proof.dataUrl} alt={`Delivery proof for ${order.id}`} />
+                  <img src={proofImage} alt={`Delivery proof for ${order.id}`} loading="lazy" />
                 </figure>
                 <dl className="proof-detail-grid">
                   <div><dt>Order ID</dt><dd>{order.id}</dd></div>
@@ -676,13 +681,14 @@ export function DeliveryProofModal({ order, onClose }) {
                   <div><dt>OTP check</dt><dd>{handoff.otpVerified ? "Verified" : "Not required / not used"}</dd></div>
                   <div><dt>Captured</dt><dd>{capturedAt ? new Date(capturedAt).toLocaleString("en-PH") : "No timestamp"}</dd></div>
                   <div><dt>Rider</dt><dd>{riderLabel}</dd></div>
+                  <div><dt>Photo storage</dt><dd>{proofStorageLabel}</dd></div>
                 </dl>
               </div>
             )}
           </div>
           <div className="modal-footer">
-            {proof?.dataUrl && <a className="btn btn-outline-dark" href={proof.dataUrl} download={`${order.id}-delivery-proof.jpg`}>Download photo</a>}
-            <button className="btn btn-dark" type="button" disabled={!proof?.dataUrl} onClick={printProof}>Print proof</button>
+            {proofImage && <a className="btn btn-outline-dark" href={proofImage} download={`${order.id}-delivery-proof.jpg`}>Download photo</a>}
+            <button className="btn btn-dark" type="button" disabled={!proofImage} onClick={printProof}>Print proof</button>
             <button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -694,8 +700,21 @@ export function DeliveryProofModal({ order, onClose }) {
 export function OrderManagement({ orders, canAdvance, notify, user = null }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [proofTarget, setProofTarget] = useState(null);
+  const [visibleOrderCount, setVisibleOrderCount] = useState(30);
+  const [orderDateFilter, setOrderDateFilter] = useState("");
   const flow = ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"];
   const cancellableStatuses = ["pending-payment", "received", "preparing"];
+  const localDateKey = (timestamp) => {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "";
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${date.getFullYear()}-${month}-${day}`;
+  };
+  const filteredOrders = orderDateFilter
+    ? orders.filter((order) => order.createdAt && localDateKey(order.createdAt) === orderDateFilter)
+    : orders;
+  const visibleOrders = filteredOrders.slice(0, visibleOrderCount);
   const advance = async (order) => {
     if (!flow.includes(order.status)) {
       notify("This order is waiting for payment confirmation.");
@@ -726,13 +745,17 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
 
   return (
     <div className="dashboard-card">
-      <h3>Live order ledger</h3>
+      <div className="module-heading">
+        <div><h3>Live order ledger</h3><span className="module-note">{filteredOrders.length} order(s) shown</span></div>
+        <label className="form-label compact-date-filter">Order date<input className="form-control" type="date" value={orderDateFilter} onChange={(event) => { setOrderDateFilter(event.target.value); setVisibleOrderCount(30); }} /></label>
+      </div>
+      {orderDateFilter && <button className="btn btn-sm btn-outline-dark mb-3" type="button" onClick={() => setOrderDateFilter("")}>Clear date filter</button>}
       <div className="table-responsive">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {orders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}
-            {orders.map((order) => (
+            {filteredOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}
+            {visibleOrders.map((order) => (
               <tr key={order.id}>
                 <td>{order.id}</td>
                 <td>
@@ -766,6 +789,7 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
           </tbody>
         </table>
       </div>
+      {filteredOrders.length > visibleOrderCount && <button className="btn btn-outline-dark mt-3" type="button" onClick={() => setVisibleOrderCount((count) => count + 30)}>Load more orders</button>}
       {cancelTarget && <ReasonModal title={`Cancel ${cancelTarget.id}`} label="Cancellation reason" placeholder="Example: Customer changed order, unavailable item, duplicate order..." confirmText="Cancel order" onClose={() => setCancelTarget(null)} onSubmit={async (reason) => { await cancelOrder(cancelTarget, reason); setCancelTarget(null); }} />}
       {proofTarget && <DeliveryProofModal order={proofTarget} onClose={() => setProofTarget(null)} />}
     </div>

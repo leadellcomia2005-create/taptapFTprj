@@ -34,35 +34,28 @@ const popularMeals = [
 ];
 
 const tapTapStrengths = [
-  { title: "Affordable Pinoy meals", detail: "Budget-friendly rice meals, solo servings, drinks, and add-ons for everyday foodtrips." },
-  { title: "Freshly prepared favorites", detail: "Meals are prepared for fast service while keeping the familiar TapTap taste." },
-  { title: "Pickup and delivery ready", detail: "Customers can choose pickup or delivery, while staff and riders keep orders moving." },
-  { title: "Friendly local service", detail: "Built for students, workers, families, and nearby customers who want sulit meals." }
+  { tag: "Sulit meals", title: "Affordable Pinoy meals", detail: "Budget-friendly rice meals, solo servings, drinks, and add-ons for everyday foodtrips." },
+  { tag: "Kitchen fresh", title: "Freshly prepared favorites", detail: "Meals are prepared for fast service while keeping the familiar TapTap taste." },
+  { tag: "Flexible handoff", title: "Pickup and delivery ready", detail: "Choose pickup or delivery and get clear updates while your order moves." },
+  { tag: "Local care", title: "Friendly local service", detail: "Built for students, workers, families, and nearby customers who want sulit meals." }
 ];
 
 const orderSteps = [
-  { title: "Choose your meal", detail: "Browse tapsilog, rice meals, alacarte, solo, drinks, and specials." },
-  { title: "Confirm pickup or delivery", detail: "Add your phone, address, landmark, and delivery pin when needed." },
-  { title: "Receive your order", detail: "Track updates from kitchen preparation to pickup, delivery, or counter handoff." }
+  { tag: "Browse", title: "Choose your meal", detail: "Browse tapsilog, rice meals, alacarte, solo, drinks, and specials." },
+  { tag: "Confirm", title: "Confirm pickup or delivery", detail: "Add your phone, address, landmark, and delivery pin when needed." },
+  { tag: "Enjoy", title: "Receive your order", detail: "Track updates from kitchen preparation to pickup, delivery, or dine-in service." }
 ];
 
 const serviceOptions = [
-  { title: "Delivery", detail: "Customers can save their address, landmark, phone number, and delivery pin for rider handoff." },
-  { title: "Pickup", detail: "Order ahead and collect meals without waiting through the full counter line." },
-  { title: "Walk-in", detail: "Staff can serve dine-in and takeout customers using the same TapTap menu and receipt flow." }
+  { tag: "Delivery pin", title: "Delivery", detail: "Save your address, landmark, phone number, and exact drop-off pin for smoother delivery." },
+  { tag: "Order ahead", title: "Pickup", detail: "Collect meals without waiting through the full counter line." },
+  { tag: "Counter ready", title: "Walk-in", detail: "Drop by for dine-in or takeout when you want your meal served straight from the counter." }
 ];
 
 const homepageHighlights = [
   { value: "P69+", label: "Budget-friendly meals" },
   { value: "3 ways", label: "Delivery, pickup, walk-in" },
-  { value: "4 roles", label: "Customer, staff, rider, owner" }
-];
-
-const roleAccess = [
-  { role: "Customer", detail: "Order food, save delivery details, track purchases, view receipts, and leave reviews." },
-  { role: "Staff", detail: "Handle walk-in POS, kitchen queue, order queue, stock movement, and support messages." },
-  { role: "Rider", detail: "Manage assigned deliveries, open navigation, collect COD, and submit proof of delivery." },
-  { role: "Owner", detail: "Monitor sales, reports, inventory, user access, reviews, audit logs, and operations." }
+  { value: "1 account", label: "Orders, receipts, reviews" }
 ];
 
 function LoginPanel({ onLoggedIn }) {
@@ -84,12 +77,14 @@ function LoginPanel({ onLoggedIn }) {
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
   const [registrationResult, setRegistrationResult] = useState(null);
   const [loginModalOpen, setLoginModalOpen] = useState(registrationRequested);
+  const [teamAccessOpen, setTeamAccessOpen] = useState(false);
   const loginHomeRef = useRef(null);
   const loginModalRef = useRef(null);
   const lastFocusedElementRef = useRef(null);
 
   useGSAP(() => {
     if (prefersReducedMotion()) return;
+    const isSmallScreen = window.matchMedia?.("(max-width: 620px)")?.matches;
 
     gsap.from("[data-login-nav], [data-login-hero]", {
       y: 24,
@@ -99,15 +94,17 @@ function LoginPanel({ onLoggedIn }) {
       ease: "power3.out"
     });
 
-    gsap.to("[data-login-float]", {
-      y: -10,
-      rotate: 1.5,
-      duration: 2.2,
-      stagger: 0.18,
-      repeat: -1,
-      yoyo: true,
-      ease: "sine.inOut"
-    });
+    if (!isSmallScreen) {
+      gsap.to("[data-login-float]", {
+        y: -10,
+        rotate: 1.5,
+        duration: 2.2,
+        stagger: 0.18,
+        repeat: -1,
+        yoyo: true,
+        ease: "sine.inOut"
+      });
+    }
 
     gsap.utils.toArray("[data-login-section]").forEach((section) => {
       const revealItems = section.querySelectorAll("[data-login-reveal]");
@@ -116,8 +113,8 @@ function LoginPanel({ onLoggedIn }) {
         y: 34,
         scale: 0.985,
         autoAlpha: 0,
-        duration: 0.58,
-        stagger: 0.07,
+        duration: isSmallScreen ? 0.42 : 0.58,
+        stagger: isSmallScreen ? 0.035 : 0.07,
         ease: "power2.out",
         scrollTrigger: {
           trigger: section,
@@ -157,7 +154,25 @@ function LoginPanel({ onLoggedIn }) {
     }, 80);
 
     const onKeyDown = (event) => {
-      if (event.key === "Escape") setLoginModalOpen(false);
+      if (event.key === "Escape") {
+        setLoginModalOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(loginModalRef.current?.querySelectorAll(focusableSelector) || [])
+        .filter((element) => !element.disabled && element.offsetParent !== null);
+      if (!focusable.length) return;
+
+      const firstFocusable = focusable[0];
+      const lastFocusable = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -187,6 +202,7 @@ function LoginPanel({ onLoggedIn }) {
       return next;
     });
     setRole("customer");
+    setTeamAccessOpen(false);
     setName("");
     setEmail("");
     setPassword("");
@@ -203,6 +219,7 @@ function LoginPanel({ onLoggedIn }) {
     setEmail(demoAccounts[nextRole].email);
     setPassword(demoAccounts[nextRole].password);
     setRegistering(false);
+    setTeamAccessOpen(nextRole !== "customer");
     setRegistrationResult(null);
     setRegistrationSteps(registrationStepDefaults);
   };
@@ -210,6 +227,7 @@ function LoginPanel({ onLoggedIn }) {
   const openLoginModal = (preferredRole) => {
     lastFocusedElementRef.current = document.activeElement;
     if (preferredRole && !registering) selectRole(preferredRole);
+    if (!preferredRole && role === "customer") setTeamAccessOpen(false);
     setLoginModalOpen(true);
   };
 
@@ -241,6 +259,10 @@ function LoginPanel({ onLoggedIn }) {
     }
   };
 
+  const submitLabel = busy
+    ? registering ? "Creating your account..." : "Signing in..."
+    : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
+
   const loginCard = (
     <form className="login-card" onSubmit={submit} data-login-modal-panel>
       <div className="login-card-header">
@@ -251,8 +273,24 @@ function LoginPanel({ onLoggedIn }) {
       <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
       <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Sample accounts are ready for this preview."}</p>
       {!registering && (
-        <div className="role-tabs" aria-label="Choose account role">
-          {loginRoleOptions.map((item) => (
+        <div className="login-access-choice">
+          <button type="button" className={`login-customer-choice ${role === "customer" ? "active" : ""}`} aria-pressed={role === "customer"} onClick={() => selectRole("customer")}>
+            <span>
+              <strong>Customer ordering</strong>
+              <small>Browse meals, checkout, and track orders.</small>
+            </span>
+          </button>
+          <button type="button" className={`login-team-toggle ${teamAccessOpen ? "active" : ""}`} aria-expanded={teamAccessOpen} aria-controls="team-role-options" onClick={() => setTeamAccessOpen((current) => !current)}>
+            <span>
+              <strong>Team access</strong>
+              <small>Owner, staff, and rider sign-in.</small>
+            </span>
+          </button>
+        </div>
+      )}
+      {!registering && (teamAccessOpen || role !== "customer") && (
+        <div className="role-tabs team-role-tabs" id="team-role-options" aria-label="Choose team account role">
+          {loginRoleOptions.filter((item) => item.id !== "customer").map((item) => (
             <button type="button" key={item.id} className={role === item.id ? "active" : ""} aria-pressed={role === item.id} onClick={() => selectRole(item.id)}>
               <strong>{item.label}</strong>
               <small>{item.detail}</small>
@@ -299,7 +337,7 @@ function LoginPanel({ onLoggedIn }) {
       )}
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
       <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
-        {busy ? "Creating your account..." : registering ? "Create account" : `Sign in as ${role}`}
+        {submitLabel}
       </button>
       <div className="login-secondary-actions">
         <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
@@ -321,27 +359,36 @@ function LoginPanel({ onLoggedIn }) {
           <a href="#about-taptap">About</a>
           <a href="#popular-meals">Meals</a>
           <a href="#service-options">Services</a>
-          <a href="#role-access">Roles</a>
+          <a href="#how-ordering-works">How it works</a>
         </nav>
         <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal()}>
-          Sign in
+          Order now
         </button>
       </header>
 
       <section className="login-screen" id="home" aria-label="TapTap Foodtrip homepage">
       <div className="login-visual">
         <div className="login-restaurant-top" data-login-hero>
-          <div className="brand-lockup"><BrandMark /><div><strong>Taptap</strong><small>FOODTRIP</small></div></div>
+          <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
           <span>Fresh from the kitchen</span>
         </div>
         <div className="login-restaurant-copy">
           <p className="eyebrow" data-login-hero>Pinoy tapsilog house</p>
           <h1 data-login-hero>Traditional Pinoy comfort, served fast.</h1>
-          <p data-login-hero>We sell traditional Pinoy Style Tapsilog at the lowest price with quality taste and service.</p>
+          <div className="login-hero-message" data-login-hero>
+            <span>We sell</span>
+            <strong>traditional Pinoy Style Tapsilog</strong>
+            <span>at the lowest price with quality taste and service.</span>
+          </div>
+          <div className="login-hero-badges" aria-label="TapTap food promise" data-login-hero>
+            <span>Hot rice meals</span>
+            <span>Friendly local service</span>
+            <span>Pickup or delivery</span>
+          </div>
           <div className="login-hero-actions" data-login-hero>
-            <button type="button" className="btn btn-danger" onClick={() => openLoginModal()}>Sign in</button>
             <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>Order now</button>
             <a className="btn btn-outline-light" href="#popular-meals">View meals</a>
+            <button type="button" className="btn btn-danger" onClick={() => openLoginModal()}>Customer sign in</button>
           </div>
           <div className="login-plate-row" aria-label="TapTap favorite meals">
             <article data-login-hero data-login-float>
@@ -361,13 +408,17 @@ function LoginPanel({ onLoggedIn }) {
         <div className="login-special-card" aria-label="TapTap service promise" data-login-hero data-login-float>
           <span>TapTap promise</span>
           <strong>Hot meals, clear orders, friendly service.</strong>
-          <small>For customers, staff, riders, and owners.</small>
+          <small>Made for nearby customers who want a fast, sulit foodtrip.</small>
         </div>
       </div>
       <div className="login-home-panel" data-login-hero>
         <p className="eyebrow text-danger">Ready for orders</p>
-        <h2>Order your TapTap favorites without leaving the homepage.</h2>
-        <p>Browse the story, check the service options, then sign in only when you are ready to order, manage the store, serve customers, or deliver meals.</p>
+        <h2>Browse meals first. Sign in when you are ready.</h2>
+        <div className="login-panel-message">
+          <span>Customer-first ordering</span>
+          <strong>Your TapTap foodtrip starts with the meal.</strong>
+          <small>Check favorites, pick delivery or pickup, then sign in only when it is time to confirm.</small>
+        </div>
         <div className="login-highlight-list">
           {homepageHighlights.map((item) => (
             <article key={item.label} data-login-float>
@@ -386,18 +437,22 @@ function LoginPanel({ onLoggedIn }) {
         <div className="login-section-heading" data-login-reveal>
           <p className="eyebrow text-danger">Local Filipino food business</p>
           <h2>Affordable TapTap meals for everyday cravings.</h2>
-          <p>TapTap Foodtrip serves classic Filipino rice meals, alacarte servings, solo meals, drinks, and specials for customers who want fast, sulit, and familiar comfort food.</p>
+          <p><span className="login-inline-pill">Rice meals</span> <span className="login-inline-pill">Solo servings</span> <span className="login-inline-pill">Drinks</span> <span className="login-inline-pill">Specials</span></p>
+          <p>Classic Filipino comfort food presented in a simple ordering flow for customers who want fast, sulit, and familiar meals.</p>
         </div>
         <div className="login-business-grid">
           <article data-login-reveal>
+            <small className="login-card-kicker">Meal line</small>
             <strong>Rice meals</strong>
             <span>Tapsilog-style favorites with egg, rice, soup, and hearty ulam choices.</span>
           </article>
           <article data-login-reveal>
+            <small className="login-card-kicker">Flexible portions</small>
             <strong>Ala carte and solo</strong>
             <span>Flexible servings for dine-in, takeout, delivery, or lighter meals.</span>
           </article>
           <article data-login-reveal>
+            <small className="login-card-kicker">Quick pairings</small>
             <strong>Drinks and add-ons</strong>
             <span>Simple add-ons for walk-in customers and quick meal pairings.</span>
           </article>
@@ -414,9 +469,10 @@ function LoginPanel({ onLoggedIn }) {
             <article className="login-meal-card" key={meal.name} data-login-reveal>
               <img src={meal.image} alt={meal.name} loading="lazy" />
               <div>
+                <span className="login-meal-tag">TapTap pick</span>
                 <strong>{meal.name}</strong>
                 <p>{meal.detail}</p>
-                <span>{meal.price}</span>
+                <span className="login-price-pill">{meal.price}</span>
               </div>
             </article>
           ))}
@@ -431,6 +487,7 @@ function LoginPanel({ onLoggedIn }) {
         <div className="login-strength-grid">
           {tapTapStrengths.map((item) => (
             <article key={item.title} data-login-reveal>
+              <small className="login-card-kicker">{item.tag}</small>
               <strong>{item.title}</strong>
               <p>{item.detail}</p>
             </article>
@@ -441,12 +498,13 @@ function LoginPanel({ onLoggedIn }) {
       <section className="login-business-section login-service-section" id="service-options" data-login-section>
         <div className="login-section-heading" data-login-reveal>
           <p className="eyebrow text-danger">Service options</p>
-          <h2>Built for nearby cravings, counter sales, and rider handoff.</h2>
-          <p>TapTap keeps the food journey simple: customers choose how they want to receive the order, staff prepares it, and riders get the right delivery details when needed.</p>
+          <h2>Built for nearby cravings, pickup plans, and exact drop-off pins.</h2>
+          <p>Choose how you want your meal: delivered to your pin, prepared for pickup, or ordered for dine-in and takeout.</p>
         </div>
         <div className="login-service-grid">
           {serviceOptions.map((item) => (
             <article key={item.title} data-login-reveal>
+              <small className="login-card-kicker">{item.tag}</small>
               <strong>{item.title}</strong>
               <p>{item.detail}</p>
             </article>
@@ -457,12 +515,13 @@ function LoginPanel({ onLoggedIn }) {
       <section className="login-business-section login-order-flow-section" id="how-ordering-works" data-login-section>
         <div className="login-section-heading compact" data-login-reveal>
           <p className="eyebrow text-danger">How ordering works</p>
-          <h2>Three easy steps from craving to handoff.</h2>
+          <h2>Three easy steps from craving to serving.</h2>
         </div>
         <div className="login-step-grid">
           {orderSteps.map((step, index) => (
             <article key={step.title} data-login-reveal>
               <span>{String(index + 1).padStart(2, "0")}</span>
+              <small className="login-card-kicker">{step.tag}</small>
               <strong>{step.title}</strong>
               <p>{step.detail}</p>
             </article>
@@ -470,20 +529,13 @@ function LoginPanel({ onLoggedIn }) {
         </div>
       </section>
 
-      <section className="login-business-section login-role-section" id="role-access" data-login-section>
+      <section className="login-business-section login-role-section" data-login-section>
         <div className="login-section-heading" data-login-reveal>
-          <p className="eyebrow text-danger">One system for the whole foodtrip</p>
-          <h2>Customers, staff, riders, and owners each get the right access.</h2>
+          <p className="eyebrow text-danger">Ready for your next meal?</p>
+          <h2>Start with your favorites, then confirm your foodtrip when you are ready.</h2>
+          <p><span className="login-inline-pill">Browse meals</span> <span className="login-inline-pill">Choose delivery</span> <span className="login-inline-pill">Track orders</span></p>
         </div>
-        <div className="login-role-grid">
-          {roleAccess.map((item) => (
-            <article key={item.role} data-login-reveal>
-              <strong>{item.role}</strong>
-              <p>{item.detail}</p>
-            </article>
-          ))}
-        </div>
-        <button type="button" className="btn btn-danger login-bottom-cta" onClick={() => openLoginModal()} data-login-reveal>Sign in to continue</button>
+        <button type="button" className="btn btn-danger login-bottom-cta" onClick={() => openLoginModal("customer")} data-login-reveal>Order as customer</button>
       </section>
 
       {loginModalOpen && (
@@ -500,8 +552,8 @@ function LoginPanel({ onLoggedIn }) {
           <div className="login-modal-scrim" data-login-modal-scrim onMouseDown={closeLoginModal} />
           <div className="login-modal-panel">
             <button type="button" className="login-modal-close" aria-label="Close sign in" onClick={closeLoginModal}>x</button>
-            <span className="login-modal-kicker">Secure role access</span>
-            <h2 id="login-modal-title">Sign in to TapTap Foodtrip</h2>
+            <span className="login-modal-kicker">{role === "customer" ? "Customer order access" : "Team access"}</span>
+            <h2 id="login-modal-title">{registering ? "Create your TapTap account" : role === "customer" ? "Sign in to order" : "Team sign in"}</h2>
             {loginCard}
           </div>
         </div>

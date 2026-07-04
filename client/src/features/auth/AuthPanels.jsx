@@ -16,6 +16,7 @@ import {
   resetPassword
 } from "../../services/firebase";
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "../../services/passkeys";
+import { normalizeFullName, passwordChecklist, validateCustomerRegistrationForm } from "../../utils/registrationValidation";
 
 const loginRoleOptions = [
   { id: "customer", label: "Customer", detail: "Order meals" },
@@ -71,6 +72,11 @@ function LoginPanel({ onLoggedIn }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState(registrationRequested ? "" : demoAccounts.customer.email);
   const [password, setPassword] = useState(registrationRequested ? "" : demoAccounts.customer.password);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [botField, setBotField] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -206,6 +212,11 @@ function LoginPanel({ onLoggedIn }) {
     setName("");
     setEmail("");
     setPassword("");
+    setConfirmPassword("");
+    setTermsAccepted(false);
+    setPrivacyAccepted(false);
+    setBotField("");
+    setFieldErrors({});
     setError("");
     setRegistrationResult(null);
     setRegistrationSteps(registrationStepDefaults);
@@ -218,6 +229,11 @@ function LoginPanel({ onLoggedIn }) {
     setRole(nextRole);
     setEmail(demoAccounts[nextRole].email);
     setPassword(demoAccounts[nextRole].password);
+    setConfirmPassword("");
+    setTermsAccepted(false);
+    setPrivacyAccepted(false);
+    setBotField("");
+    setFieldErrors({});
     setRegistering(false);
     setTeamAccessOpen(nextRole !== "customer");
     setRegistrationResult(null);
@@ -239,15 +255,22 @@ function LoginPanel({ onLoggedIn }) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setFieldErrors({});
     if (registering) {
       setRegistrationResult(null);
       setRegistrationSteps(registrationStepDefaults);
     }
     try {
       if (registering) {
-        const result = await registerCustomer(name, email, password, updateRegistrationStep);
+        const validation = validateCustomerRegistrationForm({ name, email, password, confirmPassword, termsAccepted, privacyAccepted, botField });
+        if (!validation.valid) {
+          setFieldErrors(validation.errors);
+          throw new Error(validation.errors.form || "Check the highlighted registration details.");
+        }
+        const result = await registerCustomer(validation.values, updateRegistrationStep);
         setRegistrationResult(result);
         setPassword("");
+        setConfirmPassword("");
       } else {
         await login(email, password, role, demoAccounts);
         onLoggedIn?.();
@@ -262,6 +285,7 @@ function LoginPanel({ onLoggedIn }) {
   const submitLabel = busy
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
+  const passwordItems = passwordChecklist(password);
 
   const loginCard = (
     <form className="login-card" onSubmit={submit} data-login-modal-panel>
@@ -300,20 +324,91 @@ function LoginPanel({ onLoggedIn }) {
       )}
       {registering && (
         <label className="form-label">Full name
-          <input className="form-control" required value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            aria-describedby={fieldErrors.name ? "registration-name-error" : undefined}
+            aria-invalid={Boolean(fieldErrors.name)}
+            autoComplete="name"
+            className={`form-control ${fieldErrors.name ? "is-invalid" : ""}`}
+            required
+            value={name}
+            onBlur={() => setName(normalizeFullName(name))}
+            onChange={(event) => setName(event.target.value)}
+          />
+          {fieldErrors.name && <small className="registration-field-error" id="registration-name-error">{fieldErrors.name}</small>}
         </label>
       )}
       <label className="form-label">Email
-        <input className="form-control" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+        <input
+          aria-describedby={fieldErrors.email ? "registration-email-error" : undefined}
+          aria-invalid={Boolean(fieldErrors.email)}
+          autoComplete={registering ? "email" : "username"}
+          className={`form-control ${fieldErrors.email ? "is-invalid" : ""}`}
+          type="email"
+          required
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        {fieldErrors.email && <small className="registration-field-error" id="registration-email-error">{fieldErrors.email}</small>}
       </label>
       <label className="form-label">Password
         <span className="login-password-field">
-          <input className="form-control" type={showPassword ? "text" : "password"} minLength="8" required value={password} onChange={(event) => setPassword(event.target.value)} />
+          <input
+            aria-describedby={fieldErrors.password ? "registration-password-error" : undefined}
+            aria-invalid={Boolean(fieldErrors.password)}
+            autoComplete={registering ? "new-password" : "current-password"}
+            className={`form-control ${fieldErrors.password ? "is-invalid" : ""}`}
+            type={showPassword ? "text" : "password"}
+            minLength={registering ? 12 : 8}
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
           <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((current) => !current)}>
             {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
           </button>
         </span>
+        {fieldErrors.password && <small className="registration-field-error" id="registration-password-error">{fieldErrors.password}</small>}
       </label>
+      {registering && (
+        <>
+          <label className="form-label">Confirm password
+            <input
+              aria-describedby={fieldErrors.confirmPassword ? "registration-confirm-password-error" : undefined}
+              aria-invalid={Boolean(fieldErrors.confirmPassword)}
+              autoComplete="new-password"
+              className={`form-control ${fieldErrors.confirmPassword ? "is-invalid" : ""}`}
+              type={showPassword ? "text" : "password"}
+              minLength="12"
+              required
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+            />
+            {fieldErrors.confirmPassword && <small className="registration-field-error" id="registration-confirm-password-error">{fieldErrors.confirmPassword}</small>}
+          </label>
+          <div className="registration-password-rules" aria-label="Password requirements">
+            {passwordItems.map((item) => (
+              <span className={item.valid ? "valid" : ""} key={item.id}>{item.label}</span>
+            ))}
+          </div>
+          <div className="registration-consent-panel">
+            <label className={`registration-checkbox ${fieldErrors.termsAccepted ? "invalid" : ""}`}>
+              <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />
+              <span><strong>I agree to the Terms</strong><small>I will use TapTap Foodtrip ordering responsibly.</small></span>
+            </label>
+            <label className={`registration-checkbox ${fieldErrors.privacyAccepted ? "invalid" : ""}`}>
+              <input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} />
+              <span><strong>I agree to the Privacy Notice</strong><small>TapTap may save my account, contact, order, and delivery details for service use.</small></span>
+            </label>
+            {(fieldErrors.termsAccepted || fieldErrors.privacyAccepted) && (
+              <small className="registration-field-error">Accept both items before creating an account.</small>
+            )}
+          </div>
+          <label className="registration-honeypot" aria-hidden="true">
+            Company
+            <input tabIndex="-1" autoComplete="off" value={botField} onChange={(event) => setBotField(event.target.value)} />
+          </label>
+        </>
+      )}
       {registering && (
         <div className="firebase-registration-flow" aria-live="polite">
           <div className="registration-flow-heading">
@@ -335,7 +430,7 @@ function LoginPanel({ onLoggedIn }) {
           )}
         </div>
       )}
-      {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
       <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
         {submitLabel}
       </button>

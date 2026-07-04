@@ -10,9 +10,11 @@ import {
   validateLocation,
   validateOrderItems
 } from "../src/security.js";
+import { passwordChecklist, validateCustomerRegistration } from "../src/registration.js";
 
 const order = {
   customerId: "customer-1",
+  deliveryType: "delivery",
   riderId: "rider-1",
   status: "ready"
 };
@@ -21,6 +23,44 @@ test("extracts only valid bearer tokens", () => {
   assert.equal(bearerToken("Bearer abc.def"), "abc.def");
   assert.equal(bearerToken("Basic abc"), "");
   assert.equal(bearerToken(""), "");
+});
+
+test("validates secure customer registration inputs", () => {
+  const values = validateCustomerRegistration({
+    name: "  Juan   Dela Cruz  ",
+    email: "  CUSTOMER@Example.COM ",
+    password: "TapTapFood2026!",
+    confirmPassword: "TapTapFood2026!",
+    termsAccepted: true,
+    privacyAccepted: true
+  });
+
+  assert.equal(values.name, "Juan Dela Cruz");
+  assert.equal(values.email, "customer@example.com");
+  assert.equal(passwordChecklist("TapTapFood2026!").length, true);
+  assert.equal(passwordChecklist("TapTapFood2026!").uppercase, true);
+  assert.equal(passwordChecklist("TapTapFood2026!").lowercase, true);
+  assert.equal(passwordChecklist("TapTapFood2026!").number, true);
+  assert.equal(passwordChecklist("TapTapFood2026!").symbol, true);
+  assert.equal(passwordChecklist("password123!").common, false);
+});
+
+test("rejects unsafe customer registration inputs", () => {
+  const base = {
+    name: "Juan Dela Cruz",
+    email: "juan@example.com",
+    password: "TapTapFood2026!",
+    confirmPassword: "TapTapFood2026!",
+    termsAccepted: true,
+    privacyAccepted: true
+  };
+
+  assert.throws(() => validateCustomerRegistration({ ...base, name: "Juan123" }), /full name/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, email: "not-an-email" }), /email/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, password: "short", confirmPassword: "short" }), /stronger/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, confirmPassword: "Different2026!" }), /match/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, termsAccepted: false }), /Terms and Privacy/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, botField: "filled" }), /could not create/i);
 });
 
 test("authorizes order access by verified ownership and role", () => {

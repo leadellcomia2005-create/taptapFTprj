@@ -46,6 +46,7 @@ import {
   createPayMongoCheckout,
   detectDialogflowIntent,
   generateInsights,
+  sendCustomerVerificationEmail,
   sendOrderReceiptEmail,
   sendTwoFactorEmail,
   sendTwoFactorSms,
@@ -75,6 +76,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "./passkeys.js";
+import { createCustomerRegistration } from "./registration.js";
 
 dotenv.config({ override: true });
 
@@ -88,6 +90,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api", rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: "draft-8" }));
+const registrationLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 12, standardHeaders: "draft-8" });
 
 let firebaseAdminEnabled = false;
 let firebaseAdminError = "Account service is not ready yet.";
@@ -171,6 +174,18 @@ app.get("/api/status", (_req, res) => res.json({
   uptimeSeconds: Math.round((Date.now() - serverStartedAt) / 1000),
   services: { ...serviceStatus(), firebase: firebaseAdminEnabled, socket: firebaseAdminEnabled },
   firebaseAdminError: firebaseAdminEnabled ? null : firebaseAdminError
+}));
+
+app.post("/api/auth/register", registrationLimiter, requireFirebaseAdmin, asyncRoute(async (req, res) => {
+  const result = await createCustomerRegistration({
+    db: db(),
+    auth: getAuth(),
+    input: req.body,
+    req,
+    sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
+    appBaseUrl: allowedOrigins[0] || "http://localhost:5173"
+  });
+  res.status(201).json(result);
 }));
 
 app.get("/api/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {

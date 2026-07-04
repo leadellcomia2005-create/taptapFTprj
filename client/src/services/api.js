@@ -15,13 +15,21 @@ function requestErrorForStatus(status, payload = {}) {
 
 async function request(path, options = {}) {
   const token = await getAuthToken();
+  return requestWithHeaders(path, options, token ? { Authorization: `Bearer ${token}` } : {});
+}
+
+async function publicRequest(path, options = {}) {
+  return requestWithHeaders(path, options);
+}
+
+async function requestWithHeaders(path, options = {}, authHeaders = {}) {
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...authHeaders,
         ...options.headers,
       },
     });
@@ -36,6 +44,11 @@ async function request(path, options = {}) {
 
 export const api = {
   status: () => request("/status"),
+  registerCustomer: (values) =>
+    publicRequest("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
   twoFactorStatus: () => request("/2fa/status"),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),

@@ -211,6 +211,21 @@ export async function sendTwoFactorEmail(to, code) {
   });
 }
 
+export async function sendCustomerVerificationEmail(to, verificationLink, name = "Customer") {
+  if (!serviceStatus().emailOtp || !to || !verificationLink) {
+    throw new Error("Email verification is not ready yet.");
+  }
+  const safeName = escapeHtml(name || "Customer");
+  const safeLink = escapeHtml(verificationLink);
+  return gmailClient().sendMail({
+    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+    to,
+    subject: "Verify your Taptap Foodtrip account",
+    text: `Hi ${name || "Customer"}, verify your Taptap Foodtrip account here: ${verificationLink}`,
+    html: `<p>Hi ${safeName},</p><p>Verify your Taptap Foodtrip account before placing orders.</p><p><a href="${safeLink}" style="display:inline-block;padding:12px 18px;background:#e33d2e;color:#fff;text-decoration:none;border-radius:8px">Verify account</a></p><p>If the button does not work, copy this link:</p><p>${safeLink}</p>`
+  });
+}
+
 export async function sendOrderReceiptEmail(order = {}) {
   if (!serviceStatus().emailOtp || !order.customerEmail || order.source === "walk-in-pos") {
     return { sent: false };

@@ -1,12 +1,9 @@
-import { getApp, getApps, initializeApp } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported, logEvent } from "firebase/analytics";
 import {
   connectAuthEmulator,
-  createUserWithEmailAndPassword,
-  deleteUser,
   browserSessionPersistence,
   getAuth,
-  inMemoryPersistence,
   onAuthStateChanged,
   reload,
   sendEmailVerification,
@@ -14,8 +11,7 @@ import {
   setPersistence,
   signInWithCustomToken,
   signInWithEmailAndPassword,
-  signOut,
-  updateProfile
+  signOut
 } from "firebase/auth";
 import {
   connectDatabaseEmulator,
@@ -58,8 +54,6 @@ let auth;
 let db;
 let storage;
 let analytics;
-let registrationAuth;
-let registrationDb;
 let authPersistenceReady = Promise.resolve();
 
 if (firebaseEnabled) {
@@ -67,11 +61,6 @@ if (firebaseEnabled) {
   auth = getAuth(app);
   db = getDatabase(app);
   if (firebaseStorageEnabled) storage = getStorage(app);
-  const registrationApp = getApps().some((candidate) => candidate.name === "registration")
-    ? getApp("registration")
-    : initializeApp(config, "registration");
-  registrationAuth = getAuth(registrationApp);
-  registrationDb = getDatabase(registrationApp);
   configureAuthTokenProvider(() => auth.currentUser?.getIdToken() || "");
   isSupported().then((supported) => {
     if (supported) analytics = getAnalytics(app);
@@ -82,16 +71,11 @@ if (firebaseEnabled) {
       connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
       connectDatabaseEmulator(db, "127.0.0.1", 9000);
       if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
-      connectAuthEmulator(registrationAuth, "http://127.0.0.1:9099", { disableWarnings: true });
-      connectDatabaseEmulator(registrationDb, "127.0.0.1", 9000);
     } catch {
       // Hot reload may initialize emulators more than once.
     }
   }
-  authPersistenceReady = Promise.all([
-    setPersistence(auth, browserSessionPersistence),
-    setPersistence(registrationAuth, inMemoryPersistence)
-  ]);
+  authPersistenceReady = setPersistence(auth, browserSessionPersistence);
 }
 
 const demoDataKey = "taptap-demo-data";
@@ -245,61 +229,28 @@ export async function refreshEmailVerification() {
   };
 }
 
-export async function registerCustomer(name, email, password, onProgress = () => {}) {
+export async function registerCustomer(values, onProgress = () => {}) {
   if (firebaseEnabled) {
     await authPersistenceReady;
-    let user;
     onProgress("auth", "active", "Creating your secure login...");
     try {
-      const credential = await createUserWithEmailAndPassword(registrationAuth, email, password);
-      user = credential.user;
-      await updateProfile(user, { displayName: name });
+      const result = await api.registerCustomer(values);
       onProgress("auth", "success", "Secure login created.");
+      onProgress("profile", "success", "Customer profile saved.");
+      onProgress("verification", result.verificationSent ? "success" : "warning", result.verificationSent
+        ? "Verification email requested."
+        : "The account is ready, but the verification email can be resent after sign-in.");
+      onProgress("session", "success", "Registration finished. The customer can now sign in.");
+      return result;
     } catch (error) {
-      if (user) await deleteUser(user).catch(() => {});
       onProgress("auth", "error", friendlyAuthError(error));
       throw error;
     }
-
-    onProgress("profile", "active", "Saving the customer profile...");
-    try {
-      await set(ref(registrationDb, `users/${user.uid}`), {
-        name,
-        email,
-        role: "customer",
-        createdAt: Date.now()
-      });
-      onProgress("profile", "success", "Customer profile saved.");
-    } catch (error) {
-      await deleteUser(user).catch(() => {});
-      onProgress("profile", "error", "The profile could not be saved, so the incomplete account was removed.");
-      throw error;
-    }
-
-    let verificationSent = false;
-    onProgress("verification", "active", `Requesting a verification email for ${email}...`);
-    try {
-      await sendEmailVerification(user);
-      verificationSent = true;
-      onProgress("verification", "success", "Verification email requested.");
-    } catch {
-      onProgress("verification", "warning", "The account is ready, but the verification email could not be sent. It can be resent after sign-in.");
-    }
-
-    onProgress("session", "active", "Finishing registration...");
-    await signOut(registrationAuth);
-    onProgress("session", "success", "Registration finished. The customer can now sign in.");
-    return {
-      uid: user.uid,
-      email: user.email,
-      profilePath: `users/${user.uid}`,
-      verificationSent
-    };
   }
-  const user = { uid: `demo-${crypto.randomUUID()}`, email, name, role: "customer" };
+  const user = { uid: `demo-${crypto.randomUUID()}`, email: values.email, name: values.name, role: "customer" };
   demoUser = user;
   window.dispatchEvent(new Event("taptap-demo-auth"));
-  return { uid: user.uid, email, profilePath: `users/${user.uid}`, verificationSent: false };
+  return { uid: user.uid, email: values.email, profilePath: `users/${user.uid}`, verificationSent: false };
 }
 
 export function friendlyAuthError(error) {

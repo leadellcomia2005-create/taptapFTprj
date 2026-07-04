@@ -47,6 +47,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "./passkeys.js";
+import { createCustomerRegistration } from "./registration.js";
 
 initializeApp();
 const database = () => getDatabase();
@@ -159,6 +160,18 @@ app.get(route("/status"), (_req, res) => {
   });
 });
 
+app.post(route("/auth/register"), asyncRoute(async (req, res) => {
+  const result = await createCustomerRegistration({
+    db: database(),
+    auth: getAuth(),
+    input: req.body,
+    req,
+    sendVerificationEmail: secretValue(gmailUser) && secretValue(gmailAppPassword) ? sendCustomerVerificationEmail : null,
+    appBaseUrl: allowedOrigins()[0] || "http://localhost:5173"
+  });
+  res.status(201).json(result);
+}));
+
 const sendTwoFactorSms = async (to, code) => {
   const sid = secretValue(twilioSid);
   const token = secretValue(twilioToken);
@@ -212,6 +225,22 @@ const sendTwoFactorEmail = async (to, code) => {
     subject: "Your Taptap Foodtrip verification code",
     text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes.`,
     html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 10 minutes.</p>`
+  });
+};
+
+const sendCustomerVerificationEmail = async (to, verificationLink, name = "Customer") => {
+  const user = secretValue(gmailUser);
+  const password = secretValue(gmailAppPassword);
+  if (!user || !password || !to || !verificationLink) throw new HttpError(503, "Email verification is not ready yet.");
+  gmailTransport ||= nodemailer.createTransport({ service: "gmail", auth: { user, pass: password } });
+  const safeName = escapeHtml(name || "Customer");
+  const safeLink = escapeHtml(verificationLink);
+  return gmailTransport.sendMail({
+    from: `"Taptap Foodtrip" <${user}>`,
+    to,
+    subject: "Verify your Taptap Foodtrip account",
+    text: `Hi ${name || "Customer"}, verify your Taptap Foodtrip account here: ${verificationLink}`,
+    html: `<p>Hi ${safeName},</p><p>Verify your Taptap Foodtrip account before placing orders.</p><p><a href="${safeLink}" style="display:inline-block;padding:12px 18px;background:#e33d2e;color:#fff;text-decoration:none;border-radius:8px">Verify account</a></p><p>If the button does not work, copy this link:</p><p>${safeLink}</p>`
   });
 };
 

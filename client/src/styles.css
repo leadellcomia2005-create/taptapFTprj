@@ -263,10 +263,120 @@ button { font: inherit; }
 .login-card .form-label { width: 100%; margin: 12px 0 5px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .login-card .form-control { margin-top: 7px; min-height: 48px; font-size: 15px; text-transform: none; border-color: #ded3c4; border-radius: 10px; }
 .login-card .form-control:focus { border-color: var(--red); box-shadow: 0 0 0 .2rem rgba(227,61,46,.14); }
+.login-card .form-control.is-invalid {
+  border-color: #d93624;
+  background-color: #fff8f6;
+}
+.login-card .form-control.is-invalid:focus {
+  border-color: #d93624;
+  box-shadow: 0 0 0 .2rem rgba(217,54,36,.16);
+}
 .login-password-field { position: relative; display: block; }
 .login-password-field .form-control { padding-right: 54px; }
 .login-password-field button { position: absolute; top: 50%; right: 6px; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; color: var(--muted); border: 0; background: transparent; border-radius: 10px; transform: translateY(-50%); }
 .login-password-field button:hover,.login-password-field button:focus-visible { color: var(--red); background: var(--red-soft); outline: 0; }
+.registration-field-error {
+  display: block;
+  margin-top: 6px;
+  color: #b32a1c;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.registration-password-rules {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 7px;
+  margin: 10px 0 12px;
+}
+.registration-password-rules span {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: #786d60;
+  background: #fffaf3;
+  border: 1px solid #eadccd;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.registration-password-rules span::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border: 2px solid #c9b9a5;
+  border-radius: 50%;
+}
+.registration-password-rules span.valid {
+  color: #195f36;
+  background: #edf8f1;
+  border-color: #b8dfc4;
+}
+.registration-password-rules span.valid::before {
+  border-color: #24864a;
+  background: #24864a;
+}
+.registration-consent-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 14px;
+  padding: 12px;
+  background: #fffaf3;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.registration-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: 54px;
+  margin: 0;
+  padding: 10px;
+  color: var(--ink);
+  border: 1px solid transparent;
+  border-radius: 11px;
+  cursor: pointer;
+}
+.registration-checkbox.invalid {
+  border-color: rgba(217,54,36,.42);
+  background: #fff5f3;
+}
+.registration-checkbox input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 2px;
+  accent-color: var(--red);
+}
+.registration-checkbox strong,
+.registration-checkbox small {
+  display: block;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.registration-checkbox strong {
+  font-size: 12px;
+  line-height: 1.3;
+}
+.registration-checkbox small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.registration-honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
 .login-submit-button { min-height: 52px; margin-top: 8px; font-size: 16px; font-weight: 900; border-radius: 10px; }
 .login-secondary-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; }
 .login-secondary-actions .btn { min-height: 44px; flex: 1 1 0; font-weight: 800; }
@@ -2510,6 +2620,32 @@ button:not(:disabled),
   }
   .login-home-panel h2 {
     font-size: 29px;
+  }
+}
+
+@media (max-width: 620px) {
+  .registration-password-rules {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .registration-password-rules span {
+    min-height: 32px;
+    padding: 8px;
+    font-size: 9px;
+  }
+  .registration-consent-panel {
+    padding: 10px;
+  }
+  .registration-checkbox {
+    min-height: 52px;
+    padding: 9px;
+  }
+  .registration-checkbox strong {
+    font-size: 11px;
+  }
+  .registration-checkbox small,
+  .registration-field-error {
+    font-size: 9px;
   }
 }
 

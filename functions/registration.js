@@ -69,6 +69,7 @@ export function validateCustomerRegistration(input = {}) {
   const password = String(input.password || "");
   const confirmPassword = String(input.confirmPassword || "");
   const botField = cleanText(input.botField, 200);
+  const turnstileToken = typeof input.turnstileToken === "string" ? input.turnstileToken.trim() : "";
 
   if (botField) throw new HttpError(400, "We could not create this account. Please check your details and try again.");
   if (name.length < 2 || name.length > 80 || !/^[A-Za-z\u00d1\u00f1 .'-]+$/.test(name)) throw new HttpError(400, "Enter a valid full name.");
@@ -79,7 +80,44 @@ export function validateCustomerRegistration(input = {}) {
     throw new HttpError(400, "Accept the Terms and Privacy Notice before creating an account.");
   }
 
-  return { name, email, password, termsAccepted: true, privacyAccepted: true };
+  return { name, email, password, turnstileToken, termsAccepted: true, privacyAccepted: true };
+}
+
+export async function verifyTurnstileToken({ secret, token, req }) {
+  const cleanSecret = typeof secret === "string" ? secret.trim() : "";
+  const cleanToken = typeof token === "string" ? token.trim() : "";
+  if (!cleanSecret) return { configured: false };
+  if (!cleanToken) throw new HttpError(400, "Complete the security check before creating an account.");
+
+  const body = new URLSearchParams();
+  body.set("secret", cleanSecret);
+  body.set("response", cleanToken);
+  const remoteIp = clientIp(req);
+  if (remoteIp && remoteIp !== "unknown") body.set("remoteip", remoteIp);
+
+  let payload;
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body
+    });
+    payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new HttpError(503, "Security check is unavailable. Please try again.");
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, "Security check is unavailable. Please try again.");
+  }
+
+  if (payload?.success !== true) {
+    throw new HttpError(400, "Complete the security check before creating an account.");
+  }
+
+  return {
+    configured: true,
+    hostname: cleanText(payload.hostname || "", 120),
+    action: cleanText(payload.action || "", 80),
+    challengeTs: cleanText(payload.challenge_ts || "", 80)
+  };
 }
 
 async function enforceRegistrationRateLimit(db, source) {
@@ -95,10 +133,21 @@ async function enforceRegistrationRateLimit(db, source) {
   }
 }
 
-export async function createCustomerRegistration({ db, auth, input, req, sendVerificationEmail, appBaseUrl }) {
+export async function createCustomerRegistration({ db, auth, input, req, sendVerificationEmail, appBaseUrl, verifyHuman }) {
   const values = validateCustomerRegistration(input);
   const source = registrationSource(req, values.email);
   await enforceRegistrationRateLimit(db, source);
+
+  const humanCheck = verifyHuman ? await verifyHuman(values.turnstileToken, req) : { configured: false };
+  if (humanCheck.configured) {
+    await writeRegistrationAudit(db, "registration_security_check_passed", {
+      emailHash: source.emailHash,
+      ipHash: source.ipHash,
+      provider: "turnstile",
+      hostname: humanCheck.hostname
+    });
+  }
+
   await writeRegistrationAudit(db, "registration_started", { emailHash: source.emailHash, ipHash: source.ipHash });
 
   let userRecord;
@@ -136,6 +185,8 @@ export async function createCustomerRegistration({ db, auth, input, req, sendVer
         emailHash: source.emailHash,
         ipHash: source.ipHash,
         userAgent: source.userAgent,
+        botProtection: humanCheck.configured ? "turnstile" : "honeypot-rate-limit",
+        botProtectionVerified: humanCheck.configured === true,
         createdAt: now
       },
       createdAt: now,

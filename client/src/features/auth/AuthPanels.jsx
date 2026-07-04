@@ -59,6 +59,96 @@ const homepageHighlights = [
   { value: "1 account", label: "Orders, receipts, reviews" }
 ];
 
+const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
+let turnstileScriptPromise;
+
+function loadTurnstileScript() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  if (!turnstileScriptPromise) {
+    turnstileScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve(window.turnstile);
+      script.onerror = () => reject(new Error("Security check could not load."));
+      document.head.appendChild(script);
+    });
+  }
+  return turnstileScriptPromise;
+}
+
+function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
+  const containerRef = useRef(null);
+  const widgetIdRef = useRef(null);
+  const [status, setStatus] = useState("loading");
+
+  useEffect(() => {
+    if (!siteKey || !containerRef.current) return undefined;
+    let cancelled = false;
+    setStatus("loading");
+
+    loadTurnstileScript()
+      .then((turnstile) => {
+        if (cancelled || !turnstile || !containerRef.current) return;
+        if (widgetIdRef.current) {
+          try {
+            turnstile.remove(widgetIdRef.current);
+          } catch {
+            // The widget may already be removed by Cloudflare during fast remounts.
+          }
+          widgetIdRef.current = null;
+        }
+        containerRef.current.replaceChildren();
+        widgetIdRef.current = turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          theme: "light",
+          callback(token) {
+            setStatus("verified");
+            onToken(token);
+          },
+          "expired-callback"() {
+            setStatus("expired");
+            onToken("");
+          },
+          "error-callback"() {
+            setStatus("error");
+            onToken("");
+            onError("Security check failed. Try again.");
+          }
+        });
+        setStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus("error");
+          onError("Security check could not load. Check your connection, then try again.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (widgetIdRef.current && window.turnstile?.remove) {
+        try {
+          window.turnstile.remove(widgetIdRef.current);
+        } catch {
+          // The widget may already be removed by Cloudflare during route cleanup.
+        }
+      }
+      widgetIdRef.current = null;
+    };
+  }, [siteKey, resetKey, onToken, onError]);
+
+  return (
+    <div className="registration-turnstile-widget">
+      <div ref={containerRef} />
+      {status === "loading" && <small>Loading security check...</small>}
+      {status === "expired" && <small>Security check expired. Please complete it again.</small>}
+      {status === "error" && <small>Security check could not be completed.</small>}
+    </div>
+  );
+}
+
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
@@ -76,6 +166,9 @@ function LoginPanel({ onLoggedIn }) {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [botField, setBotField] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileMessage, setTurnstileMessage] = useState("");
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -216,6 +309,9 @@ function LoginPanel({ onLoggedIn }) {
     setTermsAccepted(false);
     setPrivacyAccepted(false);
     setBotField("");
+    setTurnstileToken("");
+    setTurnstileMessage("");
+    setTurnstileResetKey((current) => current + 1);
     setFieldErrors({});
     setError("");
     setRegistrationResult(null);
@@ -233,6 +329,9 @@ function LoginPanel({ onLoggedIn }) {
     setTermsAccepted(false);
     setPrivacyAccepted(false);
     setBotField("");
+    setTurnstileToken("");
+    setTurnstileMessage("");
+    setTurnstileResetKey((current) => current + 1);
     setFieldErrors({});
     setRegistering(false);
     setTeamAccessOpen(nextRole !== "customer");
@@ -256,13 +355,24 @@ function LoginPanel({ onLoggedIn }) {
     setBusy(true);
     setError("");
     setFieldErrors({});
+    setTurnstileMessage("");
     if (registering) {
       setRegistrationResult(null);
       setRegistrationSteps(registrationStepDefaults);
     }
     try {
       if (registering) {
-        const validation = validateCustomerRegistrationForm({ name, email, password, confirmPassword, termsAccepted, privacyAccepted, botField });
+        const validation = validateCustomerRegistrationForm({
+          name,
+          email,
+          password,
+          confirmPassword,
+          termsAccepted,
+          privacyAccepted,
+          botField,
+          turnstileRequired: Boolean(turnstileSiteKey),
+          turnstileToken
+        });
         if (!validation.valid) {
           setFieldErrors(validation.errors);
           throw new Error(validation.errors.form || "Check the highlighted registration details.");
@@ -271,11 +381,17 @@ function LoginPanel({ onLoggedIn }) {
         setRegistrationResult(result);
         setPassword("");
         setConfirmPassword("");
+        setTurnstileToken("");
+        setTurnstileResetKey((current) => current + 1);
       } else {
         await login(email, password, role, demoAccounts);
         onLoggedIn?.();
       }
     } catch (authError) {
+      if (registering && turnstileSiteKey) {
+        setTurnstileToken("");
+        setTurnstileResetKey((current) => current + 1);
+      }
       setError(friendlyAuthError(authError));
     } finally {
       setBusy(false);
@@ -407,6 +523,23 @@ function LoginPanel({ onLoggedIn }) {
             Company
             <input tabIndex="-1" autoComplete="off" value={botField} onChange={(event) => setBotField(event.target.value)} />
           </label>
+          {turnstileSiteKey && (
+            <div className={`registration-turnstile-panel ${fieldErrors.turnstileToken ? "invalid" : ""}`}>
+              <div className="registration-turnstile-heading">
+                <strong>Security check</strong>
+                <small>Confirms this signup is made by a real customer.</small>
+              </div>
+              <TurnstileWidget
+                siteKey={turnstileSiteKey}
+                resetKey={turnstileResetKey}
+                onToken={setTurnstileToken}
+                onError={setTurnstileMessage}
+              />
+              {(fieldErrors.turnstileToken || turnstileMessage) && (
+                <small className="registration-field-error">{fieldErrors.turnstileToken || turnstileMessage}</small>
+              )}
+            </div>
+          )}
         </>
       )}
       {registering && (

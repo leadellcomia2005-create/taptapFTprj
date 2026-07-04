@@ -14,7 +14,8 @@ export function serviceStatus() {
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: has("PAYMONGO_SECRET_KEY"),
     twilio: has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
-    emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD")
+    emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD"),
+    turnstile: has("TURNSTILE_SECRET_KEY")
   };
 }
 

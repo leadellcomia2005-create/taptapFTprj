@@ -120,6 +120,18 @@ map at any time.
 You can also double-click `OPEN-DEVELOPMENT.bat` after dependencies are
 installed.
 
+## Customer registration bot protection
+
+Customer registration supports Cloudflare Turnstile as an optional free
+bot-protection layer. Create a Turnstile widget in Cloudflare, then set:
+
+- `VITE_TURNSTILE_SITE_KEY` in `client/.env`
+- `TURNSTILE_SECRET_KEY` in `server/.env`
+
+The site key is public and safe for the browser. The secret key must stay on
+the backend. If Turnstile keys are not configured, the app still uses the
+hidden bot field and registration rate limits.
+
 ## Free Spark setup
 
 The working project uses Firebase Authentication and Realtime Database on the
@@ -162,6 +174,7 @@ firebase functions:secrets:set PAYMONGO_SECRET_KEY
 firebase functions:secrets:set TWILIO_ACCOUNT_SID
 firebase functions:secrets:set TWILIO_AUTH_TOKEN
 firebase functions:secrets:set TWO_FACTOR_ENCRYPTION_KEY
+firebase functions:secrets:set TURNSTILE_SECRET_KEY
 ```
 
 9. Add `DIALOGFLOW_PROJECT_ID`, `DIALOGFLOW_LANGUAGE_CODE`,

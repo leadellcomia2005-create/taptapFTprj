@@ -76,7 +76,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "./passkeys.js";
-import { createCustomerRegistration } from "./registration.js";
+import { createCustomerRegistration, verifyTurnstileToken } from "./registration.js";
 
 dotenv.config({ override: true });
 
@@ -183,7 +183,10 @@ app.post("/api/auth/register", registrationLimiter, requireFirebaseAdmin, asyncR
     input: req.body,
     req,
     sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
-    appBaseUrl: allowedOrigins[0] || "http://localhost:5173"
+    appBaseUrl: allowedOrigins[0] || "http://localhost:5173",
+    verifyHuman: process.env.TURNSTILE_SECRET_KEY
+      ? (token, request) => verifyTurnstileToken({ secret: process.env.TURNSTILE_SECRET_KEY, token, req: request })
+      : null
   });
   res.status(201).json(result);
 }));

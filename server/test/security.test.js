@@ -10,7 +10,7 @@ import {
   validateLocation,
   validateOrderItems
 } from "../src/security.js";
-import { passwordChecklist, validateCustomerRegistration } from "../src/registration.js";
+import { passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
 
 const order = {
   customerId: "customer-1",
@@ -61,6 +61,55 @@ test("rejects unsafe customer registration inputs", () => {
   assert.throws(() => validateCustomerRegistration({ ...base, confirmPassword: "Different2026!" }), /match/i);
   assert.throws(() => validateCustomerRegistration({ ...base, termsAccepted: false }), /Terms and Privacy/i);
   assert.throws(() => validateCustomerRegistration({ ...base, botField: "filled" }), /could not create/i);
+});
+
+test("verifies Turnstile registration tokens when configured", async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async (url, options) => {
+    assert.equal(url, "https://challenges.cloudflare.com/turnstile/v0/siteverify");
+    assert.equal(options.method, "POST");
+    assert.equal(options.body.get("secret"), "turnstile-secret");
+    assert.equal(options.body.get("response"), "turnstile-token");
+    assert.equal(options.body.get("remoteip"), "127.0.0.1");
+    return new Response(JSON.stringify({ success: true, hostname: "localhost" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  const result = await verifyTurnstileToken({
+    secret: "turnstile-secret",
+    token: "turnstile-token",
+    req: { headers: {}, ip: "127.0.0.1" }
+  });
+  assert.equal(result.configured, true);
+  assert.equal(result.hostname, "localhost");
+});
+
+test("rejects missing or failed Turnstile registration tokens", async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  await assert.rejects(
+    () => verifyTurnstileToken({ secret: "turnstile-secret", token: "", req: {} }),
+    /security check/i
+  );
+
+  global.fetch = async () => new Response(JSON.stringify({ success: false }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+
+  await assert.rejects(
+    () => verifyTurnstileToken({ secret: "turnstile-secret", token: "bad-token", req: {} }),
+    /security check/i
+  );
 });
 
 test("authorizes order access by verified ownership and role", () => {

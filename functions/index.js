@@ -47,7 +47,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "./passkeys.js";
-import { createCustomerRegistration } from "./registration.js";
+import { createCustomerRegistration, verifyTurnstileToken } from "./registration.js";
 
 initializeApp();
 const database = () => getDatabase();
@@ -59,6 +59,7 @@ const twilioToken = defineSecret("TWILIO_AUTH_TOKEN");
 const twoFactorKey = defineSecret("TWO_FACTOR_ENCRYPTION_KEY");
 const gmailUser = defineSecret("GMAIL_USER");
 const gmailAppPassword = defineSecret("GMAIL_APP_PASSWORD");
+const turnstileSecret = defineSecret("TURNSTILE_SECRET_KEY");
 const app = express();
 
 const allowedOrigins = () => (process.env.CLIENT_ORIGIN || "http://localhost:5173")
@@ -155,6 +156,7 @@ app.get(route("/status"), (_req, res) => {
       paymongo: Boolean(secretValue(paymongoKey)),
       twilio: Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER),
       emailOtp: Boolean(secretValue(gmailUser) && secretValue(gmailAppPassword)),
+      turnstile: Boolean(secretValue(turnstileSecret)),
       twoFactor: Boolean(secretValue(twoFactorKey))
     }
   });
@@ -167,7 +169,10 @@ app.post(route("/auth/register"), asyncRoute(async (req, res) => {
     input: req.body,
     req,
     sendVerificationEmail: secretValue(gmailUser) && secretValue(gmailAppPassword) ? sendCustomerVerificationEmail : null,
-    appBaseUrl: allowedOrigins()[0] || "http://localhost:5173"
+    appBaseUrl: allowedOrigins()[0] || "http://localhost:5173",
+    verifyHuman: secretValue(turnstileSecret)
+      ? (token, request) => verifyTurnstileToken({ secret: secretValue(turnstileSecret), token, req: request })
+      : null
   });
   res.status(201).json(result);
 }));
@@ -566,5 +571,5 @@ export const api = onRequest({
   region: "asia-southeast1",
   timeoutSeconds: 60,
   memory: "512MiB",
-  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey, gmailUser, gmailAppPassword]
+  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey, gmailUser, gmailAppPassword, turnstileSecret]
 }, app);

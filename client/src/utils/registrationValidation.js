@@ -34,6 +34,7 @@ export function validateCustomerRegistrationForm(values = {}) {
   const email = String(values.email || "").trim().toLowerCase();
   const password = String(values.password || "");
   const confirmPassword = String(values.confirmPassword || "");
+  const turnstileToken = String(values.turnstileToken || "").trim();
 
   if (name.length < 2 || name.length > 80 || !/^[A-Za-z\u00d1\u00f1 .'-]+$/.test(name)) {
     errors.name = "Use a real full name. Letters, spaces, period, hyphen, apostrophe, and n with tilde are allowed.";
@@ -56,6 +57,9 @@ export function validateCustomerRegistrationForm(values = {}) {
   if (String(values.botField || "").trim()) {
     errors.form = "We could not create this account. Please check your details and try again.";
   }
+  if (values.turnstileRequired === true && !turnstileToken) {
+    errors.turnstileToken = "Complete the security check before creating an account.";
+  }
 
   return {
     valid: Object.keys(errors).length === 0,
@@ -65,6 +69,7 @@ export function validateCustomerRegistrationForm(values = {}) {
       email,
       password,
       confirmPassword,
+      turnstileToken,
       termsAccepted: values.termsAccepted === true,
       privacyAccepted: values.privacyAccepted === true,
       botField: String(values.botField || "")

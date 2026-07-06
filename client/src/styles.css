@@ -2737,6 +2737,280 @@ button:not(:disabled),
   }
 }
 
+.customer-bottom-nav {
+  display: none;
+}
+
+.profile-section-tabs {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 7px;
+  background: #fff7ed;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.profile-section-tabs button {
+  min-height: 48px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 900;
+}
+.profile-section-tabs button.active {
+  color: white;
+  border-color: var(--ink);
+  background: var(--ink);
+}
+.profile-tab-panel {
+  display: grid;
+  gap: 16px;
+}
+.profile-panel-heading h3 {
+  margin: 4px 0 5px;
+  font: 700 24px/1.05 var(--display);
+}
+.profile-panel-heading span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.profile-delivery-pin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px;
+  background: #fff8f6;
+  border: 1px solid rgba(217,54,36,.22);
+  border-radius: 12px;
+}
+.profile-delivery-pin.ready {
+  background: #f3fbf6;
+  border-color: rgba(72,168,117,.28);
+}
+.profile-delivery-pin strong,
+.profile-delivery-pin small {
+  display: block;
+}
+.profile-delivery-pin small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.profile-delivery-pin span {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  color: var(--red);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.profile-save-button {
+  width: max-content;
+  min-width: 220px;
+}
+.security-recovery-panel {
+  display: grid;
+  gap: 5px;
+  margin: 14px 0;
+  padding: 14px;
+  background: #fff8f6;
+  border: 1px solid rgba(217,54,36,.18);
+  border-radius: 12px;
+}
+.security-recovery-panel.compact {
+  margin-top: 14px;
+  background: #fffdf9;
+}
+.security-recovery-panel strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.security-recovery-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.owner-create-user-card .form-label small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.security-audit-filters {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(140px,180px) minmax(140px,180px);
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.security-audit-filters label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.audit-filter-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.audit-filter-buttons button {
+  min-height: 38px;
+  padding: 8px 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 900;
+}
+.audit-filter-buttons button.active {
+  color: white;
+  border-color: var(--ink);
+  background: var(--ink);
+}
+.readiness-fix {
+  color: #7f5b50 !important;
+}
+.readiness-fix b {
+  color: var(--red);
+}
+.proof-requirement-card {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #fff8f6;
+  border: 1px solid rgba(217,54,36,.18);
+  border-radius: 10px;
+}
+.proof-requirement-card strong,
+.proof-requirement-card span {
+  display: block;
+}
+.proof-requirement-card strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.proof-requirement-card span {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.rider-proof-note {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 13px;
+  color: #3f251b;
+  background: #fff8f6;
+  border: 1px solid rgba(217,54,36,.2);
+  border-radius: 12px;
+}
+.rider-proof-note strong,
+.rider-proof-note span {
+  display: block;
+}
+.rider-proof-note span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .customer-app-shell {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+  .customer-app-shell .customer-menu-toggle {
+    display: none;
+  }
+  .customer-app-shell .app-header.customer-header {
+    grid-template-columns: minmax(0,1fr) auto;
+  }
+  .customer-bottom-nav {
+    position: fixed;
+    z-index: 1120;
+    right: 10px;
+    bottom: 8px;
+    left: 10px;
+    display: grid;
+    grid-template-columns: repeat(5,minmax(0,1fr));
+    gap: 5px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255,250,243,.96);
+    border: 1px solid rgba(217,54,36,.16);
+    border-radius: 18px;
+    box-shadow: 0 18px 44px rgba(38,29,19,.18);
+    backdrop-filter: blur(16px);
+  }
+  .customer-bottom-nav button {
+    min-width: 0;
+    min-height: 54px;
+    display: grid;
+    place-items: center;
+    gap: 3px;
+    color: #7a6f66;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 13px;
+    font-size: 9px;
+    font-weight: 900;
+  }
+  .customer-bottom-nav button svg {
+    color: currentColor;
+  }
+  .customer-bottom-nav button.active {
+    color: white;
+    border-color: var(--ink);
+    background: linear-gradient(135deg,var(--red-dark),var(--red));
+    box-shadow: 0 10px 22px rgba(217,54,36,.2);
+  }
+  .customer-app-shell .assistant-launcher {
+    bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+  }
+  .customer-app-shell .assistant-panel {
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+  }
+  .customer-app-shell .app-toast {
+    bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+  }
+  .profile-section-tabs {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  .profile-delivery-pin {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .profile-save-button {
+    width: 100%;
+    min-width: 0;
+  }
+  .security-audit-filters {
+    grid-template-columns: 1fr;
+  }
+  .audit-filter-buttons button {
+    flex: 1 1 112px;
+  }
+}
+
 @media print {
   .app-header,
   .assistant-launcher,

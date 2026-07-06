@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, LogOut, Menu, Trash2, X } from "lucide-react";
+import { Bell, ClipboardList, LogOut, Menu, ReceiptText, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
@@ -446,6 +446,32 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
         <button className="btn btn-danger btn-sm logout-button" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
       </div>
     </header>
+  );
+}
+
+function CustomerBottomNav({ activeView, onNavigate }) {
+  const items = [
+    ["store", "Menu", Store],
+    ["orders", "Orders", ClipboardList],
+    ["receipts", "Receipts", ReceiptText],
+    ["feedback", "Reviews", Star],
+    ["profile", "Profile", UserRound]
+  ];
+  return (
+    <nav className="customer-bottom-nav" aria-label="Customer mobile navigation">
+      {items.map(([view, label, Icon]) => (
+        <button
+          aria-current={activeView === view ? "page" : undefined}
+          className={activeView === view ? "active" : ""}
+          key={view}
+          onClick={() => onNavigate(view)}
+          type="button"
+        >
+          <Icon size={18} strokeWidth={2.4} aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -941,7 +967,7 @@ export default function App() {
     : null;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${user.role === "customer" ? "customer-app-shell" : ""}`}>
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
       {serviceStatus.api === false && <div className="offline-banner" role="status">The app could not be reached. Restart the app, then refresh this page.</div>}
@@ -978,6 +1004,7 @@ export default function App() {
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} />}
+      {user.role === "customer" && <CustomerBottomNav activeView={view} onNavigate={navigate} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}
     </div>

@@ -223,6 +223,11 @@ export const api = {
       body: JSON.stringify({ uid, role, staffRole }),
     }),
   listUsers: () => request("/admin/users"),
+  createManagedUser: (account) =>
+    request("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(account),
+    }),
   resetUserTwoFactor: (uid) =>
     request(`/admin/users/${encodeURIComponent(uid)}/2fa/reset`, {
       method: "POST",

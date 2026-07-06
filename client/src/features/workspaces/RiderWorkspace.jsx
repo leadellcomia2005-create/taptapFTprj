@@ -262,6 +262,12 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
                 <div><small>Route ETA</small><strong>{routeEstimate ? routeEstimate.label : "Address only"}</strong><span>{routeEstimate ? routeEstimate.distanceLabel : "Open navigation for route"}</span></div>
               </div>
+              {active.status === "arrived" && (
+                <div className="rider-proof-note">
+                  <strong>Proof required before delivered</strong>
+                  <span>Capture a clear handoff photo and enter the receiver name or typed signature.</span>
+                </div>
+              )}
               {active.deliveryIssue && <div className="rider-issue-note"><strong>Reported issue</strong><span>{active.deliveryIssue}</span></div>}
 
               <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>

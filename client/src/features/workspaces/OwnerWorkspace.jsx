@@ -14,6 +14,8 @@ const securityAuditActions = new Set([
   "registration_started",
   "registration_failed",
   "registration_rate_limited",
+  "admin_user_created",
+  "role_changed",
   "account_created",
   "2fa_failure",
   "2fa_lockout",
@@ -40,6 +42,7 @@ function auditActionLabel(action = "") {
 function safeAuditIdentifier(entry = {}) {
   if (entry.emailHash) return `Email hash ${String(entry.emailHash).slice(0, 12)}`;
   if (entry.ipHash) return `IP hash ${String(entry.ipHash).slice(0, 12)}`;
+  if (entry.targetUserId) return `User ${String(entry.targetUserId).slice(0, 12)}`;
   if (entry.userId) return `User ${String(entry.userId).slice(0, 12)}`;
   if (entry.actorId) return `Actor ${String(entry.actorId).slice(0, 12)}`;
   return "Safe identifier unavailable";
@@ -68,12 +71,31 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [insight, setInsight] = useState("Generate a free best-seller and stock recommendation.");
   const [salesGoal, setSalesGoal] = useState(100000);
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff", staffRole: "manager" });
+  const [createUserForm, setCreateUserForm] = useState({ name: "", email: "", temporaryPassword: "", role: "staff", staffRole: "manager" });
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createdUserNotice, setCreatedUserNotice] = useState("");
   const [managedUsers, setManagedUsers] = useState([]);
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
+  const [auditFilter, setAuditFilter] = useState("all");
+  const [auditDateRange, setAuditDateRange] = useState({ from: "", to: "" });
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
   const securityAuditRows = useMemo(() => auditLogs.filter((entry) => securityAuditActions.has(entry.action)), [auditLogs]);
   const blockedRegistrationRows = useMemo(() => securityAuditRows.filter((entry) => entry.action === "registration_failed" || String(entry.reason || "").toLowerCase().includes("too many")), [securityAuditRows]);
+  const filteredSecurityAuditRows = useMemo(() => {
+    const from = auditDateRange.from ? new Date(`${auditDateRange.from}T00:00:00`).getTime() : null;
+    const to = auditDateRange.to ? new Date(`${auditDateRange.to}T00:00:00`).getTime() + 24 * 60 * 60 * 1000 : null;
+    return securityAuditRows.filter((entry) => {
+      const timestamp = Number(entry.createdAt || 0);
+      if (from && timestamp < from) return false;
+      if (to && timestamp >= to) return false;
+      if (auditFilter === "registration") return String(entry.action).startsWith("registration_") || entry.action === "account_created";
+      if (auditFilter === "security") return String(entry.action).startsWith("2fa_") || String(entry.action).startsWith("passkey_");
+      if (auditFilter === "account") return ["admin_user_created", "role_changed", "2fa_reset", "2fa_unlocked"].includes(entry.action);
+      if (auditFilter === "blocked") return entry.action === "registration_failed" || entry.action === "registration_rate_limited" || entry.action === "2fa_lockout" || String(entry.reason || "").toLowerCase().includes("too many");
+      return true;
+    });
+  }, [auditDateRange, auditFilter, securityAuditRows]);
   const refreshUsers = useCallback(async () => {
     try {
       const result = await api.listUsers();
@@ -115,6 +137,22 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       await refreshUsers();
     } catch (error) {
       notify(error.message);
+    }
+  };
+  const createManagedUser = async (event) => {
+    event.preventDefault();
+    setCreatingUser(true);
+    setCreatedUserNotice("");
+    try {
+      const result = await api.createManagedUser(createUserForm);
+      setCreatedUserNotice(`${result.name} was created as ${result.role}. Ask them to verify email and complete security setup on first sign-in.`);
+      notify(`Created ${result.role} account for ${result.email}.`);
+      setCreateUserForm({ name: "", email: "", temporaryPassword: "", role: "staff", staffRole: "manager" });
+      await refreshUsers();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setCreatingUser(false);
     }
   };
   const securityAction = async (uid, action) => {
@@ -197,12 +235,37 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     </main>
   );
   if (section === "owner-users") return (
-    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div><div className="row g-3">
-      <div className="col-12"><div className="dashboard-card account-control-note"><p className="eyebrow text-danger">Account control</p><h3>Team access is owner-managed</h3><p>Customer registration is public. Owner, staff, and rider accounts must be assigned here by an owner so store access stays controlled.</p></div></div>
-      <div className="col-12"><div className="dashboard-card"><h3>User accounts and security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
-      <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign user role</h3><p className="module-note">Enter the user account ID and choose the role.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label>{roleForm.role === "staff" && <label className="form-label">Staff access scope<select className="form-select" value={roleForm.staffRole} onChange={(event) => setRoleForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}<button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
-      <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
-    </div></main>
+    <main className="container-fluid dashboard-page py-4">
+      <div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div>
+      <div className="row g-3">
+        <div className="col-12"><div className="dashboard-card account-control-note"><p className="eyebrow text-danger">Account control</p><h3>Team access is owner-managed</h3><p>Customers register from the public sign-in page. Owner, staff, and rider accounts are created here, then the user verifies email and sets up account security on first sign-in.</p></div></div>
+
+        <div className="col-xl-5">
+          <form className="dashboard-card owner-create-user-card" onSubmit={createManagedUser}>
+            <div className="module-heading"><div><p className="eyebrow text-danger">Create team account</p><h3>New owner, staff, or rider</h3></div><span className="module-note">Temporary passwords are never shown again after saving.</span></div>
+            <label className="form-label">Full name<input className="form-control" required autoComplete="name" value={createUserForm.name} onChange={(event) => setCreateUserForm((current) => ({ ...current, name: event.target.value }))} placeholder="Example: Mika Reyes" /></label>
+            <label className="form-label">Email<input className="form-control" required type="email" autoComplete="email" value={createUserForm.email} onChange={(event) => setCreateUserForm((current) => ({ ...current, email: event.target.value }))} placeholder="team@example.com" /></label>
+            <div className="row g-2">
+              <label className="form-label col-md-6">Role<select className="form-select" value={createUserForm.role} onChange={(event) => setCreateUserForm((current) => ({ ...current, role: event.target.value }))}><option>staff</option><option>rider</option><option>owner</option></select></label>
+              {createUserForm.role === "staff" && <label className="form-label col-md-6">Staff access<select className="form-select" value={createUserForm.staffRole} onChange={(event) => setCreateUserForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+            </div>
+            <label className="form-label">Temporary password<input className="form-control" required minLength="12" type="password" autoComplete="new-password" value={createUserForm.temporaryPassword} onChange={(event) => setCreateUserForm((current) => ({ ...current, temporaryPassword: event.target.value }))} placeholder="At least 12 characters" /><small>Share this directly with the team member outside the system, then ask them to change it.</small></label>
+            {createdUserNotice && <div className="alert alert-success py-2 small">{createdUserNotice}</div>}
+            <button className="btn btn-danger w-100 mt-2" disabled={creatingUser}>{creatingUser ? "Creating account..." : "Create team account"}</button>
+          </form>
+        </div>
+
+        <div className="col-xl-7">
+          <div className="dashboard-card">
+            <div className="module-heading"><div><p className="eyebrow text-danger">Security status</p><h3>User accounts and security</h3></div><button className="btn btn-sm btn-outline-dark" onClick={refreshUsers}>Refresh list</button></div>
+            <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex flex-wrap gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div>
+          </div>
+        </div>
+
+        <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign existing user role</h3><p className="module-note">Use this when an account already exists and only needs a role correction.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label>{roleForm.role === "staff" && <label className="form-label">Staff access scope<select className="form-select" value={roleForm.staffRole} onChange={(event) => setRoleForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}<button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
+        <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
+      </div>
+    </main>
   );
   if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;
   if (section === "owner-audit") return (
@@ -215,7 +278,22 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       </div>
       <div className="dashboard-card security-audit-card">
         <div className="module-heading"><div><p className="eyebrow text-danger">Security and account events</p><h3>Owner security audit</h3></div><span className="module-note">Safe identifiers hide private email and location details.</span></div>
-        <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Event type</th><th>Safe identifier</th><th>Role</th><th>Description</th></tr></thead><tbody>{securityAuditRows.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Security events will appear after customer registrations or account security activity.</td></tr>}{securityAuditRows.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td className="text-capitalize">{auditActionLabel(entry.action)}</td><td><code className="safe-audit-id">{safeAuditIdentifier(entry)}</code></td><td><span className="role-badge">{entry.actorRole || "customer"}</span></td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div>
+        <div className="security-audit-filters">
+          <div className="audit-filter-buttons" role="group" aria-label="Security audit filter">
+            {[
+              ["all", "All"],
+              ["registration", "Registration"],
+              ["security", "Sign-in"],
+              ["account", "Account control"],
+              ["blocked", "Blocked"]
+            ].map(([value, label]) => (
+              <button className={auditFilter === value ? "active" : ""} key={value} onClick={() => setAuditFilter(value)} type="button">{label}</button>
+            ))}
+          </div>
+          <label>From<input className="form-control" type="date" value={auditDateRange.from} onChange={(event) => setAuditDateRange((current) => ({ ...current, from: event.target.value }))} /></label>
+          <label>To<input className="form-control" type="date" value={auditDateRange.to} onChange={(event) => setAuditDateRange((current) => ({ ...current, to: event.target.value }))} /></label>
+        </div>
+        <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Event type</th><th>Safe identifier</th><th>Role</th><th>Description</th></tr></thead><tbody>{filteredSecurityAuditRows.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">No security events match this filter yet.</td></tr>}{filteredSecurityAuditRows.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td className="text-capitalize">{auditActionLabel(entry.action)}</td><td><code className="safe-audit-id">{safeAuditIdentifier(entry)}</code></td><td><span className="role-badge">{entry.actorRole || "customer"}</span></td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div>
       </div>
       <div className="dashboard-card mt-3"><div className="module-heading"><div><p className="eyebrow text-danger">Full audit trail</p><h3>Operations history</h3></div></div><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{auditActionLabel(entry.action)}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || entry.uid || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div>
     </main>

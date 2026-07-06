@@ -636,12 +636,12 @@ export function SettingsModule({ title, serviceStatus, staff = false, notify }) 
   });
   const toggle = (key) => setSettings((current) => ({ ...current, [key]: !current[key] }));
   const readinessRows = [
-    { key: "firebase", label: "Firebase/Admin connection", detail: "Required for secure accounts and records.", required: true },
-    { key: "emailOtp", label: "Gmail email sending", detail: "Used for email codes, verification, and receipts.", required: true },
-    { key: "turnstile", label: "Turnstile bot protection", detail: "Protects customer registration from automated abuse.", required: true },
-    { key: "twilio", label: "SMS provider", detail: "Optional phone texts for verified customers.", optional: true },
-    { key: "paymongo", label: "PayMongo payments", detail: "Optional online payment checkout.", optional: true },
-    { key: "openai", label: "OpenAI insights", detail: "Optional owner decision support.", optional: true }
+    { key: "firebase", label: "Account and records connection", detail: "Required for secure accounts and records.", fix: "Restart the app server and confirm the store account service credentials are available.", required: true },
+    { key: "emailOtp", label: "Email sending", detail: "Used for email codes, verification, and receipts.", fix: "Add the Gmail sender account and app password, then restart the app server.", required: true },
+    { key: "turnstile", label: "Registration protection", detail: "Protects customer registration from automated abuse.", fix: "Add the public site key and secret key, then restart the app server.", required: true },
+    { key: "twilio", label: "SMS provider", detail: "Optional phone texts for verified customers.", fix: "Connect an SMS sender before enabling paid text updates.", optional: true },
+    { key: "paymongo", label: "Online payments", detail: "Optional online payment checkout.", fix: "Add payment credentials when online checkout is ready to launch.", optional: true },
+    { key: "openai", label: "Owner recommendations", detail: "Optional owner decision support.", fix: "Add an AI key only when owner recommendation summaries are needed.", optional: true }
   ].map((item) => {
     const ready = Boolean(serviceStatus?.[item.key]);
     const status = ready ? "Ready" : item.optional ? "Optional" : "Needs attention";
@@ -659,7 +659,7 @@ export function SettingsModule({ title, serviceStatus, staff = false, notify }) 
           {readinessRows.map((item) => (
             <article className="security-readiness-row" key={item.key}>
               <span className={`readiness-dot ${item.tone}`} />
-              <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+              <div><strong>{item.label}</strong><small>{item.detail}</small>{!item.ready && <small className="readiness-fix"><b>How to fix:</b> {item.fix}</small>}</div>
               <b className={item.tone}>{item.status}</b>
             </article>
           ))}

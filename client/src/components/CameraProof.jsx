@@ -99,6 +99,10 @@ export default function CameraProof({ onCapture, onClose }) {
           </div>
           <div className="modal-body">
             {error && <div className="alert alert-danger">{error}</div>}
+            <div className="proof-requirement-card">
+              <strong>Delivery proof checklist</strong>
+              <span>Capture a clear photo, enter the receiver name or typed signature, and include the optional OTP only when the customer provides one.</span>
+            </div>
             {captured
               ? <img className="proof-preview" src={captured.url} alt="Captured delivery proof preview" />
               : <video ref={videoRef} autoPlay playsInline className="w-100 rounded" onLoadedMetadata={() => setCameraReady(true)} />}

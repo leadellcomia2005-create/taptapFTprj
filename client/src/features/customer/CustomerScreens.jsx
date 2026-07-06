@@ -362,6 +362,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
 
 export function CustomerProfile({ user, profile, notify, smsProviderEnabled = false }) {
   const [form, setForm] = useState(profile || {});
+  const [activeSection, setActiveSection] = useState("personal");
   useEffect(() => setForm(profile || {}), [profile]);
   const normalizedPhone = normalizePhilippinePhone(form.phone || "");
   const validPhone = !form.phone || isValidPhilippineMobile(normalizedPhone);
@@ -369,6 +370,9 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
   const verifiedPhone = !phoneChanged && Boolean(profile?.phoneVerified);
   const securityMethod = user.twoFactor?.method ? customerSecurityMethodLabels[user.twoFactor.method] || "Account security" : "";
   const lastSecurityUpdate = profile?.phoneVerifiedAt || profile?.updatedAt || profile?.registration?.createdAt || profile?.createdAt;
+  const savedDeliveryMarker = locationToMarker(form.deliveryLocation || profile?.deliveryLocation);
+  const savedDeliveryLocation = form.deliveryLocation || profile?.deliveryLocation || null;
+  const deliveryPinLabel = savedDeliveryMarker ? "Confirmed delivery pin" : "Delivery pin not saved";
   const securityItems = [
     {
       label: "Email verification",
@@ -401,14 +405,37 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
       detail: lastSecurityUpdate ? formatProfileDate(lastSecurityUpdate) : "No security update recorded yet."
     }
   ];
+  const profileSections = [
+    ["personal", "Personal"],
+    ["delivery", "Delivery"],
+    ["security", "Security"],
+    ["notifications", "Updates"]
+  ];
+  const requestPhoneVerification = () => {
+    if (!normalizedPhone || !validPhone) {
+      notify("Enter a valid Philippine mobile number before phone verification.");
+      return;
+    }
+    if (!smsProviderEnabled) {
+      notify("Phone OTP verification is prepared. SMS sending is not active yet.");
+      return;
+    }
+    notify("Phone OTP verification will open here once SMS sending is active.");
+  };
   const save = async (event) => {
     event.preventDefault();
     if (!validPhone) {
       notify("Enter a valid Philippine mobile number.");
       return;
     }
+    const safeName = String(form.name || "").trim().replace(/\s+/g, " ");
+    if (safeName.length < 2) {
+      notify("Enter your full name before saving.");
+      return;
+    }
     await saveUserProfile(user, {
       ...form,
+      name: safeName,
       phone: normalizedPhone,
       phoneVerified: phoneChanged ? false : Boolean(profile?.phoneVerified),
       phoneVerifiedAt: phoneChanged ? null : profile?.phoneVerifiedAt || null,
@@ -419,32 +446,84 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
   };
   return (
     <main className="container py-5 customer-page">
-      <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Personal info</h2></div><p>Keep your contact details and preferred delivery address ready for checkout.</p></div>
+      <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Customer profile</h2></div><p>Keep your contact details, delivery address, and order updates ready for checkout.</p></div>
       <form className="dashboard-card profile-form" onSubmit={save}>
-        <section className="profile-security-panel" aria-label="Account security status">
-          <div className="profile-security-heading">
-            <div><p className="eyebrow text-danger">Security status</p><h3>Account protection</h3></div>
-            <span>{securityItems.filter((item) => item.tone === "healthy").length} ready</span>
-          </div>
-          <div className="profile-security-grid">
-            {securityItems.map((item) => (
-              <article className="profile-security-item" key={item.label}>
-                <div><strong>{item.label}</strong><small>{item.detail}</small></div>
-                <span className={`profile-security-status ${item.tone}`}>{item.status}</span>
-              </article>
-            ))}
-          </div>
-        </section>
-        <div className="row g-3">
-          <label className="form-label col-md-6">Full name<input className="form-control" autoComplete="name" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
-          <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
-          <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for SMS updates." : "Phone OTP verification is prepared but not active yet."}</small></label>
-          <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
-          <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" autoComplete="street-address" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
-          <label className="form-label col-12">Default landmark<input className="form-control" value={form.landmark || ""} onChange={(event) => setForm((current) => ({ ...current, landmark: event.target.value }))} placeholder="Example: near sari-sari store, blue gate" /></label>
+        <div className="profile-section-tabs" role="tablist" aria-label="Customer profile sections">
+          {profileSections.map(([section, label]) => (
+            <button
+              aria-selected={activeSection === section}
+              className={activeSection === section ? "active" : ""}
+              key={section}
+              onClick={() => setActiveSection(section)}
+              role="tab"
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS OTP can be connected to this phone readiness flow." : "SMS sending is not active yet, so this saves the preference only."}</small></div>
-        <button className="btn btn-danger">Save personal information</button>
+
+        {activeSection === "personal" && (
+          <section className="profile-tab-panel" role="tabpanel">
+            <div className="profile-panel-heading"><p className="eyebrow text-danger">Contact profile</p><h3>Your order identity</h3><span>Used on receipts and delivery handoff.</span></div>
+            <div className="row g-3">
+              <label className="form-label col-md-6">Full name<input className="form-control" autoComplete="name" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
+              <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
+              <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for SMS updates." : "Phone OTP verification is prepared but not active yet."}</small></label>
+              <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
+            </div>
+          </section>
+        )}
+
+        {activeSection === "delivery" && (
+          <section className="profile-tab-panel" role="tabpanel">
+            <div className="profile-panel-heading"><p className="eyebrow text-danger">Delivery details</p><h3>Saved drop-off information</h3><span>Checkout can reuse this address, landmark, and pin status.</span></div>
+            <div className="row g-3">
+              <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" autoComplete="street-address" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and city" /></label>
+              <label className="form-label col-12">Default landmark<input className="form-control" value={form.landmark || ""} onChange={(event) => setForm((current) => ({ ...current, landmark: event.target.value }))} placeholder="Example: near sari-sari store, blue gate" /></label>
+            </div>
+            <div className={`profile-delivery-pin ${savedDeliveryMarker ? "ready" : ""}`}>
+              <div>
+                <strong>{deliveryPinLabel}</strong>
+                <small>{savedDeliveryMarker ? `Lat ${savedDeliveryMarker[0].toFixed(6)}, Lng ${savedDeliveryMarker[1].toFixed(6)}${savedDeliveryLocation?.accuracy ? `, about ${Math.round(savedDeliveryLocation.accuracy)}m accuracy` : ""}` : "Confirm the exact pin during checkout before placing delivery orders."}</small>
+              </div>
+              <span>{savedDeliveryLocation?.source || "Checkout pin"}</span>
+            </div>
+          </section>
+        )}
+
+        {activeSection === "security" && (
+          <section className="profile-tab-panel" role="tabpanel">
+            <div className="profile-security-panel" aria-label="Account security status">
+              <div className="profile-security-heading">
+                <div><p className="eyebrow text-danger">Security status</p><h3>Account protection</h3></div>
+                <span>{securityItems.filter((item) => item.tone === "healthy").length} ready</span>
+              </div>
+              <div className="profile-security-grid">
+                {securityItems.map((item) => (
+                  <article className="profile-security-item" key={item.label}>
+                    <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+                    <span className={`profile-security-status ${item.tone}`}>{item.status}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="security-recovery-panel">
+              <strong>Account recovery options</strong>
+              <p>Use your email for password reset, save backup codes after security setup, and keep your phone number updated for future phone verification.</p>
+            </div>
+          </section>
+        )}
+
+        {activeSection === "notifications" && (
+          <section className="profile-tab-panel" role="tabpanel">
+            <div className="profile-panel-heading"><p className="eyebrow text-danger">Order updates</p><h3>Notification preferences</h3><span>Choose how TapTap can update you about orders and offers.</span></div>
+            <div className="profile-preferences"><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS order updates require a verified phone number." : "SMS sending is not active yet, so this saves the preference only."}</small></div>
+            <button className="btn btn-outline-danger w-100" disabled={!validPhone || !normalizedPhone} onClick={requestPhoneVerification} type="button">{verifiedPhone ? "Phone already verified" : "Verify phone when SMS is ready"}</button>
+          </section>
+        )}
+
+        <button className="btn btn-danger profile-save-button">Save profile changes</button>
       </form>
     </main>
   );

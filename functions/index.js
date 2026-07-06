@@ -146,6 +146,23 @@ const asyncRoute = (handler) => async (req, res) => {
   }
 };
 
+const managedAccountRoles = new Set(["owner", "staff", "rider"]);
+const managedStaffRoles = new Set(["manager", "cashier", "kitchen", "inventory"]);
+
+function normalizeManagedAccountInput(input = {}) {
+  const name = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  const email = String(input.email || "").trim().toLowerCase();
+  const role = String(input.role || "staff").trim().toLowerCase();
+  const staffRole = managedStaffRoles.has(input.staffRole) ? input.staffRole : "manager";
+  const temporaryPassword = String(input.temporaryPassword || "").trim();
+  if (name.length < 2) throw new HttpError(400, "Enter the team member's full name.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Enter a valid email address.");
+  if (!managedAccountRoles.has(role)) throw new HttpError(400, "Owners can create owner, staff, or rider accounts only.");
+  if (temporaryPassword.length < 12) throw new HttpError(400, "Use a temporary password with at least 12 characters.");
+  if (temporaryPassword.length > 128) throw new HttpError(400, "Temporary password is too long.");
+  return { name, email, role, staffRole, temporaryPassword };
+}
+
 app.get(route("/status"), (_req, res) => {
   res.json({
     services: {
@@ -541,6 +558,60 @@ app.post(route("/admin/roles"), authenticate, requireRoles("owner"), async (req,
   return res.json({ updated: true });
 });
 
+app.post(route("/admin/users"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
+  const input = normalizeManagedAccountInput(req.body);
+  let userRecord;
+  try {
+    userRecord = await getAuth().createUser({
+      email: input.email,
+      password: input.temporaryPassword,
+      displayName: input.name,
+      emailVerified: false,
+      disabled: false
+    });
+  } catch (error) {
+    if (error.code === "auth/email-already-exists") {
+      throw new HttpError(409, "This email already has an account. Assign the role or reset security instead.");
+    }
+    throw error;
+  }
+  await getAuth().setCustomUserClaims(userRecord.uid, { role: input.role });
+  const createdAt = Date.now();
+  const profile = {
+    uid: userRecord.uid,
+    name: input.name,
+    email: input.email,
+    role: input.role,
+    staffRole: input.role === "staff" ? input.staffRole : null,
+    phone: "",
+    phoneVerified: false,
+    smsNotifications: false,
+    createdAt,
+    updatedAt: createdAt,
+    createdByOwnerId: req.user.uid,
+    securitySetupRequired: true
+  };
+  await database().ref().update({
+    [`users/${userRecord.uid}`]: profile,
+    [`auditLogs/AUD-${createdAt}-${userRecord.uid}-created`]: {
+      action: "admin_user_created",
+      targetUserId: userRecord.uid,
+      actorId: req.user.uid,
+      actorName: req.user.name || req.user.email,
+      actorRole: req.user.role,
+      details: { after: { role: input.role, staffRole: input.role === "staff" ? input.staffRole : null } },
+      createdAt
+    }
+  });
+  res.status(201).json({
+    uid: userRecord.uid,
+    email: input.email,
+    name: input.name,
+    role: input.role,
+    staffRole: input.role === "staff" ? input.staffRole : null
+  });
+}));
+
 app.get(route("/admin/users"), authenticate, requireRoles("owner"), asyncRoute(async (_req, res) => {
   const [authResult, profilesSnapshot, twoFactorSnapshot] = await Promise.all([
     getAuth().listUsers(1000),
@@ -552,7 +623,7 @@ app.get(route("/admin/users"), authenticate, requireRoles("owner"), asyncRoute(a
   res.json({ users: authResult.users.map((record) => {
     const profile = profiles[record.uid] || {};
     const status = security[record.uid] || {};
-    return { uid: record.uid, email: record.email || profile.email || "", name: profile.name || record.displayName || record.email || record.uid, role: record.customClaims?.role || profile.role || "customer", twoFactorEnabled: Boolean(status.enabled), twoFactorMethod: status.method || null, twoFactorLocked: Boolean(status.locked) };
+    return { uid: record.uid, email: record.email || profile.email || "", name: profile.name || record.displayName || record.email || record.uid, role: record.customClaims?.role || profile.role || "customer", staffRole: profile.staffRole || "manager", twoFactorEnabled: Boolean(status.enabled), twoFactorMethod: status.method || null, twoFactorLocked: Boolean(status.locked) };
   }) });
 }));
 app.post(route("/admin/users/:uid/2fa/reset"), authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {

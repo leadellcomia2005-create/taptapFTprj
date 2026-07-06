@@ -1025,6 +1025,10 @@ function TwoFactorPanel({ user, onComplete }) {
         <p className="eyebrow text-danger">Account locked</p>
         <h2>Account security is locked</h2>
         <p>Three consecutive verification attempts failed. An owner must unlock this account from Users & Roles.</p>
+        <div className="security-recovery-panel">
+          <strong>How to recover access</strong>
+          <p>Try a saved backup code if you have one. If this is a customer account, reset your password and sign in again. Team accounts can also ask the owner to unlock or reset security.</p>
+        </div>
         <button className="btn btn-outline-danger" onClick={() => resetPassword(user.email).then(() => window.alert("Password reset email sent. After changing the password, sign in again to unlock security.")).catch((requestError) => window.alert(requestError.message))}>Reset password to unlock</button>
         <button className="btn btn-link text-danger" onClick={logout}>Return to sign in</button>
       </div></div>
@@ -1105,6 +1109,10 @@ function TwoFactorPanel({ user, onComplete }) {
           {busy ? "Verifying..." : setup ? "Save security setup" : "Verify and open POS"}
         </button>}
         {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
+        <div className="security-recovery-panel compact">
+          <strong>Having trouble?</strong>
+          <p>{setup ? "Complete one security method now, then save the backup codes after setup." : "Use a saved backup code, or reset your password if you cannot access your verification method."}</p>
+        </div>
         <button type="button" className="btn btn-link text-secondary w-100" onClick={logout}>Cancel and sign out</button>
       </form>
     </div>

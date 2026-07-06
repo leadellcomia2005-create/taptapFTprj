@@ -2,15 +2,24 @@ import { getAuthToken } from "./authSession";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
+function customerSafeError(message = "") {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  if (/server|backend|api|database|token|provider/i.test(text)) {
+    return "The app could not finish that action. Please try again.";
+  }
+  return text;
+}
+
 function requestErrorForStatus(status, payload = {}) {
-  if (payload.error) return payload.error;
-  if (status === 404) return "This app server is missing the latest update. Restart the backend server, then try again.";
+  if (payload.error) return customerSafeError(payload.error);
+  if (status === 404) return "This page needs the latest app update. Restart the app, then try again.";
   if (status === 401) return "Please sign in again before continuing.";
   if (status === 403) return "Your account is not allowed to do that yet.";
   if (status === 413) return "That upload is too large. Try again with a smaller photo.";
   if (status === 429) return "Too many attempts. Please wait a minute, then try again.";
-  if (status >= 500) return "The app server could not finish that request. Please try again.";
-  return `Request failed (${status})`;
+  if (status >= 500) return "The app could not finish that action. Please try again.";
+  return "That action could not be completed. Please try again.";
 }
 
 async function request(path, options = {}) {
@@ -34,7 +43,7 @@ async function requestWithHeaders(path, options = {}, authHeaders = {}) {
       },
     });
   } catch {
-    throw new Error("The app server is unreachable. Restart the backend server or check your connection, then try again.");
+    throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)

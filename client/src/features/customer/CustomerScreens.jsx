@@ -37,6 +37,19 @@ function phoneIsVerified(profile, phone) {
   return Boolean(profile?.phoneVerified && normalizePhilippinePhone(profile?.phone || "") === normalized);
 }
 
+function formatProfileDate(value) {
+  const timestamp = Number(value || 0);
+  if (!timestamp) return "";
+  return new Date(timestamp).toLocaleString("en-PH");
+}
+
+const customerSecurityMethodLabels = {
+  passkey: "Passkey",
+  totp: "Security app",
+  email: "Email code",
+  sms: "SMS code"
+};
+
 const complaintTypes = [
   ["wrong-item", "Wrong item"],
   ["missing-item", "Missing item"],
@@ -164,7 +177,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
   const verifyPhone = () => {
     if (!validPhone) return notify("Enter a valid Philippine mobile number before verification.");
     if (!smsProviderEnabled) return notify("Phone OTP verification is not connected yet.");
-    notify("Phone OTP verification will open here once the SMS provider is enabled.");
+    notify("Phone OTP verification will open here once SMS sending is active.");
   };
 
   return (
@@ -354,6 +367,40 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
   const validPhone = !form.phone || isValidPhilippineMobile(normalizedPhone);
   const phoneChanged = normalizePhilippinePhone(profile?.phone || "") !== normalizedPhone;
   const verifiedPhone = !phoneChanged && Boolean(profile?.phoneVerified);
+  const securityMethod = user.twoFactor?.method ? customerSecurityMethodLabels[user.twoFactor.method] || "Account security" : "";
+  const lastSecurityUpdate = profile?.phoneVerifiedAt || profile?.updatedAt || profile?.registration?.createdAt || profile?.createdAt;
+  const securityItems = [
+    {
+      label: "Email verification",
+      status: user.emailVerified ? "Verified" : "Needs setup",
+      tone: user.emailVerified ? "healthy" : "low",
+      detail: user.emailVerified ? "Your email is confirmed for account recovery." : "Verify your email before placing orders."
+    },
+    {
+      label: "Passkey / security setup",
+      status: user.twoFactor?.enabled || user.mfaVerified ? "Enabled" : "Needs setup",
+      tone: user.twoFactor?.enabled || user.mfaVerified ? "healthy" : "low",
+      detail: securityMethod ? `${securityMethod} protects login.` : "Choose a login security method after sign in."
+    },
+    {
+      label: "Phone verification",
+      status: verifiedPhone ? "Verified" : normalizedPhone ? "Not verified" : "Needs setup",
+      tone: verifiedPhone ? "healthy" : "low",
+      detail: verifiedPhone ? "This number can receive order updates." : "Save a Philippine mobile number for future OTP verification."
+    },
+    {
+      label: "SMS notifications",
+      status: smsProviderEnabled && verifiedPhone && (form.smsNotifications || form.smsNotificationsRequested) ? "Enabled" : "Disabled",
+      tone: smsProviderEnabled && verifiedPhone && (form.smsNotifications || form.smsNotificationsRequested) ? "healthy" : "neutral",
+      detail: smsProviderEnabled ? "Texts are sent only when your phone is verified." : "SMS sending is not active yet; your preference is saved."
+    },
+    {
+      label: "Last security update",
+      status: lastSecurityUpdate ? "Updated" : "Needs setup",
+      tone: lastSecurityUpdate ? "neutral" : "low",
+      detail: lastSecurityUpdate ? formatProfileDate(lastSecurityUpdate) : "No security update recorded yet."
+    }
+  ];
   const save = async (event) => {
     event.preventDefault();
     if (!validPhone) {
@@ -374,6 +421,20 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Account settings</p><h2>Personal info</h2></div><p>Keep your contact details and preferred delivery address ready for checkout.</p></div>
       <form className="dashboard-card profile-form" onSubmit={save}>
+        <section className="profile-security-panel" aria-label="Account security status">
+          <div className="profile-security-heading">
+            <div><p className="eyebrow text-danger">Security status</p><h3>Account protection</h3></div>
+            <span>{securityItems.filter((item) => item.tone === "healthy").length} ready</span>
+          </div>
+          <div className="profile-security-grid">
+            {securityItems.map((item) => (
+              <article className="profile-security-item" key={item.label}>
+                <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+                <span className={`profile-security-status ${item.tone}`}>{item.status}</span>
+              </article>
+            ))}
+          </div>
+        </section>
         <div className="row g-3">
           <label className="form-label col-md-6">Full name<input className="form-control" autoComplete="name" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
           <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
@@ -382,7 +443,7 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
           <label className="form-label col-12">Saved delivery address<textarea className="form-control" rows="3" autoComplete="street-address" value={form.address || ""} onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))} placeholder="House number, street, barangay and landmark" /></label>
           <label className="form-label col-12">Default landmark<input className="form-control" value={form.landmark || ""} onChange={(event) => setForm((current) => ({ ...current, landmark: event.target.value }))} placeholder="Example: near sari-sari store, blue gate" /></label>
         </div>
-        <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS OTP can be connected to this phone readiness flow." : "SMS provider is not configured yet, so this saves the preference only."}</small></div>
+        <div className="profile-preferences"><strong>Notification preferences</strong><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS OTP can be connected to this phone readiness flow." : "SMS sending is not active yet, so this saves the preference only."}</small></div>
         <button className="btn btn-danger">Save personal information</button>
       </form>
     </main>

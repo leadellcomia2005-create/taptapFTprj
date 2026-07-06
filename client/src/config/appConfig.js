@@ -76,6 +76,7 @@ export const defaultViewForRole = (role) => ({
 }[role] || "store");
 
 export const serviceDisplayNames = {
+  api: "App connection",
   firebase: "Secure login",
   socket: "Live updates",
   openai: "Business insight",
@@ -83,7 +84,8 @@ export const serviceDisplayNames = {
   paymongo: "Online payment",
   twilio: "SMS updates",
   emailOtp: "Email codes",
-  twoFactor: "Account security"
+  twoFactor: "Account security",
+  turnstile: "Bot protection"
 };
 
 export const securityMethodLabels = {

@@ -128,7 +128,14 @@ async function enforceRegistrationRateLimit(db, source) {
     const current = (await ref.once("value")).val() || {};
     const windowStart = Number(current.windowStart || 0);
     const count = now - windowStart < rateWindowMs ? Number(current.count || 0) : 0;
-    if (count >= maxAttemptsPerWindow) throw new HttpError(429, "Too many registration attempts. Please wait 15 minutes, then try again.");
+    if (count >= maxAttemptsPerWindow) {
+      await writeRegistrationAudit(db, "registration_rate_limited", {
+        emailHash: source.emailHash,
+        ipHash: source.ipHash,
+        reason: "Too many registration attempts"
+      });
+      throw new HttpError(429, "Too many registration attempts. Please wait 15 minutes, then try again.");
+    }
     await ref.set({ windowStart: count ? windowStart : now, count: count + 1, lastAt: now, expiresAt: now + rateWindowMs });
   }
 }
@@ -229,7 +236,7 @@ export async function createCustomerRegistration({ db, auth, input, req, sendVer
       ipHash: source.ipHash,
       reason: error?.code || error?.message || "registration_failed"
     });
-    if (error?.code === "auth/email-already-exists") throw new HttpError(409, "We could not create this account. Please check your details or try signing in.");
+    if (error?.code === "auth/email-already-exists") throw new HttpError(409, "This email already has a TapTap account. Sign in or reset the password.");
     if (error instanceof HttpError) throw error;
     throw new HttpError(500, "The account could not be created. Please try again.");
   }

@@ -635,13 +635,39 @@ export function SettingsModule({ title, serviceStatus, staff = false, notify }) 
     emailReceipts: staff
   });
   const toggle = (key) => setSettings((current) => ({ ...current, [key]: !current[key] }));
+  const readinessRows = [
+    { key: "firebase", label: "Firebase/Admin connection", detail: "Required for secure accounts and records.", required: true },
+    { key: "emailOtp", label: "Gmail email sending", detail: "Used for email codes, verification, and receipts.", required: true },
+    { key: "turnstile", label: "Turnstile bot protection", detail: "Protects customer registration from automated abuse.", required: true },
+    { key: "twilio", label: "SMS provider", detail: "Optional phone texts for verified customers.", optional: true },
+    { key: "paymongo", label: "PayMongo payments", detail: "Optional online payment checkout.", optional: true },
+    { key: "openai", label: "OpenAI insights", detail: "Optional owner decision support.", optional: true }
+  ].map((item) => {
+    const ready = Boolean(serviceStatus?.[item.key]);
+    const status = ready ? "Ready" : item.optional ? "Optional" : "Needs attention";
+    return { ...item, ready, status, tone: ready ? "ready" : item.optional ? "optional" : "attention" };
+  });
   return (
     <div className="row g-3">
       <div className="col-xl-7"><div className="dashboard-card settings-card"><p className="eyebrow text-danger">Preferences</p><h3>{title}</h3>
         {Object.entries(settings).map(([key, enabled]) => <label className="setting-row" key={key}><span><strong>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</strong><small>{staff ? "Staff workstation preference" : "Business-wide operational setting"}</small></span><input type="checkbox" checked={enabled} onChange={() => toggle(key)} /></label>)}
         <button className="btn btn-danger mt-3" onClick={() => notify("Settings saved for this session.")}>Save settings</button>
       </div></div>
-      <div className="col-xl-5"><div className="dashboard-card"><h3>App features</h3>{Object.entries(serviceStatus || {}).map(([name, active]) => <ServiceBadge key={name} name={name} active={active} />)}</div></div>
+      <div className="col-xl-5"><div className="dashboard-card">
+        <h3>{staff ? "App features" : "Security readiness"}</h3>
+        {!staff && <div className="security-readiness-list">
+          {readinessRows.map((item) => (
+            <article className="security-readiness-row" key={item.key}>
+              <span className={`readiness-dot ${item.tone}`} />
+              <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+              <b className={item.tone}>{item.status}</b>
+            </article>
+          ))}
+        </div>}
+        <div className={staff ? "" : "service-badge-list"}>
+          {Object.entries(serviceStatus || {}).map(([name, active]) => <ServiceBadge key={name} name={name} active={active} />)}
+        </div>
+      </div></div>
     </div>
   );
 }

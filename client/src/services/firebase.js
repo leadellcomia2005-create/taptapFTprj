@@ -257,9 +257,9 @@ export function friendlyAuthError(error) {
   const messages = {
     "auth/email-already-in-use": "This email already has an account. Use sign in or reset the password.",
     "auth/invalid-email": "Enter a valid email address.",
-    "auth/weak-password": "Use a stronger password with at least 8 characters.",
+    "auth/weak-password": "Use a stronger password with at least 12 characters, uppercase, lowercase, number, and symbol.",
     "auth/network-request-failed": "The account service could not be reached. Check the internet connection and try again.",
-    "auth/operation-not-allowed": "Email and password registration is not available right now.",
+    "auth/operation-not-allowed": "Email and password sign-in is not available right now.",
     "auth/invalid-credential": "The email or password is incorrect.",
     "auth/invalid-login-credentials": "The email or password is incorrect."
   };

@@ -71,7 +71,7 @@ function loadTurnstileScript() {
       script.async = true;
       script.defer = true;
       script.onload = () => resolve(window.turnstile);
-      script.onerror = () => reject(new Error("Security check could not load."));
+      script.onerror = () => reject(new Error("Security check could not load. Refresh the page or check your connection."));
       document.head.appendChild(script);
     });
   }
@@ -110,11 +110,12 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
           "expired-callback"() {
             setStatus("expired");
             onToken("");
+            onError("Security check expired. Please complete it again.");
           },
           "error-callback"() {
             setStatus("error");
             onToken("");
-            onError("Security check failed. Try again.");
+            onError("Security check could not be completed. Refresh the page or check your connection.");
           }
         });
         setStatus("ready");
@@ -122,7 +123,7 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
       .catch(() => {
         if (!cancelled) {
           setStatus("error");
-          onError("Security check could not load. Check your connection, then try again.");
+          onError("Security check could not load. Refresh the page or check your connection.");
         }
       });
 
@@ -144,7 +145,7 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
       <div ref={containerRef} />
       {status === "loading" && <small>Loading security check...</small>}
       {status === "expired" && <small>Security check expired. Please complete it again.</small>}
-      {status === "error" && <small>Security check could not be completed.</small>}
+      {status === "error" && <small>Security check could not be completed. Refresh the page or check your connection.</small>}
     </div>
   );
 }
@@ -152,10 +153,10 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
-    { id: "auth", label: "Account sign-in", detail: "Waiting to create your secure login.", status: "pending" },
+    { id: "auth", label: "Account created", detail: "Waiting to create your secure login.", status: "pending" },
     { id: "profile", label: "Customer profile", detail: "Waiting to save your profile.", status: "pending" },
     { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
-    { id: "session", label: "Final setup", detail: "Waiting to finish your account setup.", status: "pending" }
+    { id: "session", label: "Security setup", detail: "Required after your first sign in.", status: "pending" }
   ];
   const [role, setRole] = useState("customer");
   const [registering, setRegistering] = useState(registrationRequested);
@@ -556,15 +557,26 @@ function LoginPanel({ onLoggedIn }) {
           ))}
           {registrationResult && (
             <div className="registration-result">
-              <strong>Customer account created</strong>
-              <span>Your account is ready. Please check your email to verify it.</span>
-              <span>{registrationResult.verificationSent ? "Verification email requested." : "Verification email still needs to be resent."}</span>
+              <div>
+                <strong>Customer account created</strong>
+                <span>Your TapTap account is ready. Verify your email before ordering.</span>
+              </div>
+              <ul>
+                <li><b>Account created</b><span>Your customer profile was saved.</span></li>
+                <li><b>Email verification required</b><span>{registrationResult.verificationSent ? "A verification email was sent." : "Sign in later to resend the verification email."}</span></li>
+                <li><b>Security setup required</b><span>After sign in, choose passkey, email code, or security app.</span></li>
+              </ul>
+              <div className="registration-result-actions">
+                <a className="btn btn-outline-danger btn-sm" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
+                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>Back to sign in</button>
+              </div>
+              {!registrationResult.verificationSent && <small>Use Resend verification after signing in if the email did not arrive.</small>}
             </div>
           )}
         </div>
       )}
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
-      <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
+      <button className="btn btn-danger w-100 login-submit-button" disabled={busy || Boolean(registering && registrationResult)}>
         {submitLabel}
       </button>
       <div className="login-secondary-actions">

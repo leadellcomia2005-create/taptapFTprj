@@ -101,7 +101,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       setActiveShift(result.shift);
       notify("Shift opened. Walk-in POS is ready.");
     } catch (error) {
-      notify(error.message || "Shift could not be started. Restart the app server if this keeps happening.");
+      notify(error.message || "Shift could not be started. Restart the app if this keeps happening.");
     } finally {
       setOpeningShift(false);
     }

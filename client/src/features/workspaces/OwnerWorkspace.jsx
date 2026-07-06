@@ -9,6 +9,42 @@ import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, 
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
 
+const securityAuditActions = new Set([
+  "registration_security_check_passed",
+  "registration_started",
+  "registration_failed",
+  "registration_rate_limited",
+  "account_created",
+  "2fa_failure",
+  "2fa_lockout",
+  "2fa_success",
+  "2fa_password_reset_unlock",
+  "2fa_setup_started",
+  "2fa_sms_sent",
+  "2fa_email_sent",
+  "2fa_enabled",
+  "2fa_reset",
+  "2fa_unlocked",
+  "passkey_registered",
+  "passkey_verified"
+]);
+
+function auditActionLabel(action = "") {
+  return String(action || "audit event")
+    .replace(/^2fa_/, "Security ")
+    .replace(/^passkey_/, "Passkey ")
+    .replace(/^registration_/, "Registration ")
+    .replaceAll("_", " ");
+}
+
+function safeAuditIdentifier(entry = {}) {
+  if (entry.emailHash) return `Email hash ${String(entry.emailHash).slice(0, 12)}`;
+  if (entry.ipHash) return `IP hash ${String(entry.ipHash).slice(0, 12)}`;
+  if (entry.userId) return `User ${String(entry.userId).slice(0, 12)}`;
+  if (entry.actorId) return `Actor ${String(entry.actorId).slice(0, 12)}`;
+  return "Safe identifier unavailable";
+}
+
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
@@ -36,6 +72,8 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
+  const securityAuditRows = useMemo(() => auditLogs.filter((entry) => securityAuditActions.has(entry.action)), [auditLogs]);
+  const blockedRegistrationRows = useMemo(() => securityAuditRows.filter((entry) => entry.action === "registration_failed" || String(entry.reason || "").toLowerCase().includes("too many")), [securityAuditRows]);
   const refreshUsers = useCallback(async () => {
     try {
       const result = await api.listUsers();
@@ -105,6 +143,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       const after = Object.entries(entry.details.after || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
       return [before && `Before ${before}`, after && `After ${after}`].filter(Boolean).join(" | ") || "-";
     }
+    if (entry.provider) return `${entry.provider} check`;
+    if (entry.method) return `${entry.method} security`;
+    if (entry.hostname) return `Host ${entry.hostname}`;
     return entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-");
   };
   if (section === "owner-sales") return (
@@ -157,6 +198,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   );
   if (section === "owner-users") return (
     <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div><div className="row g-3">
+      <div className="col-12"><div className="dashboard-card account-control-note"><p className="eyebrow text-danger">Account control</p><h3>Team access is owner-managed</h3><p>Customer registration is public. Owner, staff, and rider accounts must be assigned here by an owner so store access stays controlled.</p></div></div>
       <div className="col-12"><div className="dashboard-card"><h3>User accounts and security</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div></div></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign user role</h3><p className="module-note">Enter the user account ID and choose the role.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label>{roleForm.role === "staff" && <label className="form-label">Staff access scope<select className="form-select" value={roleForm.staffRole} onChange={(event) => setRoleForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}<button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
       <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
@@ -164,7 +206,19 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   );
   if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;
   if (section === "owner-audit") return (
-    <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div><div className="dashboard-card"><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{entry.action?.replaceAll("_", " ")}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div></main>
+    <main className="container-fluid dashboard-page py-4">
+      <div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div>
+      <div className="row g-3 mb-3">
+        <div className="col-md-4"><div className="metric-card"><small>Security events</small><strong>{securityAuditRows.length}</strong><span>Registration and login protection</span></div></div>
+        <div className="col-md-4"><div className="metric-card"><small>Blocked attempts</small><strong>{blockedRegistrationRows.length}</strong><span>Failed or limited signups</span></div></div>
+        <div className="col-md-4"><div className="metric-card"><small>Total audit rows</small><strong>{auditLogs.length}</strong><span>Orders, stock, shifts, accounts</span></div></div>
+      </div>
+      <div className="dashboard-card security-audit-card">
+        <div className="module-heading"><div><p className="eyebrow text-danger">Security and account events</p><h3>Owner security audit</h3></div><span className="module-note">Safe identifiers hide private email and location details.</span></div>
+        <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Event type</th><th>Safe identifier</th><th>Role</th><th>Description</th></tr></thead><tbody>{securityAuditRows.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Security events will appear after customer registrations or account security activity.</td></tr>}{securityAuditRows.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td className="text-capitalize">{auditActionLabel(entry.action)}</td><td><code className="safe-audit-id">{safeAuditIdentifier(entry)}</code></td><td><span className="role-badge">{entry.actorRole || "customer"}</span></td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div>
+      </div>
+      <div className="dashboard-card mt-3"><div className="module-heading"><div><p className="eyebrow text-danger">Full audit trail</p><h3>Operations history</h3></div></div><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{auditActionLabel(entry.action)}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || entry.uid || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div>
+    </main>
   );
   if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><div className="row g-3"><div className="col-12"><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></div><div className="col-12"><ApprovalQueueModule user={user} notify={notify} /></div><div className="col-12"><AdminCleanupModule user={user} orders={orders} inventory={inventory} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={notify} /></div></div></main>;
   return (

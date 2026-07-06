@@ -10,7 +10,7 @@ import {
   validateLocation,
   validateOrderItems
 } from "../src/security.js";
-import { passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
+import { createCustomerRegistration, passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
 
 const order = {
   customerId: "customer-1",
@@ -61,6 +61,47 @@ test("rejects unsafe customer registration inputs", () => {
   assert.throws(() => validateCustomerRegistration({ ...base, confirmPassword: "Different2026!" }), /match/i);
   assert.throws(() => validateCustomerRegistration({ ...base, termsAccepted: false }), /Terms and Privacy/i);
   assert.throws(() => validateCustomerRegistration({ ...base, botField: "filled" }), /could not create/i);
+});
+
+test("audits rate-limited customer registrations with safe identifiers", async () => {
+  const writes = {};
+  const db = {
+    ref(path) {
+      return {
+        once: async () => ({
+          val: () => path.startsWith("security/registrationRate/")
+            ? { windowStart: Date.now(), count: 5 }
+            : null
+        }),
+        set: async (value) => {
+          writes[path] = value;
+        }
+      };
+    }
+  };
+
+  await assert.rejects(
+    () => createCustomerRegistration({
+      db,
+      auth: { createUser: async () => assert.fail("rate-limited registration must not create a user") },
+      input: {
+        name: "Juan Dela Cruz",
+        email: "juan@example.com",
+        password: "TapTapFood2026!",
+        confirmPassword: "TapTapFood2026!",
+        termsAccepted: true,
+        privacyAccepted: true
+      },
+      req: { headers: { "user-agent": "node-test" }, ip: "127.0.0.1" }
+    }),
+    /Too many registration attempts/
+  );
+
+  const auditEntry = Object.values(writes).find((entry) => entry.action === "registration_rate_limited");
+  assert.equal(auditEntry.actorRole, "customer");
+  assert.match(auditEntry.emailHash, /^[a-f0-9]{40}$/);
+  assert.match(auditEntry.ipHash, /^[a-f0-9]{40}$/);
+  assert.equal(auditEntry.reason, "Too many registration attempts");
 });
 
 test("verifies Turnstile registration tokens when configured", async (t) => {

@@ -48,6 +48,101 @@ function safeAuditIdentifier(entry = {}) {
   return "Safe identifier unavailable";
 }
 
+function auditDetailText(entry) {
+  if (entry.details?.before || entry.details?.after) {
+    const before = Object.entries(entry.details.before || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
+    const after = Object.entries(entry.details.after || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
+    return [before && `Before ${before}`, after && `After ${after}`].filter(Boolean).join(" | ") || "-";
+  }
+  if (entry.provider) return `${entry.provider} check`;
+  if (entry.method) return `${entry.method} security`;
+  if (entry.hostname) return `Host ${entry.hostname}`;
+  return entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-");
+}
+
+function auditCategory(entry = {}) {
+  const action = String(entry.action || "");
+  if (securityAuditActions.has(action) || action.startsWith("2fa_") || action.startsWith("passkey_") || action.startsWith("registration_")) return "security";
+  if (action === "admin_user_created" || action === "role_changed" || entry.targetUserId || action.includes("user")) return "users";
+  if (entry.orderId || action.includes("order") || action.includes("rider") || action.includes("cod")) return "orders";
+  if (entry.itemId || entry.itemName || action.includes("inventory") || action.includes("menu_") || action.includes("stock_")) return "inventory";
+  if (entry.shiftLogId || action.includes("shift") || action.includes("cash")) return "shifts";
+  return "system";
+}
+
+function auditSeverity(entry = {}) {
+  const action = String(entry.action || "");
+  if (["role_changed", "admin_user_created", "2fa_reset", "2fa_unlocked", "2fa_lockout", "owner_void_restored", "orders_archived"].includes(action)) return "critical";
+  if (["registration_failed", "registration_rate_limited", "inventory_adjusted", "order_cancel_restored", "complaint_created", "approval_rejected"].includes(action)) return "warning";
+  if (String(entry.reason || "").toLowerCase().includes("too many")) return "warning";
+  return "info";
+}
+
+function auditRecordLabel(entry = {}) {
+  return entry.orderId || entry.itemName || entry.itemId || entry.shiftLogId || entry.approvalId || entry.complaintId || entry.reviewId || entry.targetUserId || entry.userId || entry.uid || "-";
+}
+
+function auditFriendlyMessage(entry = {}) {
+  const action = String(entry.action || "");
+  const labels = {
+    account_created: "Customer account was created",
+    admin_user_created: "Owner created a team account",
+    approval_approved: "Owner approved a request",
+    approval_rejected: "Owner rejected a request",
+    approval_requested: "Staff requested approval",
+    complaint_created: "Customer submitted a complaint",
+    complaint_updated: "Complaint was updated",
+    inventory_adjusted: "Inventory stock was adjusted",
+    inventory_received: "Inventory stock was received",
+    menu_item_created: "Menu item was created",
+    menu_item_updated: "Menu item was updated",
+    menu_stock_updated: "Menu stock was updated",
+    order_cancel_restored: "Cancelled order stock was restored",
+    order_created: "Order was created",
+    order_deducted: "Order stock was deducted",
+    order_updated: "Order status was updated",
+    orders_archived: "Old orders were archived",
+    owner_void_restored: "Owner void restored inventory",
+    registration_failed: "Registration attempt was blocked",
+    registration_rate_limited: "Registration was temporarily limited",
+    registration_security_check_passed: "Registration security check passed",
+    registration_started: "Customer registration started",
+    review_moderated: "Review moderation was updated",
+    rider_auto_assigned: "Rider was auto-assigned",
+    role_changed: "Owner changed a user role",
+    shift_closed: "Staff shift was closed",
+    shift_started: "Staff shift was opened",
+    stock_count_approved: "Stock count was approved"
+  };
+  if (action.startsWith("2fa_")) return `Account security ${action.replace(/^2fa_/, "").replaceAll("_", " ")}`;
+  if (action.startsWith("passkey_")) return `Passkey ${action.replace(/^passkey_/, "").replaceAll("_", " ")}`;
+  return labels[action] || auditActionLabel(action);
+}
+
+function auditSearchText(entry = {}) {
+  return [
+    auditFriendlyMessage(entry),
+    auditActionLabel(entry.action),
+    auditRecordLabel(entry),
+    safeAuditIdentifier(entry),
+    auditDetailText(entry),
+    entry.actorName,
+    entry.actorRole,
+    entry.status,
+    entry.reason
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+const auditCategories = [
+  ["all", "All logs"],
+  ["security", "Security"],
+  ["orders", "Orders"],
+  ["inventory", "Inventory"],
+  ["users", "Users / Roles"],
+  ["shifts", "Shift / Cash"],
+  ["system", "System"]
+];
+
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
@@ -77,25 +172,33 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [managedUsers, setManagedUsers] = useState([]);
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
-  const [auditFilter, setAuditFilter] = useState("all");
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
+  const [auditSearch, setAuditSearch] = useState("");
   const [auditDateRange, setAuditDateRange] = useState({ from: "", to: "" });
+  const [auditPage, setAuditPage] = useState(1);
+  const [selectedAuditEntry, setSelectedAuditEntry] = useState(null);
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
-  const securityAuditRows = useMemo(() => auditLogs.filter((entry) => securityAuditActions.has(entry.action)), [auditLogs]);
+  const sortedAuditRows = useMemo(() => [...auditLogs].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)), [auditLogs]);
+  const securityAuditRows = useMemo(() => sortedAuditRows.filter((entry) => securityAuditActions.has(entry.action)), [sortedAuditRows]);
   const blockedRegistrationRows = useMemo(() => securityAuditRows.filter((entry) => entry.action === "registration_failed" || String(entry.reason || "").toLowerCase().includes("too many")), [securityAuditRows]);
-  const filteredSecurityAuditRows = useMemo(() => {
+  const attentionAuditRows = useMemo(() => sortedAuditRows.filter((entry) => auditSeverity(entry) !== "info"), [sortedAuditRows]);
+  const needsAttentionAuditRows = attentionAuditRows.slice(0, 6);
+  const filteredAuditRows = useMemo(() => {
     const from = auditDateRange.from ? new Date(`${auditDateRange.from}T00:00:00`).getTime() : null;
     const to = auditDateRange.to ? new Date(`${auditDateRange.to}T00:00:00`).getTime() + 24 * 60 * 60 * 1000 : null;
-    return securityAuditRows.filter((entry) => {
+    const query = auditSearch.trim().toLowerCase();
+    return sortedAuditRows.filter((entry) => {
       const timestamp = Number(entry.createdAt || 0);
       if (from && timestamp < from) return false;
       if (to && timestamp >= to) return false;
-      if (auditFilter === "registration") return String(entry.action).startsWith("registration_") || entry.action === "account_created";
-      if (auditFilter === "security") return String(entry.action).startsWith("2fa_") || String(entry.action).startsWith("passkey_");
-      if (auditFilter === "account") return ["admin_user_created", "role_changed", "2fa_reset", "2fa_unlocked"].includes(entry.action);
-      if (auditFilter === "blocked") return entry.action === "registration_failed" || entry.action === "registration_rate_limited" || entry.action === "2fa_lockout" || String(entry.reason || "").toLowerCase().includes("too many");
+      if (auditCategoryFilter !== "all" && auditCategory(entry) !== auditCategoryFilter) return false;
+      if (query && !auditSearchText(entry).includes(query)) return false;
       return true;
     });
-  }, [auditDateRange, auditFilter, securityAuditRows]);
+  }, [auditCategoryFilter, auditDateRange, auditSearch, sortedAuditRows]);
+  const auditPageSize = 25;
+  const auditTotalPages = Math.max(1, Math.ceil(filteredAuditRows.length / auditPageSize));
+  const pagedAuditRows = filteredAuditRows.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize);
   const refreshUsers = useCallback(async () => {
     try {
       const result = await api.listUsers();
@@ -107,6 +210,12 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   useEffect(() => {
     if (section === "owner-users") refreshUsers();
   }, [refreshUsers, section]);
+  useEffect(() => {
+    setAuditPage(1);
+  }, [auditCategoryFilter, auditDateRange.from, auditDateRange.to, auditSearch]);
+  useEffect(() => {
+    if (auditPage > auditTotalPages) setAuditPage(auditTotalPages);
+  }, [auditPage, auditTotalPages]);
   const printDailyReport = () => {
     const opened = printOwnerDailyReport(dailyReport);
     notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
@@ -175,16 +284,33 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       notify(error.message);
     }
   };
-  const auditDetailText = (entry) => {
-    if (entry.details?.before || entry.details?.after) {
-      const before = Object.entries(entry.details.before || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
-      const after = Object.entries(entry.details.after || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
-      return [before && `Before ${before}`, after && `After ${after}`].filter(Boolean).join(" | ") || "-";
+  const setAuditDatePreset = (preset) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (preset === "all") {
+      setAuditDateRange({ from: "", to: "" });
+      return;
     }
-    if (entry.provider) return `${entry.provider} check`;
-    if (entry.method) return `${entry.method} security`;
-    if (entry.hostname) return `Host ${entry.hostname}`;
-    return entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-");
+    if (preset === "today") {
+      setAuditDateRange({ from: localDateInputValue(today), to: localDateInputValue(today) });
+      return;
+    }
+    if (preset === "yesterday") {
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      setAuditDateRange({ from: localDateInputValue(yesterday), to: localDateInputValue(yesterday) });
+      return;
+    }
+    if (preset === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - 6);
+      setAuditDateRange({ from: localDateInputValue(weekStart), to: localDateInputValue(today) });
+      return;
+    }
+    if (preset === "month") {
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      setAuditDateRange({ from: localDateInputValue(monthStart), to: localDateInputValue(today) });
+    }
   };
   if (section === "owner-sales") return (
     <main className="container-fluid dashboard-page py-4">
@@ -272,30 +398,117 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Accountability and integrity</p><h2>Audit Logs</h2></div></div>
       <div className="row g-3 mb-3">
-        <div className="col-md-4"><div className="metric-card"><small>Security events</small><strong>{securityAuditRows.length}</strong><span>Registration and login protection</span></div></div>
-        <div className="col-md-4"><div className="metric-card"><small>Blocked attempts</small><strong>{blockedRegistrationRows.length}</strong><span>Failed or limited signups</span></div></div>
-        <div className="col-md-4"><div className="metric-card"><small>Total audit rows</small><strong>{auditLogs.length}</strong><span>Orders, stock, shifts, accounts</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Security events</small><strong>{securityAuditRows.length}</strong><span>Registration and login protection</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Blocked attempts</small><strong>{blockedRegistrationRows.length}</strong><span>Failed or limited signups</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Needs attention</small><strong>{attentionAuditRows.length}</strong><span>Warning and critical logs</span></div></div>
+        <div className="col-md-3"><div className="metric-card"><small>Total audit rows</small><strong>{auditLogs.length}</strong><span>Orders, stock, shifts, accounts</span></div></div>
       </div>
-      <div className="dashboard-card security-audit-card">
-        <div className="module-heading"><div><p className="eyebrow text-danger">Security and account events</p><h3>Owner security audit</h3></div><span className="module-note">Safe identifiers hide private email and location details.</span></div>
-        <div className="security-audit-filters">
-          <div className="audit-filter-buttons" role="group" aria-label="Security audit filter">
+
+      <div className="audit-category-grid">
+        {auditCategories.map(([value, label]) => {
+          const count = value === "all" ? sortedAuditRows.length : sortedAuditRows.filter((entry) => auditCategory(entry) === value).length;
+          return (
+            <button className={auditCategoryFilter === value ? "active" : ""} key={value} onClick={() => setAuditCategoryFilter(value)} type="button">
+              <span>{label}</span>
+              <strong>{count}</strong>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dashboard-card security-audit-card audit-center-card">
+        <div className="module-heading"><div><p className="eyebrow text-danger">Filtered audit center</p><h3>{auditCategories.find(([value]) => value === auditCategoryFilter)?.[1] || "Audit logs"}</h3></div><span className="module-note">Search, filter, then open a row for full details.</span></div>
+        <div className="security-audit-filters audit-center-filters">
+          <label className="audit-search-field">Search logs<input className="form-control" type="search" value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} placeholder="Order ID, actor, action, item, role..." /></label>
+          <div className="audit-filter-buttons audit-date-presets" role="group" aria-label="Audit date presets">
             {[
-              ["all", "All"],
-              ["registration", "Registration"],
-              ["security", "Sign-in"],
-              ["account", "Account control"],
-              ["blocked", "Blocked"]
-            ].map(([value, label]) => (
-              <button className={auditFilter === value ? "active" : ""} key={value} onClick={() => setAuditFilter(value)} type="button">{label}</button>
-            ))}
+              ["today", "Today"],
+              ["yesterday", "Yesterday"],
+              ["week", "Last 7 days"],
+              ["month", "This month"],
+              ["all", "All dates"]
+            ].map(([value, label]) => <button key={value} onClick={() => setAuditDatePreset(value)} type="button">{label}</button>)}
           </div>
           <label>From<input className="form-control" type="date" value={auditDateRange.from} onChange={(event) => setAuditDateRange((current) => ({ ...current, from: event.target.value }))} /></label>
           <label>To<input className="form-control" type="date" value={auditDateRange.to} onChange={(event) => setAuditDateRange((current) => ({ ...current, to: event.target.value }))} /></label>
         </div>
-        <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Event type</th><th>Safe identifier</th><th>Role</th><th>Description</th></tr></thead><tbody>{filteredSecurityAuditRows.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">No security events match this filter yet.</td></tr>}{filteredSecurityAuditRows.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td className="text-capitalize">{auditActionLabel(entry.action)}</td><td><code className="safe-audit-id">{safeAuditIdentifier(entry)}</code></td><td><span className="role-badge">{entry.actorRole || "customer"}</span></td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div>
+
+        <section className="audit-attention-strip" aria-label="Audit rows needing attention">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Needs attention</p><h3>Risky account or operations events</h3></div></div>
+          <div className="audit-attention-grid">
+            {needsAttentionAuditRows.length === 0 && <div className="empty-chat">No warning or critical audit logs right now.</div>}
+            {needsAttentionAuditRows.map((entry) => (
+              <article className={`audit-attention-card ${auditSeverity(entry)}`} key={entry.id}>
+                <span className={`audit-severity ${auditSeverity(entry)}`}>{auditSeverity(entry)}</span>
+                <strong>{auditFriendlyMessage(entry)}</strong>
+                <small>{new Date(entry.createdAt).toLocaleString("en-PH")} - {auditRecordLabel(entry)}</small>
+                <button className="btn btn-sm btn-outline-dark" onClick={() => setSelectedAuditEntry(entry)} type="button">View details</button>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <div className="audit-results-summary">
+          <span>{filteredAuditRows.length} result{filteredAuditRows.length === 1 ? "" : "s"}</span>
+          <span>Page {auditPage} of {auditTotalPages}</span>
+        </div>
+        <div className="table-responsive">
+          <table className="table align-middle audit-table">
+            <thead><tr><th>Time</th><th>Severity</th><th>Category</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead>
+            <tbody>
+              {pagedAuditRows.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-5">No audit logs match the selected filters.</td></tr>}
+              {pagedAuditRows.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td>
+                  <td><span className={`audit-severity ${auditSeverity(entry)}`}>{auditSeverity(entry)}</span></td>
+                  <td><span className="role-badge">{auditCategory(entry)}</span></td>
+                  <td><strong>{auditFriendlyMessage(entry)}</strong><small className="d-block text-secondary">{auditActionLabel(entry.action)}</small></td>
+                  <td>{entry.actorName || "System"}<small className="d-block text-secondary">{entry.actorRole || "-"}</small></td>
+                  <td><code className="safe-audit-id">{auditRecordLabel(entry)}</code></td>
+                  <td><button className="btn btn-sm btn-outline-dark" onClick={() => setSelectedAuditEntry(entry)} type="button">Open</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="audit-pagination">
+          <button className="btn btn-outline-dark btn-sm" disabled={auditPage <= 1} onClick={() => setAuditPage((current) => Math.max(1, current - 1))}>Previous</button>
+          <span>{Math.min(filteredAuditRows.length, (auditPage - 1) * auditPageSize + 1)}-{Math.min(filteredAuditRows.length, auditPage * auditPageSize)} of {filteredAuditRows.length}</span>
+          <button className="btn btn-outline-dark btn-sm" disabled={auditPage >= auditTotalPages} onClick={() => setAuditPage((current) => Math.min(auditTotalPages, current + 1))}>Next</button>
+        </div>
       </div>
-      <div className="dashboard-card mt-3"><div className="module-heading"><div><p className="eyebrow text-danger">Full audit trail</p><h3>Operations history</h3></div></div><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Record</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 && <tr><td colSpan="5" className="text-center text-secondary py-5">Actions will appear here as orders, stock and shifts are updated.</td></tr>}{auditLogs.map((entry) => <tr key={entry.id}><td>{new Date(entry.createdAt).toLocaleString("en-PH")}</td><td>{auditActionLabel(entry.action)}</td><td>{entry.actorName || "System"}</td><td>{entry.orderId || entry.itemName || entry.shiftLogId || entry.approvalId || entry.uid || "-"}</td><td>{auditDetailText(entry)}</td></tr>)}</tbody></table></div></div>
+
+      {selectedAuditEntry && (
+        <div className="modal d-block audit-detail-shell" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedAuditEntry(null); }}>
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content audit-detail-modal" role="dialog" aria-modal="true" aria-labelledby="audit-detail-title">
+              <div className="modal-header">
+                <div><p className="eyebrow text-danger">Audit detail</p><h5 className="modal-title" id="audit-detail-title">{auditFriendlyMessage(selectedAuditEntry)}</h5></div>
+                <button className="btn-close" aria-label="Close audit detail" onClick={() => setSelectedAuditEntry(null)} type="button" />
+              </div>
+              <div className="modal-body">
+                <div className="audit-detail-grid">
+                  <div><small>Time</small><strong>{new Date(selectedAuditEntry.createdAt).toLocaleString("en-PH")}</strong></div>
+                  <div><small>Severity</small><span className={`audit-severity ${auditSeverity(selectedAuditEntry)}`}>{auditSeverity(selectedAuditEntry)}</span></div>
+                  <div><small>Category</small><strong>{auditCategory(selectedAuditEntry)}</strong></div>
+                  <div><small>Actor</small><strong>{selectedAuditEntry.actorName || "System"}</strong><span>{selectedAuditEntry.actorRole || "-"}</span></div>
+                  <div><small>Record</small><strong>{auditRecordLabel(selectedAuditEntry)}</strong></div>
+                  <div><small>Safe identifier</small><code className="safe-audit-id">{safeAuditIdentifier(selectedAuditEntry)}</code></div>
+                </div>
+                <section className="audit-detail-section">
+                  <small>Description</small>
+                  <p>{auditDetailText(selectedAuditEntry)}</p>
+                </section>
+                <section className="audit-detail-section">
+                  <small>Advanced details</small>
+                  <pre>{JSON.stringify(selectedAuditEntry.details || selectedAuditEntry, null, 2)}</pre>
+                </section>
+              </div>
+              <div className="modal-footer"><button className="btn btn-outline-dark" onClick={() => setSelectedAuditEntry(null)} type="button">Close</button></div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
   if (section === "owner-settings") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Business administration</p><h2>System Settings</h2></div></div><div className="row g-3"><div className="col-12"><SettingsModule title="Payments, notifications and system controls" serviceStatus={serviceStatus} notify={notify} /></div><div className="col-12"><ApprovalQueueModule user={user} notify={notify} /></div><div className="col-12"><AdminCleanupModule user={user} orders={orders} inventory={inventory} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={notify} /></div></div></main>;

@@ -72,6 +72,7 @@ button { font: inherit; }
   backdrop-filter: blur(18px);
 }
 .login-home-brand {
+  min-height: 44px;
   color: var(--ink);
   text-decoration: none;
 }
@@ -223,6 +224,53 @@ button { font: inherit; }
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
+}
+.login-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 10px;
+}
+.login-trust-grid article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0,1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  background: #fffaf3;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.login-trust-grid article > svg {
+  width: 38px;
+  height: 38px;
+  padding: 9px;
+  color: var(--red-dark);
+  background: var(--red-soft);
+  border: 1px solid rgba(227,61,46,.16);
+  border-radius: 11px;
+}
+.login-trust-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.login-trust-grid span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.login-trust-grid strong {
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.2;
+}
+.login-trust-grid small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.42;
 }
 .login-highlight-list {
   display: grid;
@@ -1995,6 +2043,7 @@ button:not(:disabled),
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding-inline: 18px;
   border-radius: 10px;
   font-weight: 900;
@@ -2156,6 +2205,24 @@ button:not(:disabled),
   font-size: 12px;
   line-height: 1.6;
 }
+.login-meal-card .login-meal-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 0;
+}
+.login-meal-card .login-meal-card-actions .btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 13px;
+  border-radius: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
 .login-price-pill,
 .login-step-grid > article > span {
   width: max-content;
@@ -2222,6 +2289,56 @@ button:not(:disabled),
   background: #fff4ef;
 }
 .login-order-flow-section { background: #fbf4e8; }
+.login-review-section {
+  background: linear-gradient(180deg,#fffaf3 0%,#fff4e6 100%);
+}
+.login-review-grid {
+  width: min(1120px,100%);
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 14px;
+  margin: 0 auto;
+}
+.login-review-grid article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: clamp(18px,2.4vw,24px);
+  background: rgba(255,255,255,.9);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 18px 42px rgba(45,30,18,.07);
+}
+.login-review-rating {
+  width: max-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #7a4a05;
+  background: #fff4d1;
+  border: 1px solid rgba(242,188,72,.42);
+  border-radius: 999px;
+}
+.login-review-rating strong {
+  font-size: 12px;
+  font-weight: 950;
+}
+.login-review-grid p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.62;
+}
+.login-review-grid article > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
 .login-role-section {
   text-align: center;
 }
@@ -2235,7 +2352,11 @@ button:not(:disabled),
   border-radius: 10px;
   font-weight: 900;
 }
+.login-mobile-sticky-cta {
+  display: none;
+}
 .login-modal-open { overflow: hidden; }
+.login-modal-open .login-mobile-sticky-cta { display: none; }
 .login-modal-shell {
   position: fixed;
   z-index: 2200;
@@ -2329,6 +2450,7 @@ button:not(:disabled),
 .login-service-grid article,
 .login-strength-grid article,
 .login-step-grid article,
+.login-review-grid article,
 .login-role-grid article {
   will-change: transform;
 }
@@ -2355,6 +2477,7 @@ button:not(:disabled),
   .login-service-grid,
   .login-role-grid,
   .login-step-grid,
+  .login-review-grid,
   .login-meal-showcase {
     grid-template-columns: 1fr 1fr;
   }
@@ -2392,6 +2515,7 @@ button:not(:disabled),
   .login-service-grid,
   .login-role-grid,
   .login-step-grid,
+  .login-review-grid,
   .login-meal-showcase {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -2408,6 +2532,20 @@ button:not(:disabled),
   .login-meal-card { border-radius: 10px; }
   .login-meal-card img { aspect-ratio: 1.8 / 1; padding: 12px; }
   .login-meal-card div { padding: 15px; }
+  .login-meal-card .login-meal-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0;
+  }
+  .login-meal-card .login-meal-card-actions .btn,
+  .login-meal-card .login-meal-card-actions .login-price-pill {
+    width: 100%;
+    justify-content: center;
+  }
+  .login-review-grid article {
+    padding: 18px;
+    border-radius: 12px;
+  }
   .login-bottom-cta { width: 100%; }
 }
 
@@ -2592,6 +2730,9 @@ button:not(:disabled),
   .login-home-header {
     grid-template-columns: minmax(0,1fr) auto;
   }
+  .login-home {
+    padding-bottom: 88px;
+  }
   .login-nav-cta {
     min-height: 44px;
     padding-inline: 14px;
@@ -2685,6 +2826,9 @@ button:not(:disabled),
   .login-panel-message strong {
     font-size: clamp(23px,6.8vw,29px);
   }
+  .login-trust-grid {
+    grid-template-columns: 1fr;
+  }
   .login-highlight-list {
     gap: 8px;
   }
@@ -2725,6 +2869,41 @@ button:not(:disabled),
     min-height: 56px;
     text-align: left;
     justify-content: stretch;
+  }
+  .login-mobile-sticky-cta {
+    position: fixed;
+    z-index: 1000;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 10px 10px 14px;
+    background: rgba(32,25,20,.94);
+    border: 1px solid rgba(255,255,255,.16);
+    border-radius: 14px;
+    box-shadow: 0 18px 46px rgba(16,10,7,.28);
+    backdrop-filter: blur(14px);
+  }
+  .login-mobile-sticky-cta span {
+    min-width: 0;
+    color: #fff5df;
+    font-size: 12px;
+    font-weight: 950;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .login-mobile-sticky-cta .btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 18px;
+    border-radius: 10px;
+    font-weight: 950;
+    white-space: nowrap;
   }
 }
 

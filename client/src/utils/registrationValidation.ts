@@ -1,4 +1,49 @@
-const weakPasswords = new Set([
+type RegistrationField =
+  | "name"
+  | "email"
+  | "password"
+  | "confirmPassword"
+  | "termsAccepted"
+  | "privacyAccepted"
+  | "turnstileToken"
+  | "form";
+
+export interface CustomerRegistrationInput {
+  name?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  termsAccepted?: boolean;
+  privacyAccepted?: boolean;
+  botField?: string;
+  turnstileRequired?: boolean;
+  turnstileToken?: string;
+}
+
+export interface PasswordChecklistItem {
+  id: "length" | "uppercase" | "lowercase" | "number" | "symbol" | "common";
+  label: string;
+  valid: boolean;
+}
+
+export interface NormalizedCustomerRegistrationValues {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  turnstileToken: string;
+  termsAccepted: boolean;
+  privacyAccepted: boolean;
+  botField: string;
+}
+
+export interface CustomerRegistrationValidationResult {
+  valid: boolean;
+  errors: Partial<Record<RegistrationField, string>>;
+  values: NormalizedCustomerRegistrationValues;
+}
+
+const weakPasswords = new Set<string>([
   "password",
   "password123",
   "password123!",
@@ -12,11 +57,11 @@ const weakPasswords = new Set([
   "taptap123!"
 ]);
 
-export function normalizeFullName(value = "") {
+export function normalizeFullName(value = ""): string {
   return String(value).trim().replace(/\s+/g, " ");
 }
 
-export function passwordChecklist(password = "") {
+export function passwordChecklist(password = ""): PasswordChecklistItem[] {
   const value = String(password);
   return [
     { id: "length", label: "At least 12 characters", valid: value.length >= 12 },
@@ -28,8 +73,8 @@ export function passwordChecklist(password = "") {
   ];
 }
 
-export function validateCustomerRegistrationForm(values = {}) {
-  const errors = {};
+export function validateCustomerRegistrationForm(values: CustomerRegistrationInput = {}): CustomerRegistrationValidationResult {
+  const errors: Partial<Record<RegistrationField, string>> = {};
   const name = normalizeFullName(values.name);
   const email = String(values.email || "").trim().toLowerCase();
   const password = String(values.password || "");

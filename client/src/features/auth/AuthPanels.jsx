@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Clock, CreditCard, Eye, EyeOff, MapPin, ShieldCheck, Star, Store, Truck } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { demoAccounts } from "../../data/menu";
 import { gsap, prefersReducedMotion, useGSAP } from "../../lib/gsap";
@@ -26,12 +26,12 @@ const loginRoleOptions = [
 ];
 
 const popularMeals = [
-  { name: "Porkchop Meal", detail: "Crispy comfort meal with rice, egg, and soup.", price: "Starts at ₱99", image: "/assets/menu/porkchop.png" },
-  { name: "Tapa Meal", detail: "Pinoy tapsilog favorite for breakfast, lunch, or late cravings.", price: "Starts at ₱99", image: "/assets/menu/tapa.png" },
-  { name: "Sisig Meal", detail: "Savory house-style sisig served as a filling rice meal.", price: "Starts at ₱99", image: "/assets/menu/sisig.png" },
-  { name: "Chicken Wings Meal", detail: "Golden chicken wings with rice and a familiar Pinoy bite.", price: "Starts at ₱99", image: "/assets/menu/chicken-wings.png" },
-  { name: "Boneless Chicken Meal", detail: "Easy-to-eat boneless chicken for quick dine-in or delivery.", price: "Starts at ₱99", image: "/assets/menu/boneless-chicken.png" },
-  { name: "Dinuguan Meal", detail: "Special weekend-style Filipino comfort dish.", price: "Starts at ₱85", image: "/assets/menu/dinuguan.png" }
+  { name: "Porkchop Meal", detail: "Crispy comfort meal with rice, egg, and soup.", price: "From ₱99", image: "/assets/menu/porkchop.png" },
+  { name: "Tapa Meal", detail: "Pinoy tapsilog favorite for breakfast, lunch, or late cravings.", price: "From ₱99", image: "/assets/menu/tapa.png" },
+  { name: "Sisig Meal", detail: "Savory house-style sisig served as a filling rice meal.", price: "From ₱99", image: "/assets/menu/sisig.png" },
+  { name: "Chicken Wings Meal", detail: "Golden chicken wings with rice and a familiar Pinoy bite.", price: "From ₱99", image: "/assets/menu/chicken-wings.png" },
+  { name: "Boneless Chicken Meal", detail: "Easy-to-eat boneless chicken for quick dine-in or delivery.", price: "From ₱99", image: "/assets/menu/boneless-chicken.png" },
+  { name: "Dinuguan Meal", detail: "Special weekend-style Filipino comfort dish.", price: "From ₱85", image: "/assets/menu/dinuguan.png" }
 ];
 
 const tapTapStrengths = [
@@ -51,6 +51,21 @@ const serviceOptions = [
   { tag: "Delivery pin", title: "Delivery", detail: "Save your address, landmark, phone number, and exact drop-off pin for smoother delivery." },
   { tag: "Order ahead", title: "Pickup", detail: "Collect meals without waiting through the full counter line." },
   { tag: "Counter ready", title: "Walk-in", detail: "Drop by for dine-in or takeout when you want your meal served straight from the counter." }
+];
+
+const orderingDetails = [
+  { icon: Clock, label: "Store hours", value: "10 AM - 9 PM", detail: "Open daily for rice meals, drinks, and specials." },
+  { icon: Truck, label: "Handoff", value: "Delivery, pickup, walk-in", detail: "Choose the service that fits your foodtrip." },
+  { icon: Store, label: "Prep time", value: "15-25 min", detail: "Freshly prepared after your order is confirmed." },
+  { icon: CreditCard, label: "Payments", value: "Cash, GCash, COD", detail: "Simple payment options for nearby customers." },
+  { icon: MapPin, label: "Service area", value: "Nearby delivery zones", detail: "Use a delivery pin and landmark for smoother drop-off." },
+  { icon: ShieldCheck, label: "Customer promise", value: "Clear orders", detail: "Receipts, status updates, and friendly local service." }
+];
+
+const customerReviews = [
+  { name: "Nearby student", rating: "5.0", quote: "Sulit yung rice meal, mabilis ihanda, and easy lang mag-order." },
+  { name: "Pickup customer", rating: "4.9", quote: "I like that I can check meals first before signing in to confirm." },
+  { name: "Family order", rating: "5.0", quote: "Clear yung order updates and familiar Pinoy comfort food talaga." }
 ];
 
 const homepageHighlights = [
@@ -599,9 +614,10 @@ function LoginPanel({ onLoggedIn }) {
           <a href="#about-taptap">About</a>
           <a href="#popular-meals">Meals</a>
           <a href="#service-options">Services</a>
+          <a href="#customer-reviews">Reviews</a>
           <a href="#how-ordering-works">How it works</a>
         </nav>
-        <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal()}>
+        <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal("customer")}>
           Order now
         </button>
       </header>
@@ -613,51 +629,67 @@ function LoginPanel({ onLoggedIn }) {
           <span>Fresh from the kitchen</span>
         </div>
         <div className="login-restaurant-copy">
-          <p className="eyebrow" data-login-hero>Pinoy tapsilog house</p>
-          <h1 data-login-hero>Traditional Pinoy comfort, served fast.</h1>
+          <p className="eyebrow" data-login-hero>Pinoy rice meals and tapsilog</p>
+          <h1 data-login-hero>TapTap Foodtrip: Pinoy rice meals from ₱69.</h1>
           <div className="login-hero-message" data-login-hero>
-            <span>We sell</span>
-            <strong>traditional Pinoy Style Tapsilog</strong>
-            <span>at the lowest price with quality taste and service.</span>
+            <span>Start with</span>
+            <strong>budget-friendly comfort meals</strong>
+            <span>then choose delivery, pickup, or walk-in service.</span>
           </div>
           <div className="login-hero-badges" aria-label="TapTap food promise" data-login-hero>
-            <span>Hot rice meals</span>
-            <span>Friendly local service</span>
-            <span>Pickup or delivery</span>
+            <span>Open daily 10 AM - 9 PM</span>
+            <span>15-25 min prep</span>
+            <span>Cash, GCash, COD</span>
           </div>
           <div className="login-hero-actions" data-login-hero>
-            <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>Order now</button>
+            <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>
+              Order now <ArrowRight aria-hidden="true" size={17} strokeWidth={2.6} />
+            </button>
             <a className="btn btn-outline-light" href="#popular-meals">View meals</a>
-            <button type="button" className="btn btn-danger" onClick={() => openLoginModal()}>Customer sign in</button>
           </div>
           <div className="login-plate-row" aria-label="TapTap favorite meals">
             <article data-login-hero data-login-float>
-              <img src="/assets/menu/tapa.png" alt="Tapa meal" />
+              <img src="/assets/menu/tapa.png" alt="Tapa meal" width={96} height={96} decoding="async" />
               <span>Tapa Meal</span>
             </article>
             <article data-login-hero data-login-float>
-              <img src="/assets/menu/porkchop.png" alt="Porkchop meal" />
+              <img src="/assets/menu/porkchop.png" alt="Porkchop meal" width={96} height={96} decoding="async" />
               <span>Porkchop</span>
             </article>
             <article data-login-hero data-login-float>
-              <img src="/assets/menu/sisig.png" alt="Sisig meal" />
+              <img src="/assets/menu/sisig.png" alt="Sisig meal" width={96} height={96} decoding="async" />
               <span>Sisig Meal</span>
             </article>
           </div>
         </div>
         <div className="login-special-card" aria-label="TapTap service promise" data-login-hero data-login-float>
           <span>TapTap promise</span>
-          <strong>Hot meals, clear orders, friendly service.</strong>
+          <strong>Hot meals, clear orders, friendly local service.</strong>
           <small>Made for nearby customers who want a fast, sulit foodtrip.</small>
         </div>
       </div>
       <div className="login-home-panel" data-login-hero>
         <p className="eyebrow text-danger">Ready for orders</p>
-        <h2>Browse meals first. Sign in when you are ready.</h2>
+        <h2>Browse meals first. Confirm when ready.</h2>
         <div className="login-panel-message">
           <span>Customer-first ordering</span>
-          <strong>Your TapTap foodtrip starts with the meal.</strong>
+          <strong>Choose the food before the account step.</strong>
           <small>Check favorites, pick delivery or pickup, then sign in only when it is time to confirm.</small>
+        </div>
+        <div className="login-trust-grid" aria-label="TapTap ordering details">
+          {orderingDetails.map((item) => {
+            const Icon = item.icon;
+            return (
+              <article key={item.label} data-login-float>
+                <Icon aria-hidden="true" size={18} strokeWidth={2.4} />
+                <div>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              </article>
+            );
+          })}
         </div>
         <div className="login-highlight-list">
           {homepageHighlights.map((item) => (
@@ -707,12 +739,17 @@ function LoginPanel({ onLoggedIn }) {
         <div className="login-meal-showcase">
           {popularMeals.map((meal) => (
             <article className="login-meal-card" key={meal.name} data-login-reveal>
-              <img src={meal.image} alt={meal.name} loading="lazy" />
+              <img src={meal.image} alt={meal.name} loading="lazy" width={420} height={300} decoding="async" />
               <div>
                 <span className="login-meal-tag">TapTap pick</span>
                 <strong>{meal.name}</strong>
                 <p>{meal.detail}</p>
-                <span className="login-price-pill">{meal.price}</span>
+                <div className="login-meal-card-actions">
+                  <span className="login-price-pill">{meal.price}</span>
+                  <button type="button" className="btn btn-outline-danger btn-sm" aria-label={`Order ${meal.name}`} onClick={() => openLoginModal("customer")}>
+                    Order this
+                  </button>
+                </div>
               </div>
             </article>
           ))}
@@ -769,6 +806,26 @@ function LoginPanel({ onLoggedIn }) {
         </div>
       </section>
 
+      <section className="login-business-section login-review-section" id="customer-reviews" data-login-section>
+        <div className="login-section-heading compact" data-login-reveal>
+          <p className="eyebrow text-danger">Customer proof</p>
+          <h2>Local customers come back for fast, sulit meals.</h2>
+          <p>Short feedback from everyday foodtrips: quick pickup, familiar taste, and clear order updates.</p>
+        </div>
+        <div className="login-review-grid">
+          {customerReviews.map((review) => (
+            <article key={review.name} data-login-reveal>
+              <div className="login-review-rating" aria-label={`${review.rating} out of 5 rating`}>
+                <Star aria-hidden="true" size={16} fill="currentColor" strokeWidth={2.4} />
+                <strong>{review.rating}</strong>
+              </div>
+              <p>{review.quote}</p>
+              <span>{review.name}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="login-business-section login-role-section" data-login-section>
         <div className="login-section-heading" data-login-reveal>
           <p className="eyebrow text-danger">Ready for your next meal?</p>
@@ -777,6 +834,13 @@ function LoginPanel({ onLoggedIn }) {
         </div>
         <button type="button" className="btn btn-danger login-bottom-cta" onClick={() => openLoginModal("customer")} data-login-reveal>Order as customer</button>
       </section>
+
+      <div className="login-mobile-sticky-cta" aria-label="Quick customer ordering">
+        <span>Meals from ₱69</span>
+        <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>
+          Order now
+        </button>
+      </div>
 
       {loginModalOpen && (
         <div

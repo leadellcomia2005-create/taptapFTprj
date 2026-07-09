@@ -1,14 +1,62 @@
-const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const dayLabels = { sun: "Sun", mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat" };
+import {
+  ACTIVE_PREP_ORDER_STATUSES,
+  DAY_KEYS,
+  DAY_LABELS,
+  NON_REVENUE_ORDER_STATUSES
+} from "../types/constants";
+import type { CartItem, DayKey, DeliveryLocation, InventoryItem, MenuAvailability, MenuItem, Order, TimestampMs } from "../types/domain";
 
-const toPoint = (value) => {
+export type Point = [number, number];
+
+export interface MenuAvailabilityResult {
+  available: boolean;
+  label: string;
+}
+
+export interface DeliveryRouteEstimate {
+  points: [Point, Point];
+  distanceKm: number;
+  etaMinutes: number;
+  label: string;
+  distanceLabel: string;
+}
+
+export interface OrderPrepClock {
+  waitingMs: number;
+  label: string;
+  delayed: boolean;
+}
+
+export interface ItemSalesStat {
+  id: string;
+  name: string;
+  stock: number;
+  reorderPoint: number;
+  qty: number;
+  sales: number;
+  recentQty: number;
+  dailyVelocity: number;
+  daysLeft: number;
+}
+
+export interface PeakOrderHour {
+  hour: number;
+  count: number;
+  label: string;
+}
+
+type PointValue = Point | DeliveryLocation | { lat?: number | string; lng?: number | string } | null | undefined;
+type SalesOrder = Pick<Order, "status" | "createdAt"> & { items?: Array<Pick<CartItem, "id" | "name" | "price" | "qty">> };
+type SalesInventoryItem = Pick<InventoryItem, "id" | "name" | "stock" | "reorderPoint">;
+
+const toPoint = (value: PointValue): Point | null => {
   if (!value) return null;
   const lat = Number(Array.isArray(value) ? value[0] : value.lat);
   const lng = Number(Array.isArray(value) ? value[1] : value.lng);
   return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
 };
 
-const minutesFromTime = (value) => {
+const minutesFromTime = (value: unknown): number | null => {
   const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
   const hours = Number(match[1]);
@@ -16,14 +64,14 @@ const minutesFromTime = (value) => {
   return hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60 ? hours * 60 + minutes : null;
 };
 
-export function menuAvailability(item = {}, now = new Date()) {
+export function menuAvailability(item: Partial<MenuItem> = {}, now = new Date()): MenuAvailabilityResult {
   if (item.unavailable) return { available: false, label: "Unavailable" };
-  const schedule = item.availability || {};
+  const schedule: Partial<MenuAvailability> = item.availability || {};
   const mode = schedule.mode || item.availabilityMode || "always";
   if (mode !== "schedule") return { available: true, label: "Available today" };
 
-  const days = Array.isArray(schedule.days) ? schedule.days : [];
-  const day = dayKeys[now.getDay()];
+  const days: DayKey[] = Array.isArray(schedule.days) ? schedule.days : [];
+  const day = DAY_KEYS[now.getDay()];
   const dayAllowed = days.length === 0 || days.includes(day);
   const start = minutesFromTime(schedule.start || item.availableFrom);
   const end = minutesFromTime(schedule.end || item.availableUntil);
@@ -34,7 +82,7 @@ export function menuAvailability(item = {}, now = new Date()) {
       ? current >= start && current <= end
       : current >= start || current <= end;
 
-  const dayText = days.length ? days.map((key) => dayLabels[key] || key).join(", ") : "Daily";
+  const dayText = days.length ? days.map((key) => DAY_LABELS[key] || key).join(", ") : "Daily";
   const timeText = start == null || end == null ? "" : ` ${schedule.start}-${schedule.end}`;
   return {
     available: dayAllowed && timeAllowed,
@@ -42,23 +90,33 @@ export function menuAvailability(item = {}, now = new Date()) {
   };
 }
 
-export function distanceKm(fromValue, toValue) {
+export function distanceKm(fromValue: PointValue, toValue: PointValue): number | null {
   const from = toPoint(fromValue);
   const to = toPoint(toValue);
   if (!from || !to) return null;
-  const radians = (value) => value * Math.PI / 180;
+  const radians = (value: number): number => value * Math.PI / 180;
   const dLat = radians(to[0] - from[0]);
   const dLng = radians(to[1] - from[1]);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(from[0])) * Math.cos(radians(to[0])) * Math.sin(dLng / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function estimateDeliveryRoute({ store, rider, customer, speedKph = 22 } = {}) {
+export function estimateDeliveryRoute({
+  store,
+  rider,
+  customer,
+  speedKph = 22
+}: {
+  store?: PointValue;
+  rider?: PointValue;
+  customer?: PointValue;
+  speedKph?: number;
+} = {}): DeliveryRouteEstimate | null {
   const origin = toPoint(rider) || toPoint(store);
   const destination = toPoint(customer);
   if (!origin || !destination) return null;
   const directKm = distanceKm(origin, destination);
-  if (!Number.isFinite(directKm)) return null;
+  if (directKm == null || !Number.isFinite(directKm)) return null;
   const routeKm = directKm * 1.35;
   const etaMinutes = Math.max(1, Math.round(routeKm / Math.max(5, speedKph) * 60));
   return {
@@ -70,16 +128,16 @@ export function estimateDeliveryRoute({ store, rider, customer, speedKph = 22 } 
   };
 }
 
-export function formatElapsed(ms) {
+export function formatElapsed(ms: number | string | null | undefined): string {
   const minutes = Math.max(0, Math.floor(Number(ms || 0) / 60000));
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export function orderPrepClock(order = {}, now = Date.now()) {
+export function orderPrepClock(order: Partial<Order> = {}, now: TimestampMs = Date.now()): OrderPrepClock {
   const start = Number(order.prepStartedAt || order.createdAt || now);
   const waitingMs = Math.max(0, now - start);
-  const delayed = ["received", "preparing"].includes(order.status) && waitingMs >= 15 * 60000;
+  const delayed = ACTIVE_PREP_ORDER_STATUSES.includes(order.status as never) && waitingMs >= 15 * 60000;
   return {
     waitingMs,
     label: formatElapsed(waitingMs),
@@ -87,8 +145,8 @@ export function orderPrepClock(order = {}, now = Date.now()) {
   };
 }
 
-export function itemSalesStats(orders = [], inventory = []) {
-  const stats = new Map(inventory.map((item) => [item.id, {
+export function itemSalesStats(orders: SalesOrder[] = [], inventory: SalesInventoryItem[] = []): ItemSalesStat[] {
+  const stats = new Map<string, Omit<ItemSalesStat, "dailyVelocity" | "daysLeft">>(inventory.map((item) => [item.id, {
     id: item.id,
     name: item.name,
     stock: Number(item.stock || 0),
@@ -99,7 +157,7 @@ export function itemSalesStats(orders = [], inventory = []) {
   }]));
   const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
   for (const order of orders) {
-    if (["cancelled", "pending-payment"].includes(order.status)) continue;
+    if (NON_REVENUE_ORDER_STATUSES.includes(order.status as never)) continue;
     for (const item of order.items || []) {
       const current = stats.get(item.id) || { id: item.id, name: item.name, stock: 0, reorderPoint: 0, qty: 0, sales: 0, recentQty: 0 };
       const qty = Number(item.qty || 0);
@@ -119,20 +177,20 @@ export function itemSalesStats(orders = [], inventory = []) {
   });
 }
 
-export const bestSellers = (orders, inventory, count = 5) =>
+export const bestSellers = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 5): ItemSalesStat[] =>
   itemSalesStats(orders, inventory).filter((item) => item.qty > 0).sort((a, b) => b.qty - a.qty || b.sales - a.sales).slice(0, count);
 
-export const slowMovingItems = (orders, inventory, count = 5) =>
+export const slowMovingItems = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 5): ItemSalesStat[] =>
   itemSalesStats(orders, inventory).sort((a, b) => a.qty - b.qty || b.stock - a.stock).slice(0, count);
 
-export const forecastRunouts = (orders, inventory, count = 6) =>
+export const forecastRunouts = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 6): ItemSalesStat[] =>
   itemSalesStats(orders, inventory)
     .filter((item) => item.stock > 0 && item.daysLeft !== Infinity)
     .sort((a, b) => a.daysLeft - b.daysLeft)
     .slice(0, count);
 
-export function peakOrderHours(orders = []) {
-  const hours = new Map();
+export function peakOrderHours(orders: Array<Pick<Order, "createdAt">> = []): PeakOrderHour[] {
+  const hours = new Map<number, number>();
   for (const order of orders) {
     const hour = new Date(Number(order.createdAt || 0)).getHours();
     hours.set(hour, (hours.get(hour) || 0) + 1);

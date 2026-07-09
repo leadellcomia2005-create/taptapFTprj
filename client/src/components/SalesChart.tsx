@@ -13,7 +13,11 @@ import { Line } from "react-chartjs-2";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
-export default function SalesChart({ values }) {
+interface SalesChartProps {
+  values: number[];
+}
+
+export default function SalesChart({ values }: SalesChartProps) {
   return (
     <Line
       data={{
@@ -34,7 +38,7 @@ export default function SalesChart({ values }) {
         plugins: { legend: { display: false } },
         scales: {
           x: { grid: { display: false } },
-          y: { ticks: { callback: (value) => `₱${Number(value).toLocaleString()}` } }
+          y: { ticks: { callback: (value) => `\u20b1${Number(value).toLocaleString()}` } }
         }
       }}
     />

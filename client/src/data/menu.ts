@@ -1,23 +1,12 @@
-const stockByCategory = {
-  "Favorite Meal": 35,
-  Alacarte: 25,
-  Solo: 25,
-  Drinks: 60,
-  "Special Meal": 30,
-  "Walk-in Add-on": 100
-};
-
-const descriptions = {
-  "Favorite Meal": "Served as a complete favorite meal.",
-  Alacarte: "Full alacarte serving for dine-in, takeout, or delivery.",
-  Solo: "Solo serving for a lighter order.",
-  Drinks: "Cold drink add-on.",
-  "Special Meal": "House special meal.",
-  "Walk-in Add-on": "Counter add-on for walk-in orders only."
-};
+import {
+  MENU_CATEGORIES,
+  MENU_CATEGORY_DESCRIPTIONS,
+  MENU_CATEGORY_STOCK
+} from "../types/constants";
+import type { MenuCategory, MenuItem, UserRole } from "../types/domain";
 
 const imagePositions = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"];
-const photoRules = [
+const photoRules: ReadonlyArray<readonly [string, string]> = [
   ["egg-rice-unli-soup", "egg-rice-soup"],
   ["sisig-alacarte", "sisig-ala-carte"],
   ["boneless-chicken", "boneless-chicken"],
@@ -41,12 +30,19 @@ const photoRules = [
   ["tapa", "tapa"]
 ];
 
-const photoFor = (id) => {
+const photoFor = (id: string): string | undefined => {
   const match = photoRules.find(([prefix]) => id === prefix || id.startsWith(`${prefix}-`));
   return match ? `/assets/menu/${match[1]}.png` : undefined;
 };
 
-const item = (id, name, category, price, index, options = {}) => {
+const item = (
+  id: string,
+  name: string,
+  category: MenuCategory,
+  price: number,
+  index: number,
+  options: Partial<MenuItem> = {}
+): MenuItem => {
   const image = photoFor(id);
   return {
     id,
@@ -55,15 +51,15 @@ const item = (id, name, category, price, index, options = {}) => {
     price,
     ...(image ? { image } : {}),
     imagePosition: imagePositions[index % imagePositions.length],
-    description: descriptions[category],
+    description: MENU_CATEGORY_DESCRIPTIONS[category],
     allergens: [],
-    stock: stockByCategory[category] || 30,
-    featured: category === "Favorite Meal" && index < 6,
+    stock: MENU_CATEGORY_STOCK[category] || 30,
+    featured: category === MENU_CATEGORIES.FAVORITE_MEAL && index < 6,
     ...options
   };
 };
 
-export const fallbackMenu = [
+export const fallbackMenu: MenuItem[] = [
   item("porkchop-meal", "Porkchop", "Favorite Meal", 99, 0),
   item("tapa-meal", "Tapa Meal", "Favorite Meal", 99, 1),
   item("chibu-meal", "Chibu Meal", "Favorite Meal", 99, 2),
@@ -120,7 +116,13 @@ export const fallbackMenu = [
   item("papaitan-meal", "Papaitan Meal", "Special Meal", 85, 49)
 ];
 
-export const demoAccounts = {
+type DemoAccount = {
+  email: string;
+  password: string;
+  name: string;
+};
+
+export const demoAccounts: Record<UserRole, DemoAccount> = {
   customer: { email: "customer@demo.ph", password: "Customer123!", name: "Juan Dela Cruz" },
   owner: { email: "owner@taptap.ph", password: "Owner123!", name: "Leadell Comia" },
   staff: { email: "staff@taptap.ph", password: "Staff123!", name: "Mika Reyes" },

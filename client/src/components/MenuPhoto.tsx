@@ -1,4 +1,12 @@
-export default function MenuPhoto({ product, className = "", priority = false }) {
+import type { MenuItem } from "../types/domain";
+
+interface MenuPhotoProps {
+  product?: Pick<MenuItem, "image" | "imagePosition"> | null;
+  className?: string;
+  priority?: boolean;
+}
+
+export default function MenuPhoto({ product, className = "", priority = false }: MenuPhotoProps) {
   const classes = ["menu-photo", className].filter(Boolean).join(" ");
   if (product?.image) {
     return (

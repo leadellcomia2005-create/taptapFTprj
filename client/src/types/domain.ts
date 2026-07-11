@@ -81,6 +81,42 @@ export type DeliveryType = "delivery" | "pickup" | "walk-in";
 
 export type DiningOption = "dine-in" | "takeout" | DeliveryType | string;
 
+export interface StoreDayHours {
+  day: DayKey;
+  label: string;
+  opens: TimeString;
+  closes: TimeString;
+  closed?: boolean;
+}
+
+export type ServiceAvailabilityKey = DeliveryType;
+
+export interface WebsiteStoreConfig {
+  timezone: "Asia/Manila";
+  hours: StoreDayHours[];
+  prepTimeMinutes: {
+    min: number;
+    max: number;
+  };
+  serviceAvailability: Record<ServiceAvailabilityKey, boolean>;
+  paymentMethods: PaymentMethod[];
+  serviceAreaLabel: string;
+  serviceAreaDetail: string;
+  customerPromise: {
+    label: string;
+    detail: string;
+  };
+}
+
+export interface WebsiteOpenStatus {
+  open: boolean;
+  label: string;
+  detail: string;
+  todayHoursLabel: string;
+  nextOpeningLabel: string;
+  timezone: WebsiteStoreConfig["timezone"];
+}
+
 export interface DeliveryLocation {
   lat: number;
   lng: number;
@@ -136,6 +172,7 @@ export interface Order {
   items: CartItem[];
   subtotal: number;
   discount?: number;
+  discountReason?: string;
   deliveryFee?: number;
   total: number;
   cashReceived?: number | null;
@@ -163,6 +200,8 @@ export interface Order {
   cancelledByRole?: UserRole;
   cancelReason?: string;
   codCollectedAt?: TimestampMs;
+  codHandoffRequestedAt?: TimestampMs;
+  codHandoffRequestedBy?: EntityId;
   codRemittedAt?: TimestampMs;
   handoffOtp?: string | null;
   proofOfDeliveryRef?: string;

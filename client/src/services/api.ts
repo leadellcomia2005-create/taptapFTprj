@@ -53,6 +53,7 @@ export type OrderUpdateRequest = Partial<Order> & {
   cancel?: boolean;
   cancelReason?: string;
   codRemitted?: boolean;
+  codHandoffRequested?: boolean;
 };
 
 export type MenuItemUpdateRequest = Partial<MenuItem>;

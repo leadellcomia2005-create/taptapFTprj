@@ -7,8 +7,8 @@ import {
   STAFF_ROLE_CAPABILITIES,
   STAFF_ROLE_LABELS
 } from "../types/constants";
-import type { MenuItem, StaffRole, UserRole } from "../types/domain";
-import type { RoleView, StaffView } from "../types/constants";
+import type { DayKey, MenuItem, StaffRole, UserRole, WebsiteOpenStatus, WebsiteStoreConfig } from "../types/domain";
+import type { RoleView } from "../types/constants";
 
 type StaffPosCategory = {
   id: "all" | "meal" | "alacarte" | "solo" | "special" | "drinks" | "addons";
@@ -21,7 +21,106 @@ type NavigationUser = {
   staffRole?: StaffRole | string;
 };
 
+const dayKeys: DayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const normalizeMenuCategory = (value = ""): string => value.toLowerCase().replace(/[^a-z]/g, "");
+const minutesFromTime = (value: string): number => {
+  const [hour = "0", minute = "0"] = value.split(":");
+  return Number(hour) * 60 + Number(minute);
+};
+const formatBusinessTime = (value: string): string => {
+  const [rawHour = "0", rawMinute = "0"] = value.split(":");
+  const hour = Number(rawHour);
+  const minute = Number(rawMinute);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${suffix}`;
+};
+const dayLabel = (offset: number, fallback: string): string => {
+  if (offset === 0) return "today";
+  if (offset === 1) return "tomorrow";
+  return fallback;
+};
+
+export const websiteStoreConfig: WebsiteStoreConfig = {
+  timezone: "Asia/Manila",
+  hours: dayKeys.map((day) => ({
+    day,
+    label: day.charAt(0).toUpperCase() + day.slice(1),
+    opens: "10:00",
+    closes: "21:00"
+  })),
+  prepTimeMinutes: {
+    min: 15,
+    max: 25
+  },
+  serviceAvailability: {
+    delivery: true,
+    pickup: true,
+    "walk-in": true
+  },
+  paymentMethods: ["cash", "gcash", "cod"],
+  serviceAreaLabel: "Nearby delivery zones",
+  serviceAreaDetail: "Use a delivery pin and landmark for smoother drop-off.",
+  customerPromise: {
+    label: "Clear orders",
+    detail: "Receipts, status updates, and friendly local service."
+  }
+};
+
+export const paymentMethodLabels: Record<WebsiteStoreConfig["paymentMethods"][number], string> = {
+  cash: "Cash",
+  gcash: "GCash",
+  cod: "COD"
+};
+
+export const serviceAvailabilityLabels: Record<keyof WebsiteStoreConfig["serviceAvailability"], string> = {
+  delivery: "Delivery",
+  pickup: "Pickup",
+  "walk-in": "Walk-in"
+};
+
+export const getWebsiteOpenStatus = (date = new Date(), config = websiteStoreConfig): WebsiteOpenStatus => {
+  const manilaNow = new Date(date.toLocaleString("en-US", { timeZone: config.timezone }));
+  const dayIndex = manilaNow.getDay();
+  const minutesNow = manilaNow.getHours() * 60 + manilaNow.getMinutes();
+  const today = config.hours.find((hours) => hours.day === dayKeys[dayIndex]);
+  const todayHoursLabel = today && !today.closed
+    ? `${formatBusinessTime(today.opens)} - ${formatBusinessTime(today.closes)}`
+    : "Closed today";
+
+  if (today && !today.closed) {
+    const opens = minutesFromTime(today.opens);
+    const closes = minutesFromTime(today.closes);
+    if (minutesNow >= opens && minutesNow < closes) {
+      return {
+        open: true,
+        label: "Open now",
+        detail: `Serving until ${formatBusinessTime(today.closes)} today.`,
+        todayHoursLabel,
+        nextOpeningLabel: "",
+        timezone: config.timezone
+      };
+    }
+  }
+
+  let nextOpeningLabel = "Next opening time is unavailable.";
+  for (let offset = 0; offset < dayKeys.length; offset += 1) {
+    const candidate = config.hours.find((hours) => hours.day === dayKeys[(dayIndex + offset) % dayKeys.length]);
+    if (!candidate || candidate.closed) continue;
+    if (offset === 0 && minutesNow >= minutesFromTime(candidate.opens)) continue;
+    nextOpeningLabel = `Opens ${dayLabel(offset, candidate.label)} at ${formatBusinessTime(candidate.opens)}.`;
+    break;
+  }
+
+  return {
+    open: false,
+    label: "Closed now",
+    detail: nextOpeningLabel,
+    todayHoursLabel,
+    nextOpeningLabel,
+    timezone: config.timezone
+  };
+};
 
 export const staffPosCategories: StaffPosCategory[] = [
   { id: "all", label: "All", matches: () => true },

@@ -185,6 +185,19 @@ export function authorizeOrderUpdate(user, order, input = {}) {
 
   if (user.role !== "rider") throw new HttpError(403, "Order updates require an operations role.");
 
+  if (input.codHandoffRequested === true) {
+    if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
+    if (!isDeliveryOrder(order) || order.paymentMethod !== "cod") throw new HttpError(409, "Only COD deliveries can record a cash handoff.");
+    if (order.status !== "delivered") throw new HttpError(409, "Cash handoff can be recorded only after delivery.");
+    if (order.codRemittedAt) throw new HttpError(409, "COD was already confirmed by the owner.");
+    if (order.codHandoffRequestedAt) throw new HttpError(409, "Cash handoff was already recorded.");
+    return {
+      codHandoffRequestedAt: now,
+      codHandoffRequestedBy: user.uid,
+      updatedAt: now
+    };
+  }
+
   if (input.deliveryIssue) {
     const reason = typeof input.deliveryIssue === "string" ? input.deliveryIssue.trim().slice(0, 160) : "";
     if (!reason) throw new HttpError(400, "A delivery issue reason is required.");

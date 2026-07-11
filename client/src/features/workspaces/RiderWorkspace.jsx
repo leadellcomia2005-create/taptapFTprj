@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Bike, Camera, CheckCircle2, Clock, MapPin, Navigation, Package as PackageIcon, Phone, Route, Wallet } from "lucide-react";
+import { AlertTriangle, Bike, Camera, CheckCircle2, Clock, LoaderCircle, MapPin, Navigation, Package as PackageIcon, Phone, Route, Wallet } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
 import { saveRiderLocation, updateOrder, uploadProof } from "../../services/firebase";
 import { getSocket, sendRiderLocation } from "../../services/socket";
@@ -26,12 +26,32 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const availableOrders = deliveryOrders.filter((order) => order.status === "ready" && !order.riderId);
   const [selectedId, setSelectedId] = useState("");
   const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => !["delivered", "completed", "cancelled"].includes(order.status)) || assignedOrders[0];
-  const [online, setOnline] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState("offline");
+  const [gpsError, setGpsError] = useState("");
   const [location, setLocation] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
+  const [busyAction, setBusyAction] = useState("");
+  const [retryTask, setRetryTask] = useState(null);
   const watchRef = useRef(null);
   const activeOrderIdRef = useRef("");
+  const online = gpsStatus === "online";
+
+  const runAction = async (label, task) => {
+    if (busyAction) return false;
+    setBusyAction(label);
+    try {
+      await task();
+      setRetryTask(null);
+      return true;
+    } catch (error) {
+      setRetryTask({ label, task });
+      notify(error.message || `${label} could not be completed.`);
+      return false;
+    } finally {
+      setBusyAction("");
+    }
+  };
 
   useEffect(() => {
     activeOrderIdRef.current = active?.id || "";
@@ -42,56 +62,80 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   }, []);
 
   const toggleOnline = async () => {
-    if (online) {
-      navigator.geolocation.clearWatch(watchRef.current);
+    if (["online", "acquiring"].includes(gpsStatus)) {
+      if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
       watchRef.current = null;
-      setOnline(false);
+      setGpsStatus("offline");
+      setGpsError("");
       return;
     }
-    if (!navigator.geolocation) return notify("Geolocation is unavailable on this device.");
-    const socket = await getSocket().catch(() => null);
+    if (!navigator.geolocation) {
+      setGpsStatus("error");
+      setGpsError("Geolocation is unavailable on this device.");
+      notify("Geolocation is unavailable on this device.");
+      return;
+    }
+    setGpsStatus("acquiring");
+    setGpsError("");
+    const socketPromise = getSocket().catch(() => null);
     watchRef.current = navigator.geolocation.watchPosition(async ({ coords }) => {
       const next = { lat: coords.latitude, lng: coords.longitude, accuracy: coords.accuracy };
       setLocation(next);
+      setGpsStatus("online");
+      setGpsError("");
       const activeOrderId = activeOrderIdRef.current;
       if (!activeOrderId) return;
       try {
+        const socket = await socketPromise;
         if (socket?.connected) await sendRiderLocation(activeOrderId, next);
         else await saveRiderLocation(activeOrderId, next);
       } catch (error) {
         notify(error.message);
       }
-    }, (error) => notify(error.message), { enableHighAccuracy: true, maximumAge: 5000 });
-    setOnline(true);
+    }, (error) => {
+      if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
+      watchRef.current = null;
+      setGpsStatus("error");
+      setGpsError(error.message || "GPS permission or positioning failed.");
+      notify(error.message || "GPS permission or positioning failed.");
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
   };
 
   const pickup = async () => {
     if (!active) return;
-    await updateOrder(active.id, { status: "out-for-delivery", riderId: user.uid });
-    navigator.vibrate?.([120, 70, 120]);
-    notify("Pickup recorded. Customer tracking is live.");
+    await runAction("Recording pickup", async () => {
+      await updateOrder(active.id, { status: "out-for-delivery", riderId: user.uid });
+      navigator.vibrate?.([120, 70, 120]);
+      notify("Pickup recorded. Customer tracking is live.");
+    });
   };
 
   const claimOrder = async (order) => {
-    await updateOrder(order.id, { riderId: user.uid, assignedAt: Date.now() });
-    setSelectedId(order.id);
-    navigator.vibrate?.([150, 80, 150]);
-    notify(`${order.id} is now assigned to you.`);
+    await runAction(`Accepting ${order.id}`, async () => {
+      await updateOrder(order.id, { riderId: user.uid, assignedAt: Date.now() });
+      setSelectedId(order.id);
+      navigator.vibrate?.([150, 80, 150]);
+      notify(`${order.id} is now assigned to you.`);
+    });
   };
 
   const markArrived = async () => {
     if (!active) return;
-    await updateOrder(active.id, { status: "arrived", arrivedAt: Date.now() });
-    navigator.vibrate?.([100, 60, 100]);
-    notify("Arrival recorded. You can now capture proof of delivery.");
+    await runAction("Recording arrival", async () => {
+      await updateOrder(active.id, { status: "arrived", arrivedAt: Date.now() });
+      navigator.vibrate?.([100, 60, 100]);
+      notify("Arrival recorded. You can now capture proof of delivery.");
+    });
   };
 
   const capture = async (blob, handoff) => {
-    const proof = await uploadProof(active.id, blob, handoff);
-    await updateOrder(active.id, { status: "delivered", ...proof });
-    setCameraOpen(false);
-    navigator.vibrate?.(180);
-    notify("Delivery completed with photo evidence.");
+    await runAction("Uploading delivery proof", async () => {
+      const proof = await uploadProof(active.id, blob, handoff);
+      await updateOrder(active.id, { status: "delivered", ...proof });
+      setCameraOpen(false);
+      navigator.vibrate?.(180);
+      notify("Delivery completed with photo evidence.");
+    });
   };
 
   const firstName = (user.name || "Rider").split(" ")[0];
@@ -111,13 +155,45 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const hasDeliveryPin = (order) => Boolean(locationToPoint(order?.deliveryLocation));
   const reportDeliveryIssue = async (reason) => {
     if (!active) return;
-    await updateOrder(active.id, { deliveryIssue: reason });
-    notify("Delivery issue sent to owner and staff.");
+    return runAction("Sending delivery issue", async () => {
+      await updateOrder(active.id, { deliveryIssue: reason });
+      notify("Delivery issue sent to owner and staff.");
+    });
   };
+  const recordCodHandoff = async (order) => {
+    await runAction(`Recording ${order.id} cash handoff`, async () => {
+      await updateOrder(order.id, { codHandoffRequested: true });
+      notify(`${order.id} cash handoff is waiting for owner confirmation.`);
+    });
+  };
+  const codHandoffLabel = (order) => order.codRemittedAt
+    ? "Owner confirmed"
+    : order.codHandoffRequestedAt
+      ? "Awaiting owner confirmation"
+      : order.status === "delivered"
+        ? "Ready to hand over"
+        : "Collection pending";
 
   const googleMapsUrl = active
     ? `https://www.google.com/maps/dir/?api=1&destination=${deliveryPin ? `${deliveryPin[0]},${deliveryPin[1]}` : encodeURIComponent(active.address)}&travelmode=driving`
     : "#";
+  const routeForOrder = (order) => estimateDeliveryRoute({ store: storePoint, customer: locationToPoint(order?.deliveryLocation) });
+  const pinQuality = (order) => {
+    if (!hasDeliveryPin(order)) return "Address only";
+    const accuracy = Number(order.deliveryLocation?.accuracy || 0);
+    if (!accuracy) return "Pin confirmed";
+    if (accuracy <= 50) return "High-quality pin";
+    if (accuracy <= 100) return "Usable pin";
+    return "Approximate pin";
+  };
+  const nextAction = active?.status === "ready"
+    ? { label: "Confirm pickup", Icon: PackageIcon, action: pickup, tone: "primary" }
+    : active?.status === "out-for-delivery"
+      ? { label: "Mark arrived", Icon: MapPin, action: markArrived, tone: "warning" }
+      : active?.status === "arrived"
+        ? { label: "Capture delivery proof", Icon: Camera, action: () => setCameraOpen(true), tone: "success" }
+        : null;
+  const NextActionIcon = nextAction?.Icon || CheckCircle2;
 
   if (section === "rider-cod") {
     return (
@@ -160,6 +236,8 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
               <div className="rider-ledger-total">
                 <strong>{currency(order.total)}</strong>
                 <span className={`status status-${order.status}`}>{statusLabel(order.status)}</span>
+                <small className="rider-cod-handoff-state">{codHandoffLabel(order)}</small>
+                {order.status === "delivered" && !order.codRemittedAt && !order.codHandoffRequestedAt && <button className="rider-ledger-handoff" disabled={Boolean(busyAction)} onClick={() => recordCodHandoff(order)}>{busyAction.includes(order.id) ? "Recording..." : "Record cash handoff"}</button>}
               </div>
             </article>
           ))}
@@ -176,13 +254,14 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
           <div>
             <p className="eyebrow">Delivery rider</p>
             <h1>Hi, {firstName}</h1>
-            <span><MapPin size={14} aria-hidden="true" /> {location ? "GPS locked" : "GPS standby"}</span>
-          </div>
-          <button className={`rider-online-toggle ${online ? "online" : ""}`} onClick={toggleOnline}>
-            <span />
-            {online ? "Online" : "Go online"}
+              <span><MapPin size={14} aria-hidden="true" /> {gpsStatus === "online" ? "GPS locked" : gpsStatus === "acquiring" ? "Acquiring GPS" : gpsStatus === "error" ? "GPS error" : "GPS standby"}</span>
+            </div>
+          <button className={`rider-online-toggle ${online ? "online" : ""} ${gpsStatus === "error" ? "error" : ""}`} onClick={toggleOnline} aria-live="polite">
+            {gpsStatus === "acquiring" ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : gpsStatus === "error" ? <AlertTriangle size={17} aria-hidden="true" /> : <span />}
+            {online ? "Online" : gpsStatus === "acquiring" ? "Cancel GPS" : gpsStatus === "error" ? "Retry GPS" : "Go online"}
           </button>
         </div>
+        {gpsError && <div className="rider-gps-error" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span>{gpsError}</span></div>}
         <div className="rider-earnings">
           <small>Cash to collect</small>
           <strong>{currency(cashToCollect)}</strong>
@@ -220,17 +299,21 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><p className="eyebrow text-danger">Ready for assignment</p><h2>New jobs</h2></div>
                 <span>{availableOrders.length} ready</span>
               </div>
-              {availableOrders.map((order) => (
-                <article className="rider-job-card" key={order.id}>
-                  <div className="rider-order-avatar"><Clock size={18} aria-hidden="true" /></div>
-                  <div>
-                    <strong>{order.id}</strong>
-                    <small>{orderItems(order)}</small>
-                    <span><MapPin size={13} aria-hidden="true" /> {hasDeliveryPin(order) ? "Pin confirmed" : addressLabel(order.address)}</span>
-                  </div>
-                  <button onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> Accept</button>
-                </article>
-              ))}
+              {availableOrders.map((order) => {
+                const estimate = routeForOrder(order);
+                return (
+                  <article className="rider-job-card" key={order.id}>
+                    <div className="rider-order-avatar"><Clock size={18} aria-hidden="true" /></div>
+                    <div>
+                      <strong>{order.id}</strong>
+                      <small>{orderItems(order)}</small>
+                      <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
+                      <div className="rider-job-facts"><em>{estimate ? `${estimate.distanceLabel} - ${estimate.label}` : "Route pending"}</em><em>{pinQuality(order)}</em><em>{order.paymentMethod === "cod" ? `COD ${currency(order.total)}` : String(order.paymentMethod || "paid").toUpperCase()}</em></div>
+                    </div>
+                    <button disabled={Boolean(busyAction)} onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> {busyAction === `Accepting ${order.id}` ? "Accepting..." : "Accept"}</button>
+                  </article>
+                );
+              })}
             </>
           )}
         </section>
@@ -258,7 +341,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Customer</small><strong>{active.customerName}</strong></div>
                 <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
-                <div><small>COD collection</small><strong>{active.paymentMethod === "cod" ? currency(active.total) : "Not COD"}</strong><span>{active.paymentMethod === "cod" ? active.codCollectedAt ? "Collected and logged" : "Collect before proof" : "No cash collection"}</span></div>
+                <div><small>COD collection</small><strong>{active.paymentMethod === "cod" ? currency(active.total) : "Not COD"}</strong><span>{active.paymentMethod === "cod" ? codHandoffLabel(active) : "No cash collection"}</span></div>
                 <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
                 <div><small>Route ETA</small><strong>{routeEstimate ? routeEstimate.label : "Address only"}</strong><span>{routeEstimate ? routeEstimate.distanceLabel : "Open navigation for route"}</span></div>
               </div>
@@ -269,23 +352,22 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 </div>
               )}
               {active.deliveryIssue && <div className="rider-issue-note"><strong>Reported issue</strong><span>{active.deliveryIssue}</span></div>}
+              {retryTask && <div className="rider-retry-bar" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span><strong>{retryTask.label} failed</strong><small>Check your connection, then retry without repeating completed steps.</small></span><button disabled={Boolean(busyAction)} onClick={() => runAction(retryTask.label, retryTask.task)}>Retry</button></div>}
 
               <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
 
-              <div className="rider-action-grid">
-                <button className="rider-action primary" disabled={active.status !== "ready"} onClick={pickup}><PackageIcon size={17} aria-hidden="true" /> Pick up</button>
+              {nextAction ? <button className={`rider-next-action ${nextAction.tone}`} disabled={Boolean(busyAction)} onClick={nextAction.action}><NextActionIcon size={19} aria-hidden="true" /> {busyAction || nextAction.label}</button> : <div className="rider-complete-state"><CheckCircle2 size={18} aria-hidden="true" /><span>{["delivered", "completed"].includes(active.status) ? "Delivery completed" : "No rider status action is available"}</span></div>}
+              <div className="rider-action-grid secondary">
                 <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
                 {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}
                 <button className="rider-action" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={() => setIssueOpen(true)}><Clock size={17} aria-hidden="true" /> Issue</button>
-                <button className="rider-action warning" disabled={active.status !== "out-for-delivery"} onClick={markArrived}><MapPin size={17} aria-hidden="true" /> Arrived</button>
-                <button className="rider-action success" disabled={active.status !== "arrived"} onClick={() => setCameraOpen(true)}><Camera size={17} aria-hidden="true" /> Proof</button>
               </div>
             </>
           ) : <div className="empty-state compact">Assigned delivery details will appear here.</div>}
         </section>
       </div>
       {cameraOpen && <Suspense fallback={<SectionLoader label="Opening camera..." />}><CameraProof onCapture={capture} onClose={() => setCameraOpen(false)} /></Suspense>}
-      {issueOpen && active && <ReasonModal title={`Report ${active.id}`} label="Delivery issue" placeholder="Example: Customer not answering, address unclear, heavy traffic..." confirmText="Send issue" onClose={() => setIssueOpen(false)} onSubmit={async (reason) => { await reportDeliveryIssue(reason); setIssueOpen(false); }} />}
+      {issueOpen && active && <ReasonModal title={`Report ${active.id}`} label="Delivery issue" placeholder="Example: Customer not answering, address unclear, heavy traffic..." confirmText="Send issue" onClose={() => setIssueOpen(false)} onSubmit={async (reason) => { if (await reportDeliveryIssue(reason)) setIssueOpen(false); }} />}
     </main>
   );
 }

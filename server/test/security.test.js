@@ -174,6 +174,29 @@ test("allows riders to claim only ready unassigned orders", () => {
   );
 });
 
+test("records rider COD handoff separately from owner remittance", () => {
+  const deliveredCod = {
+    ...order,
+    status: "delivered",
+    paymentMethod: "cod"
+  };
+  const result = authorizeOrderUpdate(
+    { uid: "rider-1", role: "rider" },
+    deliveredCod,
+    { codHandoffRequested: true }
+  );
+  assert.equal(result.codHandoffRequestedBy, "rider-1");
+  assert.equal(typeof result.codHandoffRequestedAt, "number");
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "rider-2", role: "rider" }, deliveredCod, { codHandoffRequested: true }),
+    /not assigned/i
+  );
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "rider-1", role: "rider" }, { ...deliveredCod, codRemittedAt: Date.now() }, { codHandoffRequested: true }),
+    /already confirmed/i
+  );
+});
+
 test("enforces sequential order status changes", () => {
   const staffUpdate = authorizeOrderUpdate(
     { uid: "staff-1", role: "staff" },

@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, ClipboardList, LogOut, Menu, ReceiptText, Star, Store, Trash2, UserRound, X } from "lucide-react";
+import { Bell, CheckCheck, ClipboardList, LogOut, Menu, Plus, ReceiptText, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
@@ -476,9 +476,17 @@ function CustomerBottomNav({ activeView, onNavigate }) {
 }
 
 function NotificationCenter({ notifications, onClose }) {
-  useEffect(() => {
-    api.markAllNotificationsRead().catch(() => {});
-  }, []);
+  const [markingRead, setMarkingRead] = useState(false);
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  const markAllRead = async () => {
+    if (!unreadCount || markingRead) return;
+    setMarkingRead(true);
+    try {
+      await api.markAllNotificationsRead();
+    } finally {
+      setMarkingRead(false);
+    }
+  };
   const clearAll = async () => {
     if (!window.confirm("Clear all notifications? This cannot be undone.")) return;
     await api.clearNotifications();
@@ -490,12 +498,12 @@ function NotificationCenter({ notifications, onClose }) {
     <>
       <button className="notification-backdrop" aria-label="Close notifications" onClick={onClose} />
       <aside className="notification-center">
-        <header><div><p className="eyebrow text-danger">Your updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></div></header>
+        <header><div><p className="eyebrow text-danger">Your updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="mark-notifications-read" disabled={!unreadCount || markingRead} onClick={markAllRead}><CheckCheck size={15} aria-hidden="true" />{markingRead ? "Marking..." : "Mark all read"}</button><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></div></header>
         <div className="notification-list">
           {notifications.length === 0 && <div className="empty-chat">No notifications yet.</div>}
           {notifications.map((notification) => {
             const unread = !notification.readAt;
-            return <article className={unread ? "unread" : ""} key={notification.id}><span className={`notification-icon ${notification.type || "system"}`}>{notification.type?.slice(0, 1).toUpperCase() || "N"}</span><div><strong>{notification.title}</strong><p>{notification.message}</p><time title={new Date(notification.createdAt).toLocaleString("en-PH")}>{relativeTime(notification.createdAt)}</time></div>{unread && <i />}<button className="notification-dismiss" aria-label={`Dismiss ${notification.title}`} onClick={() => dismiss(notification.id)}>X</button></article>;
+            return <article className={unread ? "unread" : ""} key={notification.id}><span className={`notification-icon ${notification.type || "system"}`}><Bell size={15} aria-hidden="true" /></span><div><strong>{notification.title}</strong><p>{notification.message}</p><time title={new Date(notification.createdAt).toLocaleString("en-PH")}>{relativeTime(notification.createdAt)}</time></div>{unread && <i />}<button className="notification-dismiss" aria-label={`Dismiss ${notification.title}`} onClick={() => dismiss(notification.id)}><X size={15} aria-hidden="true" /></button></article>;
           })}
         </div>
       </aside>
@@ -503,16 +511,68 @@ function NotificationCenter({ notifications, onClose }) {
   );
 }
 
+function StoreCartPanel({ cart, cartCount, cartSubtotal, add, decrease, remove, onCheckout }) {
+  return (
+    <div className="store-cart-panel" aria-label="Current order">
+      <div className="cart-panel-heading">
+        <div>
+          <p className="eyebrow text-danger">Your order</p>
+          <h2>{cartCount} item{cartCount === 1 ? "" : "s"}</h2>
+        </div>
+        <span>{cart.length ? "Ready" : "Empty"}</span>
+      </div>
+      <div className="cart-summary-list">
+        {cart.length === 0 && <div className="empty-cart-note">Add menu items to start an order.</div>}
+        {cart.map((item) => (
+          <div className="cart-summary-item" key={item.id}>
+            <span>{item.qty}</span>
+            <div>
+              <strong>{item.name}</strong>
+              <small>{currency(item.price)} each</small>
+            </div>
+            <div className="pos-quantity cart-quantity">
+              <button type="button" onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>-</button>
+              <span>{item.qty}</span>
+              <button type="button" disabled={item.qty >= Number(item.stock || 0)} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button>
+            </div>
+            <b>{currency(item.price * item.qty)}</b>
+            <button className="cart-remove-button" type="button" aria-label={`Remove ${item.name} from cart`} onClick={() => remove(item.id)}>
+              <Trash2 size={16} strokeWidth={2.4} aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="store-cart-totals">
+        <div><span>Subtotal</span><strong>{currency(cartSubtotal)}</strong></div>
+        <div><span>Delivery</span><strong>Calculated at checkout</strong></div>
+        <div><span>Estimated total</span><strong>{currency(cartSubtotal)}</strong></div>
+      </div>
+      <button className="btn btn-danger w-100" disabled={!cart.length} onClick={onCheckout}>Choose delivery or pickup</button>
+    </div>
+  );
+}
+
 const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
+  const [search, setSearch] = useState("");
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && menuAvailability(item).available), [menu]);
   const categories = useMemo(() => ["All", ...new Set(customerMenu.map((item) => item.category))], [customerMenu]);
-  const visible = useMemo(() => (
-    category === "All" ? customerMenu : customerMenu.filter((item) => item.category === category)
-  ), [category, customerMenu]);
+  const visible = useMemo(() => customerMenu.filter((item) => {
+    const categoryMatch = category === "All" || item.category === category;
+    const query = search.trim().toLowerCase();
+    const searchMatch = !query || `${item.name} ${item.description || ""} ${item.category || ""}`.toLowerCase().includes(query);
+    const stock = Number(item.stock || 0);
+    const availabilityMatch = availabilityFilter === "all"
+      || (availabilityFilter === "available" && stock > 7)
+      || (availabilityFilter === "low" && stock > 0 && stock <= 7)
+      || (availabilityFilter === "sold-out" && stock <= 0);
+    return categoryMatch && searchMatch && availabilityMatch;
+  }), [availabilityFilter, category, customerMenu, search]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
   const cartSubtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
-  const deliveryFee = cart.length > 0 ? 49 : 0;
+  const stockLabel = (stock) => stock <= 0 ? "Sold out" : stock <= 7 ? "Low stock" : "Available";
   // erick: i-cap ang add-to-cart sa available stock (gaya ng POS) para hindi lumampas.
   const add = useCallback((product) => setCart((current) => {
     const availableStock = Number(product.stock ?? 0);
@@ -532,6 +592,10 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
     .filter((item) => item.qty > 0)), [setCart]);
   // erick: buong item ang tinatanggal kapag nagkamali ang customer sa cart.
   const remove = useCallback((productId) => setCart((current) => current.filter((item) => item.id !== productId)), [setCart]);
+  const checkout = () => {
+    setMobileCartOpen(false);
+    onCheckout();
+  };
 
   return (
     <main className="storefront-page" id="live-menu">
@@ -554,7 +618,21 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
             ))}
           </div>
 
+          <div className="storefront-filter-bar">
+            <label className="menu-search-field">
+              <Search size={18} aria-hidden="true" />
+              <span className="visually-hidden">Search menu</span>
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search meals, drinks, or categories" />
+            </label>
+            <div className="menu-availability-filter" role="group" aria-label="Filter by availability">
+              {[["all", "All"], ["available", "Available"], ["low", "Low stock"], ["sold-out", "Sold out"]].map(([value, label]) => (
+                <button type="button" key={value} className={availabilityFilter === value ? "active" : ""} aria-pressed={availabilityFilter === value} onClick={() => setAvailabilityFilter(value)}>{label}</button>
+              ))}
+            </div>
+          </div>
+
           <div className="menu-list">
+            {visible.length === 0 && <div className="empty-state compact">No menu items match these filters.</div>}
             {visible.map((product, index) => {
               const stock = Number(product.stock ?? 0);
               return (
@@ -569,8 +647,8 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
                   </div>
                   <div className="menu-item-action">
                     <strong>{currency(product.price)}</strong>
-                    <span className={stock <= 7 ? "stock-note low" : "stock-note"}>{stock} available</span>
-                    <button className="add-item-button" disabled={stock === 0} onClick={() => add(product)} aria-label={`Add ${product.name} to cart`}>+</button>
+                    <span className={stock <= 7 ? "stock-note low" : "stock-note"}>{stockLabel(stock)}</span>
+                    <button className="add-item-button" disabled={stock === 0} onClick={() => add(product)} aria-label={`Add ${product.name} to cart`}><Plus size={17} aria-hidden="true" /></button>
                   </div>
                 </article>
               );
@@ -579,43 +657,7 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
         </section>
 
         <aside className="store-cart-column">
-          <div className="store-cart-panel" aria-label="Current order">
-            <div className="cart-panel-heading">
-              <div>
-                <p className="eyebrow text-danger">Your order</p>
-                <h2>{cartCount} item{cartCount === 1 ? "" : "s"}</h2>
-              </div>
-              <span>{cart.length ? "Ready" : "Empty"}</span>
-            </div>
-            <div className="cart-summary-list">
-              {cart.length === 0 && <div className="empty-cart-note">Add menu items to start an order.</div>}
-              {cart.map((item) => (
-                <div className="cart-summary-item" key={item.id}>
-                  <span>{item.qty}</span>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <small>{currency(item.price)} each</small>
-                  </div>
-                  <div className="pos-quantity cart-quantity">
-                    <button type="button" onClick={() => decrease(item.id)} aria-label={`Decrease ${item.name}`}>-</button>
-                    <span>{item.qty}</span>
-                    <button type="button" disabled={item.qty >= Number(item.stock || 0)} onClick={() => add(item)} aria-label={`Increase ${item.name}`}>+</button>
-                  </div>
-                  <b>{currency(item.price * item.qty)}</b>
-                  {/* erick: trash icon ang delete action para madaling makita sa cart row. */}
-                  <button className="cart-remove-button" type="button" aria-label={`Remove ${item.name} from cart`} onClick={() => remove(item.id)}>
-                    <Trash2 size={16} strokeWidth={2.4} aria-hidden="true" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="store-cart-totals">
-              <div><span>Subtotal</span><strong>{currency(cartSubtotal)}</strong></div>
-              <div><span>Delivery</span><strong>{cart.length ? currency(deliveryFee) : "-"}</strong></div>
-              <div><span>Total</span><strong>{currency(cartSubtotal + deliveryFee)}</strong></div>
-            </div>
-            <button className="btn btn-danger w-100" disabled={!cart.length} onClick={onCheckout}>Checkout</button>
-          </div>
+          <StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} onCheckout={checkout} />
 
           <div className="storefront-brand-card checkout-brand-card">
             <BrandMark />
@@ -626,7 +668,8 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
           </div>
         </aside>
       </section>
-      {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={onCheckout}>Checkout {cartCount} item{cartCount === 1 ? "" : "s"}</button>}
+      {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={() => setMobileCartOpen(true)}>Review order - {cartCount} item{cartCount === 1 ? "" : "s"}</button>}
+      {mobileCartOpen && <><button className="mobile-cart-backdrop" aria-label="Close order summary" onClick={() => setMobileCartOpen(false)} /><aside className="mobile-cart-sheet" aria-label="Mobile order summary"><header><div><p className="eyebrow text-danger">Order summary</p><strong>Review your cart</strong></div><button aria-label="Close order summary" onClick={() => setMobileCartOpen(false)}><X size={20} aria-hidden="true" /></button></header><StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} onCheckout={checkout} /></aside></>}
     </main>
   );
 });
@@ -836,7 +879,7 @@ export default function App() {
   }, [activeUser, view]);
   useEffect(() => {
     const shouldLoadShiftLogs = (
-      (activeUser?.role === "owner" && view === "owner-reports") ||
+      (activeUser?.role === "owner" && ["owner-overview", "owner-reports"].includes(view)) ||
       (activeUser?.role === "staff" && view === "staff-shifts")
     );
     if (!shouldLoadShiftLogs) {
@@ -956,9 +999,9 @@ export default function App() {
     sumByTotal
   };
   const workspace = user.role === "owner"
-    ? <OwnerWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} />
+    ? <OwnerWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} serviceStatus={serviceStatus} auditLogs={auditLogs} shiftLogs={shiftLogs} notify={setNotice} onNavigate={navigate} />
     : user.role === "staff"
-      ? <StaffWorkspace helpers={workspaceHelpers} section={staffCanAccess(currentUser, view) ? view : defaultViewForRole("staff")} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} />
+      ? <StaffWorkspace helpers={workspaceHelpers} section={staffCanAccess(currentUser, view) ? view : defaultViewForRole("staff")} user={currentUser} orders={orders} inventory={inventory} reviews={reviews} complaints={complaints} shiftLogs={shiftLogs} messages={supportMessages} serviceStatus={serviceStatus} notify={setNotice} onNavigate={navigate} />
       : user.role === "rider"
         ? <RiderWorkspace helpers={workspaceHelpers} section={view} user={currentUser} orders={orders} notify={setNotice} />
         : null;
@@ -974,7 +1017,7 @@ export default function App() {
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
-          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} />
+          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} />
         </Suspense>
       )}
       {user.role === "customer" && view === "receipts" && (

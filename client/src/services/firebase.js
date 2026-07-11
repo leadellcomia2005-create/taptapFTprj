@@ -382,6 +382,39 @@ export function subscribeReviews(user, callback) {
   return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
+export function subscribePublicReviews(callback) {
+  const normalize = (value = {}) => callback(
+    Object.entries(value)
+      .map(([id, review]) => {
+        const firstName = String(review.customerName || "").trim().split(/\s+/)[0];
+        return {
+          id,
+          orderId: review.orderId || id,
+          customerLabel: firstName ? `${firstName} customer` : "TapTap customer",
+          rating: Number(review.rating || 0),
+          comment: String(review.comment || "").trim(),
+          items: Array.isArray(review.items) ? review.items.slice(0, 3) : [],
+          moderationStatus: review.moderationStatus,
+          createdAt: Number(review.createdAt || 0)
+        };
+      })
+      .filter((review) => review.moderationStatus === "approved" && review.rating > 0 && review.comment)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 5)
+  );
+  if (firebaseEnabled) {
+    return onValue(
+      ref(db, "reviews"),
+      (snapshot) => normalize(snapshot.val() || {}),
+      () => callback([])
+    );
+  }
+  const emit = () => normalize(readDemoData().reviews);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  return () => window.removeEventListener("taptap-demo-data", emit);
+}
+
 export async function submitReview(order, user, rating, comment) {
   const review = {
     orderId: order.id,
@@ -781,6 +814,7 @@ export async function createOrder(order) {
       deliveryType: order.deliveryType,
       notes: order.notes,
       discount: order.discount,
+      discountReason: order.discountReason,
       cashReceived: order.cashReceived,
       diningOption: order.diningOption,
       paymentMethod: order.paymentMethod,
@@ -870,6 +904,10 @@ export async function updateOrder(orderId, values) {
     nextValues.paymentStatus = "paid";
     nextValues.paymentConfirmedAt = Date.now();
     nextValues.codRemittedAt = Date.now();
+  }
+  if (values.codHandoffRequested && currentOrder?.paymentMethod === "cod" && currentOrder?.status === "delivered") {
+    nextValues.codHandoffRequestedAt = Date.now();
+    nextValues.codHandoffRequestedBy = currentOrder.riderId || null;
   }
   if ((values.cancel || values.status === "cancelled") && currentOrder && currentOrder.status !== "cancelled") {
     nextValues.status = "cancelled";

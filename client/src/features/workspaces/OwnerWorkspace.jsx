@@ -1,13 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowRight, ClipboardList, CreditCard, MessageSquareWarning, PackageSearch, WifiOff } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
 import { securityMethodLabels, staffRoleLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
 import { updateOrder } from "../../services/firebase";
-import { bestSellers, forecastRunouts, peakOrderHours, slowMovingItems } from "../../utils/operations";
+import { bestSellers, forecastRunouts, orderPrepClock, peakOrderHours, slowMovingItems } from "../../utils/operations";
 import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
-import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
+import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, isUnremittedCod, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
+const ownerPlanningStorageKey = "taptap-owner-planning";
+
+function ownerPlanningDefaults() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(ownerPlanningStorageKey) || "{}");
+    return {
+      salesGoal: Math.max(1, Number(saved.salesGoal || 100000)),
+      activePromotion: String(saved.activePromotion || "No active promotion")
+    };
+  } catch {
+    return { salesGoal: 100000, activePromotion: "No active promotion" };
+  }
+}
 
 const securityAuditActions = new Set([
   "registration_security_check_passed",
@@ -143,11 +157,10 @@ const auditCategories = [
   ["system", "System"]
 ];
 
-function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify }) {
+function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const estimatedProfit = totalSales * 0.58;
   const bestSellerRows = bestSellers(revenueOrders, inventory, 5);
   const slowMovingRows = slowMovingItems(revenueOrders, inventory, 5);
   const peakHours = peakOrderHours(orders);
@@ -164,7 +177,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       .reduce((sum, order) => sum + Number(order.total || 0), 0);
   });
   const [insight, setInsight] = useState("Generate a free best-seller and stock recommendation.");
-  const [salesGoal, setSalesGoal] = useState(100000);
+  const [planning, setPlanning] = useState(ownerPlanningDefaults);
+  const salesGoal = planning.salesGoal;
+  const [dashboardPeriod, setDashboardPeriod] = useState("today");
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff", staffRole: "manager" });
   const [createUserForm, setCreateUserForm] = useState({ name: "", email: "", temporaryPassword: "", role: "staff", staffRole: "manager" });
   const [creatingUser, setCreatingUser] = useState(false);
@@ -177,6 +192,32 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [auditDateRange, setAuditDateRange] = useState({ from: "", to: "" });
   const [auditPage, setAuditPage] = useState(1);
   const [selectedAuditEntry, setSelectedAuditEntry] = useState(null);
+  const now = Date.now();
+  const todayStart = new Date().setHours(0, 0, 0, 0);
+  const periodStart = dashboardPeriod === "today"
+    ? todayStart
+    : dashboardPeriod === "7d"
+      ? now - 7 * 24 * 60 * 60 * 1000
+      : dashboardPeriod === "30d"
+        ? now - 30 * 24 * 60 * 60 * 1000
+        : 0;
+  const dashboardOrders = periodStart ? orders.filter((order) => Number(order.createdAt || 0) >= periodStart) : orders;
+  const dashboardRevenueOrders = dashboardOrders.filter(isRevenueOrder);
+  const dashboardSales = sumByTotal(dashboardRevenueOrders);
+  const dashboardAverageOrder = dashboardRevenueOrders.length ? dashboardSales / dashboardRevenueOrders.length : 0;
+  const periodLength = periodStart ? Math.max(1, now - periodStart) : 0;
+  const previousSales = periodLength
+    ? sumByTotal(orders.filter((order) => isRevenueOrder(order) && Number(order.createdAt || 0) >= periodStart - periodLength && Number(order.createdAt || 0) < periodStart))
+    : 0;
+  const salesChange = previousSales > 0 ? Math.round((dashboardSales - previousSales) / previousSales * 100) : null;
+  const activeWorkload = dashboardOrders.filter((order) => !["delivered", "completed", "cancelled", "pending-payment"].includes(order.status));
+  const overdueOrders = activeWorkload.filter((order) => orderPrepClock(order).delayed);
+  const pendingPaymentOrders = dashboardOrders.filter((order) => order.status === "pending-payment" || order.paymentStatus === "pending");
+  const lowStockItems = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0));
+  const unremittedCodOrders = dashboardOrders.filter(isUnremittedCod);
+  const unresolvedComplaints = complaints.filter((complaint) => !["resolved", "closed"].includes(String(complaint.status || "open").toLowerCase()));
+  const unavailableServices = Object.entries(serviceStatus || {}).filter(([, ready]) => ready === false);
+  const dataUpdatedAt = Math.max(0, ...orders.map((order) => Number(order.updatedAt || order.createdAt || 0)));
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
   const sortedAuditRows = useMemo(() => [...auditLogs].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)), [auditLogs]);
   const securityAuditRows = useMemo(() => sortedAuditRows.filter((entry) => securityAuditActions.has(entry.action)), [sortedAuditRows]);
@@ -219,6 +260,14 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const printDailyReport = () => {
     const opened = printOwnerDailyReport(dailyReport);
     notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
+  };
+  const savePlanningStrategy = () => {
+    try {
+      window.localStorage.setItem(ownerPlanningStorageKey, JSON.stringify(planning));
+      notify("Planning settings saved on this browser. Customer pricing was not changed.");
+    } catch {
+      notify("Planning settings could not be saved on this browser.");
+    }
   };
   const markCodRemitted = async (order) => {
     await updateOrder(order.id, { codRemitted: true });
@@ -320,7 +369,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => !["delivered", "completed", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live order workload</span></div></div>
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
-        <div className="col-lg-4"><div className="dashboard-card"><h3>Strategy controls</h3><label className="form-label">Sales goal threshold<input className="form-control" type="number" value={salesGoal} onChange={(event) => setSalesGoal(Number(event.target.value))} /></label><label className="form-label">Active promotion<select className="form-select"><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={() => notify("Sales strategy saved.")}>Save strategy</button></div></div>
+        <div className="col-lg-4"><div className="dashboard-card"><h3>Local planning controls</h3><p className="module-note">Saved only on this browser for planning. These values do not change customer pricing.</p><label className="form-label">Sales goal threshold<input className="form-control" type="number" min="1" value={salesGoal} onChange={(event) => setPlanning((current) => ({ ...current, salesGoal: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Promotion scenario<select className="form-select" value={planning.activePromotion} onChange={(event) => setPlanning((current) => ({ ...current, activePromotion: event.target.value }))}><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={savePlanningStrategy}>Save on this browser</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
         <div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div>
       </div>
@@ -354,7 +403,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           {Object.entries(dailyReport.orderTypeBreakdown).map(([label, count]) => <div key={label}><small>{label}</small><strong>{count}</strong></div>)}
         </div></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Top selling items</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Item</th><th>Qty sold</th><th>Sales</th></tr></thead><tbody>{dailyReport.topItems.length === 0 && <tr><td colSpan="3" className="text-center text-secondary py-4">No paid sales for this day.</td></tr>}{dailyReport.topItems.map((item) => <tr key={item.name}><td>{item.name}</td><td>{item.qty}</td><td>{currency(item.sales)}</td></tr>)}</tbody></table></div></div></div>
-        <div className="col-12"><div className="dashboard-card"><h3>COD remittance</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Rider</th><th>Total</th><th>Status</th><th /></tr></thead><tbody>{dailyReport.unremittedCodOrders.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No COD collections waiting for owner handoff.</td></tr>}{dailyReport.unremittedCodOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{order.riderName || order.riderId || "-"}</td><td>{currency(order.total)}</td><td><span className="status status-arrived">Collected</span></td><td><button className="btn btn-sm btn-danger" onClick={() => markCodRemitted(order)}>Mark remitted</button></td></tr>)}</tbody></table></div></div></div>
+        <div className="col-12"><div className="dashboard-card"><h3>COD remittance</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Rider</th><th>Total</th><th>Handoff</th><th /></tr></thead><tbody>{dailyReport.unremittedCodOrders.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No COD collections waiting for owner handoff.</td></tr>}{dailyReport.unremittedCodOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{order.riderName || order.riderId || "-"}</td><td>{currency(order.total)}</td><td><span className={`status ${order.codHandoffRequestedAt ? "status-arrived" : "status-ready"}`}>{order.codHandoffRequestedAt ? "Rider handoff logged" : "Collected"}</span></td><td><button className="btn btn-sm btn-danger" onClick={() => markCodRemitted(order)}>Confirm remitted</button></td></tr>)}</tbody></table></div></div></div>
         <div className="col-12"><div className="dashboard-card"><h3>Daily order ledger</h3><div className="table-responsive"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Status</th><th>Sales counted</th><th>Total</th></tr></thead><tbody>{dailyReport.dailyOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders for this day.</td></tr>}{dailyReport.dailyOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{orderItemText(order)}</span></td><td>{orderPaymentLabel(order)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{isRevenueOrder(order) ? "Yes" : "No"}</td><td>{currency(order.total)}</td></tr>)}</tbody></table></div></div></div>
         <div className="col-12"><ShiftLogsModule orders={orders} logs={dailyReport.closedShifts} user={user} notify={notify} readOnly /></div>
       </div>
@@ -517,34 +566,33 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       <section className="owner-listing-hero">
         <div>
           <p className="eyebrow">Super Admin / Owner</p>
-          <h2>TapTap FoodTrip control center</h2>
-          <p>Track sales, listing readiness, stock health, and today&apos;s order movement from one owner view.</p>
+          <h1>Operations control center</h1>
+          <p>Start with exceptions that need a decision, then review sales and operating trends.</p>
         </div>
-        <button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button>
+        <div className="owner-hero-actions">
+          <label>Dashboard period<select value={dashboardPeriod} onChange={(event) => setDashboardPeriod(event.target.value)}><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All loaded</option></select></label>
+          <button className="btn btn-outline-light" onClick={printDailyReport}>Print daily report</button>
+        </div>
       </section>
 
-      <section className="owner-listing-grid">
-        <article className="owner-listing-card">
-          <div className="owner-listing-cover">
-            <span>Open</span>
-          </div>
-          <div className="owner-listing-body">
-            <p className="eyebrow text-danger">Restaurant listing</p>
-            <h3>TapTap FoodTrip</h3>
-            <p>Traditional Pinoy tapsilog, alacarte, drinks, and special meals.</p>
-            <div className="owner-listing-stats">
-              <span><strong>{menu.length}</strong> menu items</span>
-              <span><strong>{orders.length}</strong> orders</span>
-              <span><strong>{Object.values(serviceStatus || {}).filter(Boolean).length}</strong> ready tools</span>
-            </div>
-          </div>
-        </article>
+      <div className="owner-overview-meta"><span>{dashboardOrders.length} orders in scope</span><span>{dataUpdatedAt ? `Latest order update ${new Date(dataUpdatedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}` : "Waiting for live orders"}</span></div>
 
-        <div className="owner-stat-grid">
-          <div className="metric-card owner-metric-card"><small>Gross sales</small><strong>{currency(totalSales)}</strong><span>Paid transactions</span></div>
-          <div className="metric-card owner-metric-card"><small>Profit estimate</small><strong>{currency(estimatedProfit)}</strong><span>After estimated food and ops cost</span></div>
-          <div className="metric-card owner-metric-card"><small>Awaiting action</small><strong>{orders.filter((order) => !["delivered", "completed", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live workload</span></div>
-          <div className="metric-card owner-metric-card"><small>Low stock</small><strong>{inventory.filter((item) => item.stock <= item.reorderPoint).length}</strong><span>Needs attention</span></div>
+      <section className="owner-stat-grid owner-kpi-grid" aria-label="Owner performance metrics">
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Paid sales</small><strong>{currency(dashboardSales)}</strong><span>{salesChange == null ? "No previous-period baseline" : `${salesChange >= 0 ? "+" : ""}${salesChange}% vs previous period`}</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Average paid order</small><strong>{currency(dashboardAverageOrder)}</strong><span>{dashboardRevenueOrders.length} paid order{dashboardRevenueOrders.length === 1 ? "" : "s"}</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Active workload</small><strong>{activeWorkload.length}</strong><span>{overdueOrders.length} beyond prep target</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-inventory")}><small>Low stock</small><strong>{lowStockItems.length}</strong><span>At or below reorder point</span></button>
+      </section>
+
+      <section className="owner-attention-board" aria-label="Items requiring owner attention">
+        <div className="module-heading"><div><p className="eyebrow text-danger">Today&apos;s exceptions</p><h2>Needs a decision</h2></div><span className="module-note">Open an item to continue in its operational workspace.</span></div>
+        <div className="owner-attention-grid">
+          <button className={overdueOrders.length ? "urgent" : ""} type="button" onClick={() => onNavigate?.("owner-sales")}><AlertTriangle aria-hidden="true" /><span><strong>{overdueOrders.length}</strong><b>Overdue orders</b><small>Beyond the 15-minute prep target</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={pendingPaymentOrders.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-sales")}><CreditCard aria-hidden="true" /><span><strong>{pendingPaymentOrders.length}</strong><b>Pending payments</b><small>Not yet counted as revenue</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={lowStockItems.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-inventory")}><PackageSearch aria-hidden="true" /><span><strong>{lowStockItems.length}</strong><b>Low-stock items</b><small>Receiving or reorder action needed</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={unremittedCodOrders.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-reports")}><ClipboardList aria-hidden="true" /><span><strong>{unremittedCodOrders.length}</strong><b>COD to reconcile</b><small>{currency(sumByTotal(unremittedCodOrders))} awaiting owner confirmation</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={unresolvedComplaints.length ? "urgent" : ""} type="button" onClick={() => onNavigate?.("owner-reviews")}><MessageSquareWarning aria-hidden="true" /><span><strong>{unresolvedComplaints.length}</strong><b>Open complaints</b><small>Customer recovery follow-up</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={unavailableServices.length ? "urgent" : ""} type="button" onClick={() => onNavigate?.("owner-settings")}><WifiOff aria-hidden="true" /><span><strong>{unavailableServices.length}</strong><b>Service warnings</b><small>{unavailableServices.length ? unavailableServices.map(([name]) => name).join(", ") : "All checked services ready"}</small></span><ArrowRight aria-hidden="true" /></button>
         </div>
       </section>
 
@@ -552,27 +600,27 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="dashboard-card chart-card owner-chart-card">
           <div className="module-heading">
             <div><p className="eyebrow text-danger">Sales performance</p><h3>Weekly revenue</h3></div>
-            <span className="shift-chip">{Math.min(100, Math.round(totalSales / salesGoal * 100))}% goal</span>
+            <span className="shift-chip">{Math.min(100, Math.round(dashboardSales / Math.max(1, salesGoal) * 100))}% of local goal</span>
           </div>
           <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense>
         </div>
-        <div className="dashboard-card ai-insight owner-decision-card">
-          <p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Free business insight"}</p>
-          <h3>Decision support</h3>
-          <p>{insight}</p>
-          <button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate free summary"}</button>
-        </div>
-        <div className="owner-listing-orders"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
+        <div className="owner-listing-orders"><OrderManagement orders={activeWorkload.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="dashboard-card owner-stock-panel">
           <div className="module-heading"><div><p className="eyebrow text-danger">Inventory watch</p><h3>Low-stock alerts</h3></div></div>
-          {inventory.filter((item) => item.stock <= item.reorderPoint).slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}
-          {inventory.every((item) => item.stock > item.reorderPoint) && <p className="text-secondary small">All products are above their reorder points.</p>}
+          {lowStockItems.slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}
+          {lowStockItems.length === 0 && <p className="text-secondary small">All products are above their reorder points.</p>}
         </div>
         <div className="dashboard-card"><h3>Best sellers</h3>{bestSellerRows.length === 0 && <div className="empty-chat">Sales will appear here.</div>}{bestSellerRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold</small></span><b>{currency(item.sales)}</b></div>)}</div>
-        <div className="dashboard-card"><h3>Slow-moving items</h3>{slowMovingRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold, {item.stock} in stock</small></span><b>{item.qty}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Slow-moving items</h3>{slowMovingRows.length === 0 && <div className="empty-chat">Inventory activity will appear here.</div>}{slowMovingRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold, {item.stock} in stock</small></span><b>{item.qty}</b></div>)}</div>
         <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{hour.count}</b></div>)}</div>
         <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.dailyVelocity.toFixed(1)} sold/day</small></span><b>{item.daysLeft.toFixed(1)}d</b></div>)}</div>
         <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{shift.orderCount} orders - variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)}</b></div>)}</div>
+        <div className="dashboard-card ai-insight owner-decision-card">
+          <p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Local business insight"}</p>
+          <h3>Decision support</h3>
+          <p>{insight}</p>
+          <button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate local summary"}</button>
+        </div>
       </section>
     </main>
   );

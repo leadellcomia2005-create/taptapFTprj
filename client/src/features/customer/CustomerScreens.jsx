@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Clock3, MapPin, PackageCheck, RotateCcw, Star } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { api } from "../../services/api";
@@ -76,6 +77,19 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
   const verifiedPhone = phoneIsVerified(profile, normalizedPhone);
   const smsReady = Boolean(verifiedPhone && smsProviderEnabled);
   const deliveryMarker = locationToMarker(deliveryLocation);
+  const needsPhone = !validPhone;
+  const needsDeliveryAddress = deliveryType === "delivery" && !address.trim();
+  const needsDeliveryPin = deliveryType === "delivery" && !deliveryMarker;
+  const checkoutBlockReason = needsPhone
+    ? "Enter a valid Philippine mobile number."
+    : needsDeliveryAddress
+      ? "Add the delivery address."
+      : needsDeliveryPin
+        ? "Confirm the delivery pin."
+        : "";
+  const checkoutReady = !checkoutBlockReason;
+  const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Cash at pickup";
+  const cashPaymentDetail = deliveryType === "delivery" ? "Pay the rider on handoff" : "Pay at the counter when claiming";
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -188,10 +202,11 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
           <div className="modal-body">
             {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
             <div className="checkout-mode-grid mt-3" aria-label="Order type">
-              <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>With rider fee</small></button>
-              <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>Claim at store</small></button>
+              <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>Rider delivery with fee and drop-off pin</small></button>
+              <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>No delivery fee, claim at store</small></button>
             </div>
-            <label className="form-label mt-3">Mobile number<input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
+            <label className="form-label mt-3">Mobile number <span className="checkout-required">Required</span><input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" aria-describedby="checkout-phone-hint" aria-invalid={Boolean(phone && !validPhone)} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
+            <small className={`checkout-field-hint ${phone && !validPhone ? "error" : ""}`} id="checkout-phone-hint">{phone && !validPhone ? "Use a valid PH mobile number such as 0917 123 4567." : "Used for order updates, receipts, and rider handoff."}</small>
             <div className="checkout-sms-panel">
               <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
               <div className="checkout-sms-actions">
@@ -202,7 +217,8 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
             </div>
             {deliveryType === "delivery" && <>
               <div className="checkout-address-stack">
-                <label className="form-label">Delivery address<textarea className="form-control" autoComplete="street-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
+                <label className="form-label">Delivery address <span className="checkout-required">Required</span><textarea className={`form-control ${needsDeliveryAddress ? "is-invalid" : ""}`} autoComplete="street-address" aria-describedby="checkout-address-hint" aria-invalid={needsDeliveryAddress} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
+                <small className={`checkout-field-hint ${needsDeliveryAddress ? "error" : ""}`} id="checkout-address-hint">{needsDeliveryAddress ? "Add a complete address before placing a delivery order." : "Include barangay, street, house number, or building name."}</small>
                 <label className="form-label">Landmark<input className="form-control" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></label>
               </div>
               <div className="checkout-location-panel">
@@ -223,15 +239,22 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
                 ) : <div className="empty-chat checkout-pin-empty">No pin selected yet. Use GPS or choose a pin on the map.</div>}
               </div>
             </>}
-            <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: landmark, extra request, or pickup note" /></label>
+            <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: extra request, pickup note, or rider instruction" /></label>
+            <div className="checkout-payment-heading">
+              <strong>Payment method</strong>
+              <small>{deliveryType === "delivery" ? "Choose online payment or pay during delivery." : "Choose online payment or pay when you pick up."}</small>
+            </div>
             <div className="row g-2">
               <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "GCash unavailable right now"}</small></button></div>
-              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>Cash on delivery</strong><small>Rider ledger</small></button></div>
+              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>{cashPaymentLabel}</strong><small>{cashPaymentDetail}</small></button></div>
             </div>
             <div className="checkout-total"><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>
             {deliveryFee > 0 && <small className="text-secondary d-block mt-2">Delivery fee: {currency(deliveryFee)}</small>}
+            <div className={`checkout-validation-summary ${checkoutReady ? "ready" : ""}`} role="status" aria-live="polite">
+              {checkoutReady ? "Ready to place order." : checkoutBlockReason}
+            </div>
           </div>
-          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !validPhone || (deliveryType === "delivery" && (!address.trim() || !deliveryMarker))} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
+          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !checkoutReady} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
         </div>
       </div>
     </div>
@@ -281,7 +304,7 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
   );
 }
 
-export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder }) {
+export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse }) {
   const revenueCheck = isRevenueOrder || (() => false);
   const activeOrders = orders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
   const pastOrders = orders.filter((order) => ["delivered", "completed", "cancelled"].includes(order.status));
@@ -289,6 +312,11 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
   const latestOrder = orders[0];
   const [complaintTarget, setComplaintTarget] = useState(null);
   const complaintByOrder = useMemo(() => new Map(complaints.map((complaint) => [complaint.orderId, complaint])), [complaints]);
+  const priorityOrder = activeOrders[0];
+  const prioritySteps = priorityOrder?.deliveryType === "delivery"
+    ? ["received", "preparing", "ready", "out-for-delivery", "arrived", "delivered"]
+    : ["received", "preparing", "ready", "completed"];
+  const priorityStepIndex = priorityOrder ? Math.max(0, prioritySteps.indexOf(priorityOrder.status)) : -1;
   const cancelOrder = async (order) => {
     const reason = window.prompt(`Why do you want to cancel ${order.id}?`);
     if (!reason?.trim()) return;
@@ -340,7 +368,21 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
             <div><p className="eyebrow text-danger">Your orders</p><h2>Order history</h2></div>
             <p>Review previous and active purchases with live delivery status.</p>
           </div>
-          {orders.length === 0 ? <div className="empty-state">No orders yet.</div> : (
+          {priorityOrder && <section className="customer-active-order" aria-label="Priority active order">
+            <div className="customer-active-order-heading">
+              <div><p className="eyebrow">Active order</p><h3>{priorityOrder.id}</h3><span><Clock3 size={14} aria-hidden="true" /> {statusLabel(priorityOrder.status)}</span></div>
+              <strong>{currency(priorityOrder.total)}</strong>
+            </div>
+            <div className="customer-order-progress" aria-label={`Order status: ${statusLabel(priorityOrder.status)}`}>
+              {prioritySteps.map((step, index) => <div className={index <= priorityStepIndex ? "complete" : ""} key={step}><i>{index < priorityStepIndex ? <PackageCheck size={14} aria-hidden="true" /> : index + 1}</i><span>{statusLabel(step)}</span></div>)}
+            </div>
+            <div className="customer-active-order-details">
+              <span><MapPin size={15} aria-hidden="true" /> {priorityOrder.address || "Counter pickup"}</span>
+              <span>{priorityOrder.items?.map((item) => `${item.qty}x ${item.name}`).join(", ")}</span>
+            </div>
+            <div className="customer-active-order-actions"><button className="btn btn-danger" onClick={() => onTrack(priorityOrder)}>Track order</button><button className="btn btn-outline-dark" onClick={() => onReorder?.(priorityOrder)}><RotateCcw size={15} aria-hidden="true" /> Reorder</button></div>
+          </section>}
+          {orders.length === 0 ? <div className="empty-state customer-orders-empty"><strong>Your first order will appear here.</strong><span>Browse today&apos;s menu and choose delivery or pickup when ready.</span><button className="btn btn-danger" onClick={onBrowse}>Browse menu</button></div> : (
             <>
               {renderOrderTable("Active orders", activeOrders, "No active orders right now.")}
               {renderOrderTable("Past orders", pastOrders, "Completed orders will appear here.")}
@@ -587,8 +629,8 @@ export function ReviewsView({ user, orders, reviews, notify }) {
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
       <div className="row g-4">
-        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} · {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
-        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} · {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
+        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} - {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}><Star size={22} fill={star <= rating ? "currentColor" : "none"} aria-hidden="true" /></button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
+        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span className="previous-review-stars" aria-label={`${review.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <Star key={star} size={15} fill={star <= review.rating ? "currentColor" : "none"} aria-hidden="true" />)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} - {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
       </div>
     </main>
   );

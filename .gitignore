@@ -40,6 +40,12 @@ ui-debug.log
 *.bak
 *.swp
 .codex-tools/
+/tmp/
+
+# Local generated artifacts
+/config.yml
+/output/
+/separated-menu-photos/
 
 # Archives
 *.zip

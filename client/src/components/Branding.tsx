@@ -13,7 +13,11 @@ interface ServiceBadgeProps {
 export function BrandMark({ className = "" }: BrandMarkProps) {
   return (
     <span className={`brand-mark ${className}`.trim()}>
-      <img src="/assets/taptap-logo.png" alt="TapTap FoodTrip logo" width={720} height={742} decoding="async" />
+      <picture>
+        <source srcSet="/assets/taptap-logo.avif" type="image/avif" />
+        <source srcSet="/assets/taptap-logo.webp" type="image/webp" />
+        <img src="/assets/taptap-logo.png" alt="TapTap FoodTrip logo" width={720} height={742} decoding="async" />
+      </picture>
     </span>
   );
 }

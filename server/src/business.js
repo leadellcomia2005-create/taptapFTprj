@@ -211,6 +211,8 @@ export async function createOrderRecord(db, user, input) {
   const smsNotifications = Boolean(phoneVerified && smsNotificationsRequested);
   const discount = isWalkIn ? Math.max(0, Math.min(subtotal, Number(input.discount || 0))) : 0;
   if (!Number.isFinite(discount)) throw new HttpError(400, "Enter a valid discount.");
+  const discountReason = discount > 0 ? cleanText(input.discountReason, 80) : "";
+  if (discount > 0 && !discountReason) throw new HttpError(400, "Select a discount reason.");
   const fee = deliveryType === "delivery" ? deliveryFee : 0;
   const total = subtotal - discount + fee;
   const cashReceived = isWalkIn && input.paymentMethod === "cash" ? Number(input.cashReceived ?? total) : 0;
@@ -243,6 +245,7 @@ export async function createOrderRecord(db, user, input) {
     paymentMethod: input.paymentMethod,
     subtotal,
     discount,
+    discountReason,
     deliveryFee: fee,
     total,
     cashReceived: isWalkIn && input.paymentMethod === "cash" ? cashReceived : null,
@@ -415,7 +418,7 @@ export async function updateOrderRecord(db, user, orderId, input) {
       action: "order_updated",
       orderId,
       status: changes.status || null,
-      details: auditDetails(previous, order, ["status", "riderId", "riderName", "paymentStatus", "cancelReason", "refundStatus", "codRemittedAt"]),
+      details: auditDetails(previous, order, ["status", "riderId", "riderName", "paymentStatus", "cancelReason", "refundStatus", "codHandoffRequestedAt", "codRemittedAt"]),
       actorId: user.uid,
       actorName: user.name || user.email,
       actorRole: user.role,

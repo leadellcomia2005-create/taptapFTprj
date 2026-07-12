@@ -1,0 +1,54 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "eslint.workingDirectories": [
+    "./client"
+  ],
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.cache": true,
+    "**/.agents": true,
+    "**/.codex-tools": true,
+    "**/.firebase": true,
+    "**/.vite": true,
+    "**/coverage": true,
+    "**/output": true,
+    "**/playwright-report": true,
+    "**/separated-menu-photos": true,
+    "**/test-results": true,
+    "**/tmp": true,
+    "**/*.log": true,
+    "**/config.yml": true,
+    "**/service-account*.json": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.cache": true,
+    "**/.agents": true,
+    "**/.codex-tools": true,
+    "**/.firebase": true,
+    "**/.vite": true,
+    "**/coverage": true,
+    "**/output": true,
+    "**/playwright-report": true,
+    "**/separated-menu-photos": true,
+    "**/test-results": true,
+    "**/tmp": true,
+    "**/*.log": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/.agents/**": true,
+    "**/.codex-tools/**": true,
+    "**/.firebase/**": true,
+    "**/playwright-report/**": true,
+    "**/separated-menu-photos/**": true,
+    "**/test-results/**": true,
+    "**/tmp/**": true
+  },
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "npm.packageManager": "npm"
+}

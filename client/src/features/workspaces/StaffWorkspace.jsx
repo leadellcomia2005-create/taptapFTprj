@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Banknote, ChefHat, Clock3, CreditCard, PackageSearch, RefreshCw, Search, ShoppingCart } from "lucide-react";
 import MenuPhoto from "../../components/MenuPhoto";
 import { staffPosCategories } from "../../config/appConfig";
-import { createOrder, getActiveShift, startShift } from "../../services/firebase";
-import { orderPrepClock } from "../../utils/operations";
+import { getActiveShift, startShift } from "../../services/firebase/operations";
+import { createOrder } from "../../services/firebase/orders";
+import { createRequestKey, orderPrepClock } from "../../utils/operations";
 import { ComplaintResolutionModule, InventoryModule, KitchenQueue, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule, SupportChat } from "./SharedWorkspaceModules";
 import { currency, inRange, isRevenueOrder, localDateInputValue, printReceipt, reportDateRange, setWorkspaceHelpers } from "./workspaceHelpers";
 
@@ -15,6 +16,7 @@ const staffDashboardProfiles = {
 };
 
 function StaffWorkspaceContent({ section, user, orders, inventory: staffInventory, reviews, complaints = [], shiftLogs, messages, serviceStatus, notify, onNavigate }) {
+  const orderRequestKeyRef = useRef("");
   const [posCart, setPosCart] = useState([]);
   const [posCategory, setPosCategory] = useState("all");
   const [posSearch, setPosSearch] = useState("");
@@ -30,7 +32,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   const [openingCash, setOpeningCash] = useState(2000);
   const [openingShift, setOpeningShift] = useState(false);
   const [completingPayment, setCompletingPayment] = useState(false);
-  const loadActiveShift = useCallback(async () => {
+  const loadActiveShift = async () => {
     setShiftLoading(true);
     setShiftError("");
     try {
@@ -41,7 +43,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     } finally {
       setShiftLoading(false);
     }
-  }, []);
+  };
   useEffect(() => {
     if (!["staff-overview", "staff-pos", "staff-shifts"].includes(section)) return undefined;
     let mounted = true;
@@ -112,6 +114,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     setCompletingPayment(true);
     try {
       const payload = {
+        idempotencyKey: orderRequestKeyRef.current || (orderRequestKeyRef.current = createRequestKey("pos-order")),
         customerId: "walk-in",
         customerName: "Walk-in Customer",
         paymentMethod: posPaymentMethod,
@@ -130,6 +133,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
         items: posCart
       };
       const orderId = await createOrder(payload);
+      orderRequestKeyRef.current = "";
       const receipt = { id: orderId, ...payload, createdAt: Date.now(), status: "received" };
       setPosCart([]);
       setPosDiscount(0);

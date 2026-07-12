@@ -4,16 +4,17 @@ import OpenAI from "openai";
 import twilio from "twilio";
 
 const has = (name) => Boolean(process.env[name]);
+const enabled = (name) => process.env[name] === "true";
 
 export function serviceStatus() {
   return {
     firebase: has("FIREBASE_DATABASE_URL"),
     socket: true,
     twoFactor: has("TWO_FACTOR_ENCRYPTION_KEY"),
-    openai: has("OPENAI_API_KEY"),
+    openai: enabled("ENABLE_OPENAI") && has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
-    paymongo: has("PAYMONGO_SECRET_KEY"),
-    twilio: has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
+    paymongo: enabled("ENABLE_PAYMONGO") && has("PAYMONGO_SECRET_KEY"),
+    twilio: enabled("ENABLE_TWILIO") && has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
     emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD"),
     turnstile: has("TURNSTILE_SECRET_KEY")
   };
@@ -42,7 +43,7 @@ export async function detectDialogflowIntent({ message, sessionId }) {
 }
 
 function openaiClient() {
-  return has("OPENAI_API_KEY") ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+  return serviceStatus().openai ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 }
 
 export async function askOpenAI({ message, context = {} }) {
@@ -84,7 +85,7 @@ export function checkoutReturnUrls(orderId) {
 }
 
 export async function createPayMongoCheckout(order) {
-  if (!has("PAYMONGO_SECRET_KEY")) return null;
+  if (!serviceStatus().paymongo) return null;
   const returnUrls = checkoutReturnUrls(order.orderId);
   const authorization = Buffer.from(`${process.env.PAYMONGO_SECRET_KEY}:`).toString("base64");
   const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {

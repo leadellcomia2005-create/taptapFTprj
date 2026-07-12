@@ -10,6 +10,9 @@ import {
 import { getAuth } from "firebase-admin/auth";
 import QRCode from "qrcode";
 import { HttpError, validRecordId } from "./security.js";
+import { allowedTwoFactorMethods } from "./domain/twoFactorPolicy.js";
+
+export { allowedTwoFactorMethods } from "./domain/twoFactorPolicy.js";
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const backupAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -166,10 +169,6 @@ function maskEmail(value = "") {
   const [name, domain] = String(value).split("@");
   if (!name || !domain) return "";
   return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
-}
-
-export function allowedTwoFactorMethods(role) {
-  return role === "customer" ? ["passkey", "totp", "sms", "email"] : ["totp"];
 }
 
 async function audit(db, userId, action, details = {}) {

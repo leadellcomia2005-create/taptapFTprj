@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, ClipboardList, CreditCard, MessageSquareWarn
 import { SectionLoader } from "../../components/Loaders";
 import { securityMethodLabels, staffRoleLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { updateOrder } from "../../services/firebase";
+import { updateOrder } from "../../services/firebase/orders";
 import { bestSellers, forecastRunouts, orderPrepClock, peakOrderHours, slowMovingItems } from "../../utils/operations";
 import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
 import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, isUnremittedCod, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";

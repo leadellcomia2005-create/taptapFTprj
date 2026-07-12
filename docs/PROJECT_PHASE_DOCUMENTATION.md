@@ -701,3 +701,60 @@ These are the main findings from the current codebase review.
 - Add provider webhook verification for PayMongo/Twilio if enabled.
 - Deploy to stable hosting.
 - Use monitoring/logging for backend errors.
+
+## 15. Free-First Modular Architecture Update
+
+Completed on 2026-07-12 without deploying, committing, or pushing changes.
+
+### Architecture Changes
+
+- Added typed client contracts and runtime guards for Firebase and API records.
+- Added focused auth, cart, notification, and role-navigation hooks.
+- Added domain-specific Firebase service facades while retaining the original adapter for compatibility.
+- Added Express application boundaries, domain policies, middleware, and a Firebase repository adapter.
+- Made Express the documented canonical mutation backend and replaced duplicated Functions operations with canonical exports.
+- Added order idempotency, transaction-based stock/rider operations, immutable movement records, reporting aggregates, retention timestamps, and sanitized public projections.
+- Hardened Realtime Database rules and denied all Firebase Storage access in the free-first setup.
+- Added Playwright, Axe accessibility coverage, Database emulator tests, CI, and production bundle budgets.
+- Deferred OpenAI, Twilio, and PayMongo; COD/manual payment and deterministic fallbacks remain the tested paths.
+
+### Final Validation
+
+| Check | Result |
+| --- | --- |
+| Client TypeScript | Passed |
+| Client ESLint | Passed |
+| Client production build | Passed |
+| Bundle budget | Passed: 465.2 KiB largest JS, 1971.4 KiB total JS, 384.9 KiB CSS |
+| Website source smoke | Passed 45/45 |
+| Server tests | Passed 25/25 |
+| Realtime Database emulator rules | Passed 7/7 |
+| Playwright role/accessibility journeys | Passed 5/5 |
+| Functions compatibility import | Passed |
+| Git whitespace check | Passed |
+
+Production dependency audits report zero vulnerabilities for the root runtime, client, server,
+and Functions packages. The full development-tool audits retain five moderate Firebase CLI
+transitive findings and one low Vite/esbuild finding; these do not ship in the website runtime.
+Firebase CLI was upgraded to 15.23.0 and its emulator suite passes.
+
+### Free-Service Impact
+
+Local development and demonstrations continue to use Vite, local Express, COD/manual payment,
+Firebase Authentication/Realtime Database within available quotas, and the free Emulator Suite.
+Storage, Functions, Cloud Run, and paid provider calls remain disabled or undeployed. Public
+production operation is not guaranteed to remain free because hosting, backend availability,
+traffic, and Firebase quotas depend on deployment choices and usage.
+
+### Remaining Risks
+
+- `client/src/services/firebase.js` and `server/src/business.js` remain compatibility cores; move
+  one tested domain at a time rather than rewriting them.
+- The Functions adapter imports canonical modules outside its package and must not be deployed
+  until shared packaging is designed and retested.
+- Real Firebase Authentication, email delivery, camera, GPS, and passkeys still require separate
+  credentialed/manual testing on a stable HTTPS environment.
+- Existing approved private reviews need an explicit backfill or re-moderation before they appear
+  in the new sanitized `public/reviews` projection.
+
+The repository is safe to continue developing locally. A push still requires explicit approval.

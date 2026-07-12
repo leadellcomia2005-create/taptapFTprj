@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { adjustInventory, archiveCompletedOrders, closeActiveShift, createApprovalRequest, createMenuItem, getDeliveryProof, moderateReview, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests, updateComplaintStatus, updateMenuItem, updateOrder } from "../../services/firebase";
+import { getDeliveryProof } from "../../services/firebase/delivery";
+import { moderateReview, updateComplaintStatus } from "../../services/firebase/feedback";
+import { adjustInventory } from "../../services/firebase/inventory";
+import { createMenuItem, updateMenuItem } from "../../services/firebase/menu";
+import { archiveCompletedOrders, closeActiveShift, createApprovalRequest, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests } from "../../services/firebase/operations";
+import { updateOrder } from "../../services/firebase/orders";
 import { orderPrepClock } from "../../utils/operations";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
 

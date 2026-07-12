@@ -11,6 +11,14 @@ import { randomUUID } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
 import { getStorage } from "firebase-admin/storage";
 import { notificationUpdates, userIdsForRoles } from "./notifications.js";
+import {
+  availableDeliveryProjection,
+  normalizeIdempotencyKey,
+  orderCreationAggregateUpdates,
+  orderTransitionAggregateUpdates,
+  paymentMovementRecord,
+  retentionTimestamp
+} from "./domain/orderIntegrity.js";
 
 const deliveryFee = 49;
 const paymentMethods = ["gcash", "cod", "cash"];
@@ -267,6 +275,9 @@ export async function createOrderRecord(db, user, input) {
   if (deliveryType === "delivery" && !order.address) throw new HttpError(400, "A delivery address is required.");
   if (user.role === "customer" && deliveryType === "delivery" && !order.deliveryLocation) throw new HttpError(400, "Confirm the delivery pin before placing the order.");
 
+  const orderClaim = await claimOrderCreation(db, user, input.idempotencyKey);
+  if (orderClaim.existing) return orderClaim.existing;
+
   let transactionError;
   const transaction = await transactionWithInitial(inventoryRef, inventorySnapshot.val(), (inventory) => {
     if (!inventory) {
@@ -285,12 +296,23 @@ export async function createOrderRecord(db, user, input) {
     return nextInventory;
   });
 
-  if (!transaction.committed) throw new HttpError(409, transactionError || "The order could not be completed.");
+  if (!transaction.committed) {
+    await releaseOrderCreationClaim(db, orderClaim);
+    throw new HttpError(409, transactionError || "The order could not be completed.");
+  }
 
   const committedInventory = transaction.snapshot.val() || {};
 
+  const paymentMovementId = db.ref(`paymentMovements/${orderId}`).push().key;
   const updates = {
     [`orders/${orderId}`]: order,
+    [`paymentMovements/${orderId}/${paymentMovementId}`]: paymentMovementRecord({
+      orderId,
+      order,
+      user,
+      createdAt,
+      reason: "order_created"
+    }),
     [`auditLogs/AUD-${createdAt}-${orderId}`]: {
       action: "order_created",
       orderId,
@@ -317,8 +339,18 @@ export async function createOrderRecord(db, user, input) {
       message: `${orderId} added ${total} PHP to the live sales ledger.`,
       type: "sale",
       orderId
-    })
+    }),
+    ...orderCreationAggregateUpdates(order, createdAt)
   };
+  if (orderClaim.path) {
+    updates[orderClaim.path] = {
+      status: "complete",
+      actorId: user.uid,
+      orderId,
+      createdAt,
+      expiresAt: retentionTimestamp(createdAt, 7)
+    };
+  }
   // erick: i-mirror ang nabawasang stock sa public/menu para live ang storefront availability.
   for (const item of items) {
     const afterStock = Number(committedInventory[item.id]?.stock ?? 0);
@@ -357,6 +389,7 @@ export async function createOrderRecord(db, user, input) {
       menuRestore[`public/menu/${item.id}/stock`] = Number(restoredInventory[item.id]?.stock ?? 0);
     }
     await db.ref().update(menuRestore).catch(() => {});
+    await releaseOrderCreationClaim(db, orderClaim);
     throw error;
   }
   return { id: orderId, order };
@@ -392,7 +425,7 @@ export async function updateOrderRecord(db, user, orderId, input) {
   });
   if (!transaction.committed) throw updateError || new HttpError(409, "The order changed before this update was applied.");
 
-  const order = transaction.snapshot.val();
+  let order = transaction.snapshot.val();
   const now = Date.now();
   let autoAssignedRider = null;
   if (
@@ -403,14 +436,27 @@ export async function updateOrderRecord(db, user, orderId, input) {
   ) {
     autoAssignedRider = await chooseLeastBusyRider(db);
     if (autoAssignedRider) {
-      order.riderId = autoAssignedRider.uid;
-      order.riderName = autoAssignedRider.name || autoAssignedRider.email || "Rider";
-      order.assignedAt = now;
-      order.assignedBy = "system";
-      order.assignmentMode = "auto";
-      changes.riderId = autoAssignedRider.uid;
-      changes.riderName = order.riderName;
-      changes.assignedAt = now;
+      const riderName = autoAssignedRider.name || autoAssignedRider.email || "Rider";
+      const assignment = await transactionWithInitial(orderRef, order, (current) => {
+        if (!current || current.status !== "ready" || current.riderId) return undefined;
+        return {
+          ...current,
+          riderId: autoAssignedRider.uid,
+          riderName,
+          assignedAt: now,
+          assignedBy: "system",
+          assignmentMode: "auto"
+        };
+      });
+      if (assignment.committed) {
+        order = assignment.snapshot.val();
+        changes.riderId = autoAssignedRider.uid;
+        changes.riderName = riderName;
+        changes.assignedAt = now;
+      } else {
+        autoAssignedRider = null;
+        order = (await orderRef.once("value")).val();
+      }
     }
   }
   const updates = {
@@ -425,6 +471,19 @@ export async function updateOrderRecord(db, user, orderId, input) {
       createdAt: now
     }
   };
+  updates[`availableDeliveries/${orderId}`] = availableDeliveryProjection(orderId, order);
+  Object.assign(updates, orderTransitionAggregateUpdates(previous, order, now));
+  if (previous.paymentStatus !== order.paymentStatus) {
+    const movementId = db.ref(`paymentMovements/${orderId}`).push().key;
+    updates[`paymentMovements/${orderId}/${movementId}`] = paymentMovementRecord({
+      orderId,
+      order,
+      previousStatus: previous.paymentStatus || null,
+      user,
+      createdAt: now,
+      reason: changes.codRemittedAt ? "cod_remitted" : changes.status || "payment_updated"
+    });
+  }
   if (autoAssignedRider) {
     updates[`orders/${orderId}/riderId`] = autoAssignedRider.uid;
     updates[`orders/${orderId}/riderName`] = order.riderName;
@@ -469,12 +528,22 @@ export async function updateOrderRecord(db, user, orderId, input) {
   if (changes.status === "cancelled" && previous.status !== "cancelled") {
     const inventoryRef = db.ref("inventory");
     const inventorySnapshot = await inventoryRef.once("value");
+    const restored = await transactionWithInitial(inventoryRef, inventorySnapshot.val(), (inventory) => {
+      if (!inventory) return undefined;
+      const nextInventory = { ...inventory };
+      for (const item of previous.items || []) {
+        const current = Number(inventory[item.id]?.stock || 0);
+        nextInventory[item.id] = { ...inventory[item.id], stock: current + Number(item.qty || 0) };
+      }
+      return nextInventory;
+    });
+    if (!restored.committed) throw new HttpError(409, "Inventory could not be restored for this cancellation.");
+    const restoredValues = restored.snapshot.val() || {};
     const restoredInventory = {};
     for (const item of previous.items || []) {
-      const current = inventorySnapshot.child(`${item.id}/stock`).val();
-      const nextStock = Number(current || 0) + Number(item.qty || 0);
+      const current = Number(inventorySnapshot.child(`${item.id}/stock`).val() || 0);
+      const nextStock = Number(restoredValues[item.id]?.stock || 0);
       const historyId = db.ref(`stockHistory/${item.id}`).push().key;
-      restoredInventory[`inventory/${item.id}/stock`] = nextStock;
       restoredInventory[`public/menu/${item.id}/stock`] = nextStock;
       restoredInventory[`stockHistory/${item.id}/${historyId}`] = stockHistoryEntry({
         item,
@@ -488,6 +557,7 @@ export async function updateOrderRecord(db, user, orderId, input) {
         orderId
       });
     }
+    restoredInventory[`orders/${orderId}/inventoryRestoredAt`] = now;
     Object.assign(updates, restoredInventory);
     if (order.customerId !== "walk-in") {
       Object.assign(updates, notificationUpdates(db, [order.customerId], {
@@ -509,6 +579,44 @@ export async function updateOrderRecord(db, user, orderId, input) {
   }
   await db.ref().update(updates);
   return { order, changes };
+}
+
+async function claimOrderCreation(db, user, requestedKey) {
+  const key = normalizeIdempotencyKey(requestedKey);
+  if (requestedKey && !key) throw new HttpError(400, "Invalid order request key.");
+  if (!key) return { key: "", path: "", existing: null };
+  const path = `idempotency/orderCreation/${user.uid}/${key}`;
+  const claimRef = db.ref(path);
+  const initial = (await claimRef.once("value")).val();
+  if (initial?.orderId) {
+    const order = (await db.ref(`orders/${initial.orderId}`).once("value")).val();
+    if (order) return { key, path, existing: { id: initial.orderId, order, idempotent: true } };
+  }
+
+  const now = Date.now();
+  const transaction = await transactionWithInitial(claimRef, initial, (current) => {
+    if (current?.orderId) return undefined;
+    if (current?.status === "processing" && Number(current.expiresAt || 0) > now) return undefined;
+    return {
+      status: "processing",
+      actorId: user.uid,
+      createdAt: now,
+      expiresAt: now + 10 * 60 * 1000
+    };
+  });
+  if (!transaction.committed) {
+    const current = (await claimRef.once("value")).val();
+    if (current?.orderId) {
+      const order = (await db.ref(`orders/${current.orderId}`).once("value")).val();
+      if (order) return { key, path, existing: { id: current.orderId, order, idempotent: true } };
+    }
+    throw new HttpError(409, "This order request is already being processed. Please wait a moment and retry.");
+  }
+  return { key, path, existing: null };
+}
+
+async function releaseOrderCreationClaim(db, claim) {
+  if (claim?.path) await db.ref(claim.path).remove().catch(() => {});
 }
 
 export async function createMenuItemRecord(db, user, input = {}) {
@@ -655,11 +763,24 @@ export async function updateReviewRecord(db, user, reviewId, input = {}) {
   const review = (await reviewRef.once("value")).val();
   if (!review) throw new HttpError(404, "Review not found.");
   const updatedAt = Date.now();
+  const firstName = cleanText(review.customerName, 80).split(/\s+/)[0];
+  const publicReview = status === "approved"
+    ? {
+        orderId: review.orderId || reviewId,
+        customerLabel: firstName ? `${firstName} customer` : "TapTap customer",
+        rating: Number(review.rating || 0),
+        comment: cleanText(review.comment, 1000),
+        items: Array.isArray(review.items) ? review.items.map((item) => cleanText(item, 120)).filter(Boolean).slice(0, 3) : [],
+        moderationStatus: "approved",
+        createdAt: Number(review.createdAt || updatedAt)
+      }
+    : null;
   await db.ref().update({
     [`reviews/${reviewId}/moderationStatus`]: status,
     [`reviews/${reviewId}/reply`]: reply,
     [`reviews/${reviewId}/moderatedAt`]: updatedAt,
     [`reviews/${reviewId}/moderatedBy`]: user.uid,
+    [`public/reviews/${reviewId}`]: publicReview,
     [`auditLogs/${db.ref("auditLogs").push().key}`]: {
       action: "review_moderated",
       reviewId,
@@ -856,12 +977,14 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
   const handoff = parseProofHandoff(input.handoff, order);
   const image = await persistProofImage(orderId, validateDeliveryProof(input.dataUrl));
   const proofOfDeliveryRef = `deliveryProofs/${orderId}`;
+  const createdAt = Date.now();
   await db.ref(proofOfDeliveryRef).set({
     ...image,
     handoff,
     riderId: user.uid,
     riderName: user.name || user.email || "Rider",
-    createdAt: Date.now()
+    createdAt,
+    expiresAt: retentionTimestamp(createdAt, 30)
   });
   return { proofOfDeliveryRef, proofOfDeliveryMeta: handoff };
 }

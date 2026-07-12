@@ -49,6 +49,11 @@ type PointValue = Point | DeliveryLocation | { lat?: number | string; lng?: numb
 type SalesOrder = Pick<Order, "status" | "createdAt"> & { items?: Array<Pick<CartItem, "id" | "name" | "price" | "qty">> };
 type SalesInventoryItem = Pick<InventoryItem, "id" | "name" | "stock" | "reorderPoint">;
 
+export function createRequestKey(scope = "request"): string {
+  const randomPart = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  return `${scope}_${randomPart}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128);
+}
+
 const toPoint = (value: PointValue): Point | null => {
   if (!value) return null;
   const lat = Number(Array.isArray(value) ? value[0] : value.lat);

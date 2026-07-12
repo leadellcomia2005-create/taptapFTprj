@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "lint": "eslint .",
-    "smoke:website": "node scripts/website-smoke.mjs"
+    "smoke:website": "node scripts/website-smoke.mjs",
+    "performance:check": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

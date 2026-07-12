@@ -1,10 +1,13 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, MapPin, PackageCheck, RotateCcw, Star } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { api } from "../../services/api";
-import { createOrder, resendReceiptEmail, saveUserProfile, submitComplaint, submitReview, updateOrder } from "../../services/firebase";
+import { submitComplaint, submitReview } from "../../services/firebase/feedback";
+import { createOrder, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
+import { saveUserProfile } from "../../services/firebase/users";
 import { currency, statusLabel } from "../../utils/display";
+import { createRequestKey } from "../../utils/operations";
 
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));
 
@@ -59,6 +62,7 @@ const complaintTypes = [
 ];
 
 export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
+  const orderRequestKeyRef = useRef("");
   const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
   const [deliveryType, setDeliveryType] = useState("delivery");
   const [phone, setPhone] = useState(profile?.phone || "");
@@ -147,6 +151,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
     setBusy(true);
     try {
       const orderPayload = {
+        idempotencyKey: orderRequestKeyRef.current || (orderRequestKeyRef.current = createRequestKey("customer-order")),
         customerId: user.uid,
         customerName: user.name,
         customerEmail: user.email,
@@ -170,6 +175,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
         items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
       };
       const orderId = await createOrder(orderPayload);
+      orderRequestKeyRef.current = "";
       if (payment === "gcash") {
         try {
           const result = await api.createPayment({ orderId });

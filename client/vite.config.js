@@ -19,7 +19,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          firebase: ["firebase/app", "firebase/auth", "firebase/database", "firebase/storage", "firebase/analytics"],
+          firebase: ["firebase/app", "firebase/auth", "firebase/database"],
+          "firebase-analytics": ["firebase/analytics"],
+          "firebase-storage": ["firebase/storage"],
           maps: ["leaflet", "react-leaflet"],
           charts: ["chart.js", "react-chartjs-2"]
         }

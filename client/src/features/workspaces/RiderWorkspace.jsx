@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bike, Camera, CheckCircle2, Clock, LoaderCircle, MapPin, Navigation, Package as PackageIcon, Phone, Route, Wallet } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
-import { saveRiderLocation, updateOrder, uploadProof } from "../../services/firebase";
+import { saveRiderLocation, uploadProof } from "../../services/firebase/delivery";
+import { updateOrder } from "../../services/firebase/orders";
 import { getSocket, sendRiderLocation } from "../../services/socket";
 import { estimateDeliveryRoute } from "../../utils/operations";
 import { ReasonModal } from "./SharedWorkspaceModules";

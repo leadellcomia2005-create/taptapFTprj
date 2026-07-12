@@ -1,4 +1,5 @@
 import { getAuthToken } from "./authSession";
+import { isRecord, requireApiObject } from "../contracts/runtime";
 import type {
   ActiveShift,
   Complaint,
@@ -47,6 +48,7 @@ export type TwoFactorMethod = "totp" | "email" | "sms" | string;
 export type OrderCreateRequest = Partial<Order> & {
   items: Array<Pick<MenuItem, "id"> & { qty: number }>;
   paymentMethod: PaymentMethod | string;
+  idempotencyKey?: string;
 };
 
 export type OrderUpdateRequest = Partial<Order> & {
@@ -119,10 +121,11 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
   } catch {
     throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
   }
-  const payload = await response.json().catch(() => ({})) as ApiPayload;
+  const rawPayload: unknown = await response.json().catch(() => ({}));
+  const payload = isRecord(rawPayload) ? rawPayload as ApiPayload : {};
   if (!response.ok)
     throw new Error(requestErrorForStatus(response.status, payload));
-  return payload as T;
+  return requireApiObject(rawPayload) as T;
 }
 
 export const api = {

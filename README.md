@@ -3,6 +3,10 @@
 This is the full-stack edition of the capstone system. The original static
 prototype remains in the separate `taptap-foodtrip` folder.
 
+The current modular-monolith boundaries, security model, environment modes,
+test commands, and free-service limits are documented in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Technology coverage
 
 | Technology | Implementation |
@@ -22,9 +26,9 @@ prototype remains in the separate `taptap-foodtrip` folder.
 | Firebase Cloud Functions | Matching secure API implementation is included but not deployed on Spark |
 | Socket.IO | Low-latency rider location and order broadcasts |
 | Dialogflow ES | FAQ and known-intent chatbot responses |
-| OpenAI API | Assistant fallback plus sales and inventory insights |
-| PayMongo | Hosted GCash checkout sessions |
-| Twilio | SMS order-status notifications |
+| OpenAI API | Optional code retained but deferred and disabled for this update |
+| PayMongo | Optional code retained; COD/manual payment is the tested path |
+| Twilio | Optional code retained; website notifications, TOTP, and email are the tested paths |
 | TOTP / QR code | Mandatory two-factor enrollment and per-session verification |
 | Gmail SMTP | Customer-only six-digit email OTP as an alternative 2FA method |
 | HTML5 Geolocation API | Rider `watchPosition` tracking |
@@ -44,7 +48,8 @@ the implementation documentation for export to Word.
 
 ## Demo role accounts
 
-The login screen fills these automatically when a role is selected:
+When `VITE_ENABLE_DEMO_MODE=true`, the login screen fills these automatically
+when a role is selected:
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -53,7 +58,8 @@ The login screen fills these automatically when a role is selected:
 | Staff | `staff@taptap.ph` | `Staff123!` |
 | Rider | `rider@taptap.ph` | `Rider123!` |
 
-Without Firebase configuration these use the built-in local demo mode. After
+Demo mode must be enabled explicitly; missing Firebase configuration no longer
+enables it automatically. After
 running the seed command, the same accounts use Firebase Authentication and
 role claims.
 
@@ -166,22 +172,10 @@ This repository is linked to Firebase project
 6. Leave Storage, Cloud Functions, Cloud Run and App Hosting undeployed to
    keep this setup free.
 7. The default `npm run deploy` command deploys Database rules only.
-8. If the project is intentionally upgraded later, set Cloud Function secrets:
-
-```powershell
-firebase functions:secrets:set OPENAI_API_KEY
-firebase functions:secrets:set PAYMONGO_SECRET_KEY
-firebase functions:secrets:set TWILIO_ACCOUNT_SID
-firebase functions:secrets:set TWILIO_AUTH_TOKEN
-firebase functions:secrets:set TWO_FACTOR_ENCRYPTION_KEY
-firebase functions:secrets:set TURNSTILE_SECRET_KEY
-```
-
-9. Add `DIALOGFLOW_PROJECT_ID`, `DIALOGFLOW_LANGUAGE_CODE`,
-   `OPENAI_MODEL`, and `TWILIO_FROM_NUMBER` to `functions/.env`.
-10. Give the Firebase Functions service account Dialogflow API Client access.
-11. The paid deployment command is intentionally separate:
-    `npm run deploy:paid-services`.
+8. Keep OpenAI, Twilio, and PayMongo credentials empty during the current
+   update. Their optional integrations are deferred.
+9. The paid deployment command remains intentionally separate and must not be
+   used for the free-first setup: `npm run deploy:paid-services`.
 
 ## Optional paid Socket.IO deployment
 
@@ -198,15 +192,44 @@ Set its environment variables and update `VITE_SOCKET_URL` to the Cloud Run
 URL before building the client. Every rider GPS update is broadcast by
 Socket.IO and mirrored into Firebase Realtime Database.
 
-## Required third-party setup
+## Deferred third-party integrations
 
-- Create a Dialogflow ES agent with menu, store-hours, allergen and
-  order-status intents.
-- Create OpenAI and PayMongo API keys.
-- Create a Twilio Messaging sender and verify test recipient numbers if the
-  account is still in trial mode.
-- Add PayMongo webhook handling before accepting production payments.
-- Use HTTPS for camera and geolocation outside localhost.
+OpenAI, Twilio, and PayMongo are deliberately not configured, called, or
+webhook-tested in this update. Their optional code and disabled fallbacks are
+preserved. Credentials alone do not activate them; their `ENABLE_OPENAI`,
+`ENABLE_TWILIO`, or `ENABLE_PAYMONGO` server flag must also be exactly `true`.
+COD/manual payment, deterministic assistant responses, website
+notifications, TOTP, and existing email options cover local demonstrations.
+
+Camera, geolocation, and passkeys require HTTPS outside localhost.
+
+## Validation
+
+Run the full local validation before requesting a push:
+
+```powershell
+npm run typecheck --prefix client
+npm run lint --prefix client
+npm run build --prefix client
+npm run performance:check --prefix client
+npm run test --prefix server
+npm run smoke:website --prefix client
+npm run test:rules
+npm run test:e2e
+```
+
+The rules test requires Java 21. Playwright runs isolated demo servers and
+does not call OpenAI, Twilio, or PayMongo.
+
+Preview disposable workspace artifacts without deleting anything:
+
+```powershell
+npm run clean:workspace
+```
+
+After reviewing the list, `npm run clean:workspace:apply` removes only generated
+build output, Playwright output, temporary folders, and local `.log` files. It
+does not remove dependencies, source assets, environment files, or credentials.
 
 ## Important production notes
 
@@ -223,6 +246,8 @@ Socket.IO and mirrored into Firebase Realtime Database.
   order rooms. Rider GPS updates are assignment-checked and rate-limited.
 - Customer support messages, reviews and notifications are queried and
   authorized by account or role instead of being downloaded globally.
-- PayMongo and Twilio webhooks should validate provider signatures.
+- Any future PayMongo or Twilio webhook must validate provider signatures
+  before either integration is enabled.
 - Never commit `.env`, Firebase service-account JSON or API keys.
-- Test Auth, Database, Storage and Functions with the Firebase Emulator Suite.
+- Realtime Database rules are covered by the Emulator Suite; Storage remains
+  denied and Functions remain undeployed.

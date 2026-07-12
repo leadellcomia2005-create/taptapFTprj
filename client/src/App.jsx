@@ -7,25 +7,17 @@ import MenuPhoto from "./components/MenuPhoto";
 import { defaultViewForRole, navigationForUser, staffCanAccess, staffRoleLabels } from "./config/appConfig";
 import { fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
-import {
-  firebaseEnabled,
-  logout,
-  observeAuth,
-  subscribeAuditLogs,
-  subscribeComplaints,
-  subscribeInventory,
-  subscribeMenu,
-  subscribeNotifications,
-  subscribeOrders,
-  subscribeRiderLocation,
-  subscribeReviews,
-  subscribeShiftLogs,
-  sendSupportMessage,
-  subscribeSupportMessages,
-  subscribeUserProfile
-} from "./services/firebase";
+import { logout } from "./services/firebase/auth";
+import { firebaseEnabled } from "./services/firebase/core";
+import { subscribeRiderLocation } from "./services/firebase/delivery";
+import { subscribeComplaints, subscribeReviews } from "./services/firebase/feedback";
+import { subscribeInventory } from "./services/firebase/inventory";
+import { subscribeMenu } from "./services/firebase/menu";
+import { sendSupportMessage, subscribeAuditLogs, subscribeShiftLogs, subscribeSupportMessages } from "./services/firebase/operations";
+import { subscribeOrders } from "./services/firebase/orders";
 import { disconnectSocket, getSocket, subscribeSocketRiderLocation } from "./services/socket";
 import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
+import { useAuthSession, useCartState, useNotificationCenter, useRoleNavigation } from "./hooks/useAppState";
 import { menuAvailability } from "./utils/operations";
 import { assistantSourceLabel, currency, relativeTime, statusLabel } from "./utils/display";
 
@@ -443,7 +435,7 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
         <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
-        <button className="btn btn-danger btn-sm logout-button" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
+        <button className="btn btn-danger btn-sm logout-button" aria-label="Log out" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
       </div>
     </header>
   );
@@ -785,8 +777,8 @@ function Assistant({ user, menu }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(undefined);
-  const [profile, setProfile] = useState(null);
+  const { user, setUser, profile, activeUser, currentUser } = useAuthSession();
+  const { view, navigate } = useRoleNavigation(currentUser);
   const [menu, setMenu] = useState(fallbackMenu);
   const [inventory, setInventory] = useState(fallbackMenu.map((item) => ({ ...item, reorderPoint: 10 })));
   const [orders, setOrders] = useState([]);
@@ -795,19 +787,14 @@ export default function App() {
   const [supportMessages, setSupportMessages] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [complaints, setComplaints] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [cart, setCart] = useState([]);
-  const [view, setView] = useState("store");
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState(null);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const { notifications, notificationsOpen, setNotificationsOpen, unreadCount } = useNotificationCenter(activeUser);
+  const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice });
   const [online, setOnline] = useState(() => navigator.onLine);
   const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
-  const activeUser = user?.mfaVerified ? user : null;
 
-  useEffect(() => observeAuth(setUser), []);
   useEffect(() => {
     const updateOnlineState = () => setOnline(navigator.onLine);
     window.addEventListener("online", updateOnlineState);
@@ -817,13 +804,6 @@ export default function App() {
       window.removeEventListener("offline", updateOnlineState);
     };
   }, []);
-  useEffect(() => {
-    if (!activeUser) {
-      setProfile(null);
-      return undefined;
-    }
-    return subscribeUserProfile(activeUser, setProfile);
-  }, [activeUser]);
   useEffect(() => {
     if (!activeUser || activeUser.role === "rider") {
       setMenu(fallbackMenu);
@@ -896,13 +876,6 @@ export default function App() {
     return subscribeSupportMessages(setSupportMessages);
   }, [activeUser, view]);
   useEffect(() => {
-    if (!activeUser) {
-      setNotifications([]);
-      return undefined;
-    }
-    return subscribeNotifications(activeUser, setNotifications);
-  }, [activeUser]);
-  useEffect(() => {
     const shouldLoadReviews = (
       (activeUser?.role === "customer" && view === "feedback") ||
       (activeUser?.role === "owner" && view === "owner-reviews") ||
@@ -914,9 +887,6 @@ export default function App() {
     }
     return subscribeReviews(activeUser, setReviews);
   }, [activeUser, view]);
-  useEffect(() => {
-    if (activeUser) setView(defaultViewForRole(activeUser.role));
-  }, [activeUser]);
   useEffect(() => {
     if (!activeUser) return undefined;
     api.status()
@@ -960,28 +930,6 @@ export default function App() {
   }
   if (!user.mfaVerified) return <TwoFactorPanel user={user} onComplete={setUser} />;
 
-  const currentUser = { ...user, name: profile?.name || user.name, staffRole: profile?.staffRole || user.staffRole || (user.role === "staff" ? "manager" : undefined) };
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
-  const allowedViews = navigationForUser(currentUser).map(([roleView]) => roleView);
-  const navigate = (nextView) => {
-    if (allowedViews.includes(nextView)) setView(nextView);
-  };
-  const reorder = (order) => {
-    const nextCart = (order.items || []).map((item) => {
-      const product = menu.find((candidate) => candidate.id === item.id);
-      if (!product || product.walkInOnly || !menuAvailability(product).available) return null;
-      const stock = Number(product.stock ?? item.stock ?? 0);
-      const qty = Math.min(Number(item.qty || 1), stock);
-      return qty > 0 ? { ...product, stock, qty } : null;
-    }).filter(Boolean);
-    if (nextCart.length === 0) {
-      setNotice("Those items are not available right now.");
-      return;
-    }
-    setCart(nextCart);
-    setView("store");
-    setNotice(`${order.id} added back to your cart.`);
-  };
   const workspaceHelpers = {
     buildDailyReport,
     buildLocalDecisionSupport,
@@ -1042,7 +990,7 @@ export default function App() {
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
-          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={() => { setCart([]); setCheckoutOpen(false); setView("orders"); }} />
+          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={completeCheckout} />
         </Suspense>
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}

@@ -7,17 +7,17 @@ import { gsap, prefersReducedMotion, useGSAP } from "../../lib/gsap";
 import { api } from "../../services/api";
 import {
   completeTwoFactorSession,
-  firebaseEnabled,
   friendlyAuthError,
   login,
   logout,
   refreshEmailVerification,
   registerCustomer,
   resendVerificationEmail,
-  resetPassword,
-  subscribeMenu,
-  subscribePublicReviews
-} from "../../services/firebase";
+  resetPassword
+} from "../../services/firebase/auth";
+import { demoModeEnabled, firebaseEnabled } from "../../services/firebase/core";
+import { subscribePublicReviews } from "../../services/firebase/feedback";
+import { subscribeMenu } from "../../services/firebase/menu";
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "../../services/passkeys";
 import { currency } from "../../utils/display";
 import { menuAvailability } from "../../utils/operations";
@@ -191,8 +191,8 @@ function LoginPanel({ onLoggedIn }) {
   const [role, setRole] = useState("customer");
   const [registering, setRegistering] = useState(registrationRequested);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(registrationRequested ? "" : demoAccounts.customer.email);
-  const [password, setPassword] = useState(registrationRequested ? "" : demoAccounts.customer.password);
+  const [email, setEmail] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer.email);
+  const [password, setPassword] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer.password);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -399,8 +399,8 @@ function LoginPanel({ onLoggedIn }) {
     url.searchParams.delete("register");
     window.history.replaceState({}, "", url);
     setRole(nextRole);
-    setEmail(demoAccounts[nextRole].email);
-    setPassword(demoAccounts[nextRole].password);
+    setEmail(demoModeEnabled ? demoAccounts[nextRole].email : "");
+    setPassword(demoModeEnabled ? demoAccounts[nextRole].password : "");
     setConfirmPassword("");
     setTermsAccepted(false);
     setPrivacyAccepted(false);
@@ -495,7 +495,7 @@ function LoginPanel({ onLoggedIn }) {
       </div>
       <p className="eyebrow text-danger">TapTap account</p>
       <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-      <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : "Sample accounts are ready for this preview."}</p>
+      <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : demoModeEnabled ? "Sample accounts are ready for this preview." : "Connect Firebase to sign in."}</p>
       {!registering && (
         <div className="login-access-choice">
           <button type="button" className={`login-customer-choice ${role === "customer" ? "active" : ""}`} aria-pressed={role === "customer"} onClick={() => selectRole("customer")}>

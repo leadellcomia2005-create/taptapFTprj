@@ -4,7 +4,11 @@ Thumbs.db
 Desktop.ini
 
 # Editor files
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 
 # Logs
@@ -20,11 +24,14 @@ build/
 .cache/
 .vite/
 coverage/
+playwright-report/
+test-results/
 
 # Environment / secrets
 .env
 .env.*
 !.env.example
+!client/.env.e2e
 *.local
 service-account*.json
 

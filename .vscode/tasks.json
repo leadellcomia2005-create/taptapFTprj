@@ -1,0 +1,64 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Taptap: Run Full Project",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Taptap: Run Client",
+      "type": "npm",
+      "script": "dev",
+      "path": "client",
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Taptap: Run Server",
+      "type": "npm",
+      "script": "dev",
+      "path": "server",
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Taptap: Test",
+      "type": "npm",
+      "script": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Taptap: Build",
+      "type": "npm",
+      "script": "build",
+      "problemMatcher": []
+    }
+  ]
+}

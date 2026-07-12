@@ -9,6 +9,9 @@ import {
 } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
 import QRCode from "qrcode";
+import { allowedTwoFactorMethods } from "../server/src/domain/twoFactorPolicy.js";
+
+export { allowedTwoFactorMethods } from "../server/src/domain/twoFactorPolicy.js";
 import { HttpError, validRecordId } from "./operations.js";
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -118,8 +121,6 @@ const maskEmail = (value = "") => {
   if (!name || !domain) return "";
   return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
 };
-
-export const allowedTwoFactorMethods = (role) => role === "customer" ? ["passkey", "totp", "sms", "email"] : ["totp"];
 
 async function transactionWithInitial(ref, initialValue, update) {
   let firstCall = true;

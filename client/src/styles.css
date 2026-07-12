@@ -4,7 +4,7 @@
   --muted: #70685d;
   --paper: #fbf4e8;
   --paper-soft: #fffaf3;
-  --red: #e33d2e;
+  --red: #c9362a;
   --red-dark: #a9281b;
   --red-soft: #fff0eb;
   --gold: #f2bc48;
@@ -32,6 +32,7 @@ button { font: inherit; }
   --bs-btn-hover-bg: var(--red);
   --bs-btn-hover-border-color: var(--red);
 }
+.text-danger { color: var(--red) !important; }
 .login-home .btn-warning {
   color: var(--ink);
   background: var(--gold);
@@ -2500,7 +2501,7 @@ button:not(:disabled),
 
 @media (max-width: 620px) {
   .login-hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
-  .login-hero-actions .btn { min-height: 44px; padding-inline: 12px; }
+  .login-hero-actions .btn { min-height: 46px; padding-inline: 12px; }
   .login-business-section { padding: 46px 14px; }
   .login-section-heading { text-align: left; }
   .login-section-heading h2 { font-size: 34px; }
@@ -2749,7 +2750,7 @@ button:not(:disabled),
     padding-bottom: 88px;
   }
   .login-nav-cta {
-    min-height: 44px;
+    min-height: 46px;
     padding-inline: 14px;
   }
   .login-screen {
@@ -4292,7 +4293,7 @@ button:not(:disabled),
     flex-basis: 40px;
   }
   .login-nav-cta {
-    min-height: 44px;
+    min-height: 46px;
     padding-inline: 13px;
     font-size: 12px;
   }

@@ -30,3 +30,11 @@ export interface ApiMutationResponse<TRecord = unknown> {
   item?: TRecord;
   record?: TRecord;
 }
+
+export interface ApiSuccessResponse<TData = Record<string, unknown>> {
+  ok?: true;
+  data?: TData;
+  message?: string;
+}
+
+export type RuntimeGuard<T> = (value: unknown) => value is T;

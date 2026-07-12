@@ -10,27 +10,32 @@ import { getDatabase } from "firebase-admin/database";
 import helmet from "helmet";
 import { Server as SocketServer } from "socket.io";
 import {
-  adjustInventoryRecord,
   archiveCompletedOrdersRecord,
+  createOrderRecord,
+  listOrdersForUser,
+  updateOrderRecord
+} from "./application/orders.js";
+import {
+  adjustInventoryRecord,
+  createMenuItemRecord,
+  updateMenuItemRecord
+} from "./application/catalog.js";
+import {
+  createComplaintRecord,
+  listComplaintsRecord,
+  updateComplaintRecord,
+  updateReviewRecord
+} from "./application/feedback.js";
+import { saveDeliveryProofRecord, saveRiderLocationRecord } from "./application/delivery.js";
+import {
   closeActiveShiftRecord,
   createApprovalRequestRecord,
-  createMenuItemRecord,
-  createOrderRecord,
   getActiveShiftRecord,
-  createComplaintRecord,
   listApprovalRequestsRecord,
-  listComplaintsRecord,
-  listOrdersForUser,
   resolveApprovalRequestRecord,
-  saveDeliveryProofRecord,
-  saveRiderLocationRecord,
   saveShiftLogRecord,
-  startShiftRecord,
-  updateMenuItemRecord,
-  updateComplaintRecord,
-  updateOrderRecord,
-  updateReviewRecord
-} from "./business.js";
+  startShiftRecord
+} from "./application/workforce.js";
 import {
   bearerToken,
   canAccessOrder,
@@ -78,7 +83,7 @@ import {
 } from "./passkeys.js";
 import { createCustomerRegistration, verifyTurnstileToken } from "./registration.js";
 
-dotenv.config({ override: true });
+dotenv.config({ override: false });
 
 const app = express();
 const server = createServer(app);

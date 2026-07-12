@@ -220,6 +220,55 @@ export interface InventoryItem extends MenuItem {
   unavailable?: boolean;
 }
 
+export type InventoryMovementAction =
+  | "order_deducted"
+  | "order_cancel_restored"
+  | "inventory_received"
+  | "inventory_adjusted"
+  | "stock_count_approved"
+  | string;
+
+export interface InventoryMovement {
+  id: EntityId;
+  itemId: EntityId;
+  itemName: string;
+  beforeStock: number;
+  afterStock: number;
+  delta: number;
+  reason: string;
+  action: InventoryMovementAction;
+  orderId?: EntityId | null;
+  actorId: EntityId | "system";
+  actorName: string;
+  actorRole: UserRole | "system";
+  createdAt: TimestampMs;
+}
+
+export interface PaymentMovement {
+  id: EntityId;
+  orderId: EntityId;
+  method: PaymentMethod;
+  previousStatus?: PaymentStatus | null;
+  status: PaymentStatus;
+  amount: number;
+  actorId: EntityId | "system";
+  actorRole: UserRole | "system";
+  reason?: string;
+  createdAt: TimestampMs;
+}
+
+export interface DailySalesAggregate {
+  date: string;
+  grossSales: number;
+  paidSales: number;
+  orderCount: number;
+  cancelledCount: number;
+  deliveryCount: number;
+  pickupCount: number;
+  walkInCount: number;
+  updatedAt: TimestampMs;
+}
+
 export type ReviewModerationStatus = "pending" | "approved" | "hidden";
 
 export interface Review {
@@ -234,6 +283,17 @@ export interface Review {
   reply?: string;
   moderatedAt?: TimestampMs;
   moderatedBy?: EntityId;
+  createdAt: TimestampMs;
+}
+
+export interface PublicReview {
+  id: EntityId;
+  orderId: EntityId;
+  customerLabel: string;
+  rating: number;
+  comment: string;
+  items?: string[];
+  moderationStatus: "approved";
   createdAt: TimestampMs;
 }
 

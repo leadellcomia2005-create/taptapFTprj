@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Taptap Full Project (Recommended)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(http://localhost:5173/)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Debug Express Server Only",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/src/index.js",
+      "cwd": "${workspaceFolder}/server",
+      "envFile": "${workspaceFolder}/server/.env",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}

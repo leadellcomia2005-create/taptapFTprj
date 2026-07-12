@@ -1,5 +1,4 @@
 import { initializeApp } from "firebase/app";
-import { getAnalytics, isSupported, logEvent } from "firebase/analytics";
 import {
   connectAuthEmulator,
   browserSessionPersistence,
@@ -27,12 +26,16 @@ import {
   update
 } from "firebase/database";
 import {
-  connectStorageEmulator,
-  getDownloadURL,
-  getStorage,
-  ref as storageRef,
-  uploadBytes
-} from "firebase/storage";
+  firebaseRecordList,
+  isAuditLog,
+  isComplaint,
+  isMenuItem,
+  isNotification,
+  isOrder,
+  isPublicReview,
+  isReview,
+  isShiftLog
+} from "../contracts/runtime";
 import { api } from "./api";
 import { configureAuthTokenProvider } from "./authSession";
 
@@ -46,7 +49,8 @@ const config = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-export const firebaseEnabled = Boolean(config.apiKey && config.projectId && config.databaseURL);
+export const firebaseEnabled = import.meta.env.VITE_DISABLE_FIREBASE !== "true" && Boolean(config.apiKey && config.projectId && config.databaseURL);
+export const demoModeEnabled = import.meta.env.VITE_ENABLE_DEMO_MODE === "true";
 const firebaseStorageEnabled = import.meta.env.VITE_ENABLE_FIREBASE_STORAGE === "true";
 
 let app;
@@ -54,23 +58,48 @@ let auth;
 let db;
 let storage;
 let analytics;
+let analyticsLogEvent;
+let storageModulePromise;
 let authPersistenceReady = Promise.resolve();
+
+async function loadStorageModule() {
+  if (!firebaseEnabled || !firebaseStorageEnabled || !app) return null;
+  if (!storageModulePromise) {
+    storageModulePromise = import("firebase/storage").then((storageModule) => {
+      storage ||= storageModule.getStorage(app);
+      if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
+        try {
+          storageModule.connectStorageEmulator(storage, "127.0.0.1", 9199);
+        } catch {
+          // Hot reload may initialize the Storage emulator more than once.
+        }
+      }
+      return storageModule;
+    });
+  }
+  return storageModulePromise;
+}
 
 if (firebaseEnabled) {
   app = initializeApp(config);
   auth = getAuth(app);
   db = getDatabase(app);
-  if (firebaseStorageEnabled) storage = getStorage(app);
   configureAuthTokenProvider(() => auth.currentUser?.getIdToken() || "");
-  isSupported().then((supported) => {
-    if (supported) analytics = getAnalytics(app);
-  });
+  void import("firebase/analytics")
+    .then(async (analyticsModule) => {
+      if (await analyticsModule.isSupported()) {
+        analytics = analyticsModule.getAnalytics(app);
+        analyticsLogEvent = analyticsModule.logEvent;
+      }
+    })
+    .catch(() => {
+      // Analytics is optional and must never block website startup.
+    });
 
   if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
     try {
       connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
       connectDatabaseEmulator(db, "127.0.0.1", 9000);
-      if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
     } catch {
       // Hot reload may initialize emulators more than once.
     }
@@ -99,6 +128,7 @@ function readDemoData() {
     shiftLogs: {},
     reviews: {},
     notifications: {},
+    idempotency: { orderCreation: {} },
     ...data
   };
 }
@@ -182,12 +212,20 @@ export async function login(email, password, requestedRole, demoAccounts) {
     return credential.user;
   }
 
+  if (!demoModeEnabled) throw new Error("Preview accounts are disabled. Configure Firebase or explicitly enable demo mode.");
   const match = Object.entries(demoAccounts).find(
     ([role, account]) => role === requestedRole && account.email === email && account.password === password
   );
   if (!match) throw new Error("Invalid preview account or role.");
   const [role, account] = match;
-  const user = { uid: `demo-${role}`, email, name: account.name, role };
+  const user = {
+    uid: `demo-${role}`,
+    email,
+    name: account.name,
+    role,
+    emailVerified: true,
+    mfaVerified: true
+  };
   demoUser = user;
   window.dispatchEvent(new Event("taptap-demo-auth"));
   return user;
@@ -321,8 +359,7 @@ export function subscribeNotifications(user, callback) {
     callback([]);
     return () => {};
   }
-  const normalize = (value = {}) => Object.entries(value)
-      .map(([id, notification]) => ({ id, ...notification }))
+  const normalize = (value = {}) => firebaseRecordList(value, isNotification)
       .filter((notification) => notification.targetUserId === user.uid && Number(notification.expiresAt || Infinity) > Date.now())
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   if (firebaseEnabled) {
@@ -365,8 +402,7 @@ export function subscribeReviews(user, callback) {
     return () => {};
   }
   const normalize = (value = {}) => callback(
-    Object.entries(value)
-      .map(([id, review]) => ({ id, ...review }))
+    firebaseRecordList(value, isReview)
       .filter((review) => user.role !== "customer" || review.customerId === user.uid)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
@@ -383,13 +419,13 @@ export function subscribeReviews(user, callback) {
 }
 
 export function subscribePublicReviews(callback) {
-  const normalize = (value = {}) => callback(
-    Object.entries(value)
-      .map(([id, review]) => {
+  const normalizePrivateReviews = (value = {}) => callback(
+    firebaseRecordList(value, isReview)
+      .map((review) => {
         const firstName = String(review.customerName || "").trim().split(/\s+/)[0];
         return {
-          id,
-          orderId: review.orderId || id,
+          id: review.id,
+          orderId: review.orderId || review.id,
           customerLabel: firstName ? `${firstName} customer` : "TapTap customer",
           rating: Number(review.rating || 0),
           comment: String(review.comment || "").trim(),
@@ -402,14 +438,19 @@ export function subscribePublicReviews(callback) {
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       .slice(0, 5)
   );
+  const normalizePublicReviews = (value = {}) => callback(
+    firebaseRecordList(value, isPublicReview)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 5)
+  );
   if (firebaseEnabled) {
     return onValue(
-      ref(db, "reviews"),
-      (snapshot) => normalize(snapshot.val() || {}),
+      ref(db, "public/reviews"),
+      (snapshot) => normalizePublicReviews(snapshot.val() || {}),
       () => callback([])
     );
   }
-  const emit = () => normalize(readDemoData().reviews);
+  const emit = () => normalizePrivateReviews(readDemoData().reviews);
   emit();
   window.addEventListener("taptap-demo-data", emit);
   return () => window.removeEventListener("taptap-demo-data", emit);
@@ -472,15 +513,14 @@ export function subscribeComplaints(user, callback) {
     return () => {};
   }
   const normalize = (value = {}) => callback(
-    Object.entries(value)
-      .map(([id, complaint]) => ({ id, ...complaint }))
+    firebaseRecordList(value, isComplaint)
       .filter((complaint) => user.role !== "customer" || complaint.customerId === user.uid)
       .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
   );
   if (firebaseEnabled) {
     let active = true;
     const load = () => api.listComplaints().then((result) => {
-      if (active) callback(result.complaints || []);
+      if (active) callback(Array.isArray(result.complaints) ? result.complaints.filter(isComplaint) : []);
     }).catch(() => active && callback([]));
     load();
     const timer = window.setInterval(load, 15000);
@@ -560,7 +600,8 @@ export function subscribeMenu(fallback, callback) {
   if (firebaseEnabled) {
     return onValue(ref(db, "public/menu"), (snapshot) => {
       const value = snapshot.val();
-      callback(value ? Object.values(value) : fallback);
+      const menu = firebaseRecordList(value, isMenuItem);
+      callback(menu.length ? menu : fallback);
     });
   }
   const emit = () => {
@@ -763,7 +804,7 @@ export function subscribeOrders(user, callback) {
     return () => {};
   }
   if (firebaseEnabled) {
-    const normalize = (snapshot) => Object.entries(snapshot.val() || {}).map(([id, order]) => ({ id, ...order })).filter((order) => !order.archivedAt);
+    const normalize = (snapshot) => firebaseRecordList(snapshot.val(), isOrder).filter((order) => !order.archivedAt);
     if (["owner", "staff"].includes(user.role)) {
       return onValue(ref(db, "orders"), (snapshot) => callback(normalize(snapshot)));
     }
@@ -776,7 +817,7 @@ export function subscribeOrders(user, callback) {
       let available = [];
       const emit = () => callback([...new Map([...assigned, ...available].map((order) => [order.id, order])).values()]);
       const assignedOrders = query(ref(db, "orders"), orderByChild("riderId"), equalTo(user.uid));
-      const readyOrders = query(ref(db, "orders"), orderByChild("status"), equalTo("ready"));
+      const readyOrders = ref(db, "availableDeliveries");
       const stopAssigned = onValue(assignedOrders, (snapshot) => {
         assigned = normalize(snapshot);
         emit();
@@ -795,7 +836,7 @@ export function subscribeOrders(user, callback) {
   }
   const emit = () => {
     const data = readDemoData();
-    const orders = Object.entries(data.orders).map(([id, order]) => ({ id, ...order })).filter((order) => !order.archivedAt);
+    const orders = firebaseRecordList(data.orders, isOrder).filter((order) => !order.archivedAt);
     callback(user.role === "customer" ? orders.filter((order) => order.customerId === user.uid) : orders);
   };
   emit();
@@ -806,6 +847,7 @@ export function subscribeOrders(user, callback) {
 export async function createOrder(order) {
   if (firebaseEnabled) {
     const result = await api.createOrder({
+      idempotencyKey: order.idempotencyKey,
       phone: order.phone,
       address: order.address,
       landmark: order.landmark,
@@ -824,6 +866,10 @@ export async function createOrder(order) {
     return result.id;
   }
   const data = readDemoData();
+  data.idempotency ||= { orderCreation: {} };
+  data.idempotency.orderCreation ||= {};
+  const existingOrderId = order.idempotencyKey ? data.idempotency.orderCreation[order.idempotencyKey]?.orderId : "";
+  if (existingOrderId && data.orders[existingOrderId]) return existingOrderId;
   const id = `TAP-${Date.now().toString().slice(-8)}`;
   const onlinePayment = order.paymentMethod === "gcash";
   data.orders[id] = {
@@ -838,6 +884,14 @@ export async function createOrder(order) {
     paymentConfirmedAt: onlinePayment ? null : Date.now(),
     handoffOtp: order.deliveryType === "delivery" ? handoffOtp() : null
   };
+  delete data.orders[id].idempotencyKey;
+  if (order.idempotencyKey) {
+    data.idempotency.orderCreation[order.idempotencyKey] = {
+      orderId: id,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+    };
+  }
   for (const item of order.items) {
     const beforeStock = Number(data.inventory[item.id]?.stock ?? item.stock ?? 0);
     const nextStock = Math.max(0, beforeStock - item.qty);
@@ -871,7 +925,7 @@ export async function createOrder(order) {
 }
 
 export function trackEvent(name, parameters = {}) {
-  if (analytics) logEvent(analytics, name, parameters);
+  if (analytics && analyticsLogEvent) analyticsLogEvent(analytics, name, parameters);
 }
 
 export async function updateOrder(orderId, values) {
@@ -963,8 +1017,7 @@ export async function updateOrder(orderId, values) {
 
 export function subscribeAuditLogs(callback) {
   const normalize = (value = {}) => callback(
-    Object.entries(value)
-      .map(([id, entry]) => ({ id, ...entry }))
+    firebaseRecordList(value, isAuditLog)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
   if (firebaseEnabled) return onValue(ref(db, "auditLogs"), (snapshot) => normalize(snapshot.val()));
@@ -1025,8 +1078,7 @@ export async function sendSupportMessage(text, actor, conversation = {}) {
 
 export function subscribeShiftLogs(callback) {
   const normalize = (value = {}) => callback(
-    Object.entries(value)
-      .map(([id, entry]) => ({ id, ...entry }))
+    firebaseRecordList(value, isShiftLog)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
   if (firebaseEnabled) return onValue(ref(db, "shiftLogs"), (snapshot) => normalize(snapshot.val()));
@@ -1277,9 +1329,10 @@ export async function uploadProof(orderId, blob, handoff = {}) {
   };
   if (!firebaseEnabled) return { proofOfDeliveryUrl: URL.createObjectURL(blob), proofOfDeliveryMeta };
   if (firebaseStorageEnabled) {
-    const fileRef = storageRef(storage, `proof-of-delivery/${orderId}/${Date.now()}.jpg`);
-    await uploadBytes(fileRef, blob, { contentType: "image/jpeg" });
-    return { proofOfDeliveryUrl: await getDownloadURL(fileRef), proofOfDeliveryMeta };
+    const storageModule = await loadStorageModule();
+    const fileRef = storageModule.ref(storage, `proof-of-delivery/${orderId}/${Date.now()}.jpg`);
+    await storageModule.uploadBytes(fileRef, blob, { contentType: "image/jpeg" });
+    return { proofOfDeliveryUrl: await storageModule.getDownloadURL(fileRef), proofOfDeliveryMeta };
   }
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();

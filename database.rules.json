@@ -10,25 +10,49 @@
       "store": {
         ".read": true,
         ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'"
+      },
+      "reviews": {
+        ".read": true,
+        ".write": false
       }
     },
     "users": {
       "$uid": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')",
         ".write": "auth != null && ((!data.exists() && auth.uid == $uid && newData.child('role').val() == 'customer') || (auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')))",
-        ".validate": "auth.token.role == 'owner' || newData.child('role').val() == (data.exists() ? data.child('role').val() : 'customer')"
+        ".validate": "auth.token.role == 'owner' || (newData.child('role').val() == (data.exists() ? data.child('role').val() : 'customer') && (!data.exists() || (newData.child('staffRole').val() == data.child('staffRole').val() && newData.child('phoneVerified').val() == data.child('phoneVerified').val() && newData.child('phoneVerifiedAt').val() == data.child('phoneVerifiedAt').val() && newData.child('securitySetupRequired').val() == data.child('securitySetupRequired').val())))"
       }
     },
     "orders": {
-      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid) || (auth.token.role == 'rider' && ((query.orderByChild == 'riderId' && query.equalTo == auth.uid) || (query.orderByChild == 'status' && query.equalTo == 'ready'))))",
+      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid) || (auth.token.role == 'rider' && query.orderByChild == 'riderId' && query.equalTo == auth.uid))",
       ".indexOn": ["customerId", "riderId", "status"],
       "$orderId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (data.child('customerId').val() == auth.uid || data.child('riderId').val() == auth.uid || auth.token.role == 'owner' || auth.token.role == 'staff')",
         ".write": false
       }
     },
+    "availableDeliveries": {
+      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'rider' || auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": false
+    },
     "inventory": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": false
+    },
+    "stockHistory": {
+      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": false
+    },
+    "paymentMovements": {
+      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'",
+      ".write": false
+    },
+    "reportAggregates": {
+      ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff')",
+      ".write": false
+    },
+    "idempotency": {
+      ".read": false,
       ".write": false
     },
     "riderLocations": {

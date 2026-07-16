@@ -21,8 +21,8 @@ const projectId = "demo-taptap-foodtrip";
 const rulesPath = fileURLToPath(new URL("../database.rules.json", import.meta.url));
 let environment;
 
-const claims = (role) => ({ role, email_verified: true, mfaSession: true });
-const databaseFor = (uid, role) => environment.authenticatedContext(uid, claims(role)).database();
+const claims = (role, overrides = {}) => ({ role, email_verified: true, mfaSession: true, ...overrides });
+const databaseFor = (uid, role, overrides) => environment.authenticatedContext(uid, claims(role, overrides)).database();
 
 const seed = {
   public: {
@@ -112,9 +112,28 @@ after(async () => {
 test("public catalog and approved reviews are readable without private review access", async () => {
   const database = environment.unauthenticatedContext().database();
   await assertSucceeds(get(ref(database, "public/menu")));
+  await assertSucceeds(get(ref(database, "public/store")));
   await assertSucceeds(get(ref(database, "public/reviews")));
   await assertFails(get(ref(database, "reviews")));
   await assertFails(get(ref(database, "availableDeliveries")));
+});
+
+test("verified email and MFA claims are both required for private records", async () => {
+  const unverified = databaseFor("customer-1", "customer", { email_verified: false });
+  const missingMfa = databaseFor("customer-1", "customer", { mfaSession: false });
+  await assertFails(get(ref(unverified, "users/customer-1")));
+  await assertFails(get(ref(unverified, "orders/order-own")));
+  await assertFails(update(ref(unverified, "users/customer-1"), { address: "Unverified update" }));
+  await assertFails(get(ref(missingMfa, "users/customer-1")));
+  await assertFails(get(ref(missingMfa, "orders/order-own")));
+  await assertFails(update(ref(missingMfa, "users/customer-1"), { address: "Missing MFA update" }));
+});
+
+test("customers cannot read another customer profile", async () => {
+  const customer = databaseFor("customer-1", "customer");
+  await assertSucceeds(get(ref(customer, "users/customer-1")));
+  await assertFails(get(ref(customer, "users/customer-2")));
+  await assertSucceeds(get(ref(databaseFor("owner-1", "owner"), "users/customer-2")));
 });
 
 test("customers can read only their order and cannot change protected profile fields", async () => {
@@ -173,7 +192,11 @@ test("notifications require a user-scoped query", async () => {
 
 test("sensitive records reject all direct browser writes", async () => {
   const owner = databaseFor("owner-1", "owner");
+  const staff = databaseFor("staff-1", "staff");
   const rider = databaseFor("rider-1", "rider");
+  await assertFails(set(ref(owner, "public/menu/new-meal"), { id: "new-meal", name: "Unvalidated meal" }));
+  await assertFails(set(ref(owner, "public/store/hours"), { open: "00:00", close: "23:59" }));
+  await assertFails(set(ref(staff, "public/menu/new-meal"), { id: "new-meal", name: "Staff meal" }));
   await assertFails(update(ref(owner, "orders/order-own"), { status: "completed" }));
   await assertFails(update(ref(owner, "inventory/meal"), { stock: 999 }));
   await assertFails(set(ref(owner, "paymentMovements/fake"), { amount: 1 }));

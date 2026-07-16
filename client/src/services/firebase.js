@@ -59,8 +59,59 @@ let db;
 let storage;
 let analytics;
 let analyticsLogEvent;
+const pendingAnalyticsEvents = [];
+let analyticsModulePromise;
 let storageModulePromise;
 let authPersistenceReady = Promise.resolve();
+
+function sendAnalyticsEvent(name, parameters) {
+  if (!analytics || !analyticsLogEvent) return false;
+  try {
+    analyticsLogEvent(analytics, name, parameters);
+  } catch {
+    // Optional measurement must never interrupt ordering or authentication.
+  }
+  return true;
+}
+
+function flushAnalyticsEvents() {
+  if (!analytics || !analyticsLogEvent) return;
+  pendingAnalyticsEvents.splice(0).forEach(({ name, parameters }) => {
+    sendAnalyticsEvent(name, parameters);
+  });
+}
+
+function loadAnalyticsModule() {
+  if (!firebaseEnabled || !app) return Promise.resolve(null);
+  if (!analyticsModulePromise) {
+    analyticsModulePromise = import("firebase/analytics")
+      .then(async (analyticsModule) => {
+        if (!(await analyticsModule.isSupported())) {
+          pendingAnalyticsEvents.length = 0;
+          return null;
+        }
+        analytics ||= analyticsModule.getAnalytics(app);
+        analyticsLogEvent ||= analyticsModule.logEvent;
+        flushAnalyticsEvents();
+        return analyticsModule;
+      })
+      .catch(() => {
+        analyticsModulePromise = null;
+        return null;
+      });
+  }
+  return analyticsModulePromise;
+}
+
+function scheduleAnalyticsLoad() {
+  if (typeof window === "undefined") return;
+  const load = () => void loadAnalyticsModule();
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(load, { timeout: 5000 });
+    return;
+  }
+  window.setTimeout(load, 3000);
+}
 
 async function loadStorageModule() {
   if (!firebaseEnabled || !firebaseStorageEnabled || !app) return null;
@@ -85,16 +136,7 @@ if (firebaseEnabled) {
   auth = getAuth(app);
   db = getDatabase(app);
   configureAuthTokenProvider(() => auth.currentUser?.getIdToken() || "");
-  void import("firebase/analytics")
-    .then(async (analyticsModule) => {
-      if (await analyticsModule.isSupported()) {
-        analytics = analyticsModule.getAnalytics(app);
-        analyticsLogEvent = analyticsModule.logEvent;
-      }
-    })
-    .catch(() => {
-      // Analytics is optional and must never block website startup.
-    });
+  scheduleAnalyticsLoad();
 
   if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
     try {
@@ -925,7 +967,10 @@ export async function createOrder(order) {
 }
 
 export function trackEvent(name, parameters = {}) {
-  if (analytics && analyticsLogEvent) analyticsLogEvent(analytics, name, parameters);
+  if (!firebaseEnabled || sendAnalyticsEvent(name, parameters)) return;
+  if (pendingAnalyticsEvents.length >= 50) pendingAnalyticsEvents.shift();
+  pendingAnalyticsEvents.push({ name, parameters });
+  void loadAnalyticsModule();
 }
 
 export async function updateOrder(orderId, values) {

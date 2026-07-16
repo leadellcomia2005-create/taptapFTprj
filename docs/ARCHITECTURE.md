@@ -98,6 +98,14 @@ through Express to Realtime Database.
 
 Rule behavior is tested in `test/database.rules.test.mjs` against the Realtime Database emulator.
 
+## Analytics Boundary
+
+Website conversion events pass through the typed `client/src/services/analytics.ts` boundary.
+It accepts product, role, source, quantity, value, currency, and coded funnel facts only. Customer
+identity, contact details, addresses, delivery coordinates, notes, OTPs, messages, and proof data
+must never be sent to Analytics. Event definitions, funnel setup, and reporting limitations are in
+`docs/ANALYTICS.md`.
+
 ## Environment Modes
 
 ### Client
@@ -162,7 +170,7 @@ npm run lint --prefix client
 npm run build --prefix client
 npm run performance:check --prefix client
 npm run test --prefix server
-npm run smoke:website --prefix client
+npm run smoke:preview --prefix client
 npm run test:rules
 npm run test:e2e
 ```

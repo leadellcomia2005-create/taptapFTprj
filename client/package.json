@@ -10,14 +10,13 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "smoke:website": "node scripts/website-smoke.mjs",
+    "smoke:preview": "node scripts/run-smoke-preview.mjs",
     "performance:check": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
-    "@gsap/react": "^2.1.2",
     "bootstrap": "^5.3.8",
     "chart.js": "^4.5.0",
     "firebase": "^12.4.0",
-    "gsap": "^3.15.0",
     "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.18.0",

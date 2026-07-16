@@ -35,6 +35,9 @@ const formatBusinessTime = (value: string): string => {
   const displayHour = hour % 12 || 12;
   return `${displayHour}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${suffix}`;
 };
+export const formatStoreHoursLabel = (hours: WebsiteStoreConfig["hours"][number]): string => hours.closed
+  ? "Closed"
+  : `${formatBusinessTime(hours.opens)} - ${formatBusinessTime(hours.closes)}`;
 const dayLabel = (offset: number, fallback: string): string => {
   if (offset === 0) return "today";
   if (offset === 1) return "tomorrow";
@@ -58,7 +61,7 @@ export const websiteStoreConfig: WebsiteStoreConfig = {
     pickup: true,
     "walk-in": true
   },
-  paymentMethods: ["cash", "gcash", "cod"],
+  paymentMethods: ["cash", "cod"],
   serviceAreaLabel: "Nearby delivery zones",
   serviceAreaDetail: "Use a delivery pin and landmark for smoother drop-off.",
   customerPromise: {

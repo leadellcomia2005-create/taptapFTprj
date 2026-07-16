@@ -5,11 +5,11 @@
     "public": {
       "menu": {
         ".read": true,
-        ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'"
+        ".write": false
       },
       "store": {
         ".read": true,
-        ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'"
+        ".write": false
       },
       "reviews": {
         ".read": true,

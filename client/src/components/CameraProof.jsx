@@ -92,10 +92,10 @@ export default function CameraProof({ onCapture, onClose }) {
   return (
     <div className="modal d-block camera-modal" tabIndex="-1">
       <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content">
+        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="proof-camera-title">
           <div className="modal-header">
-            <h5 className="modal-title">Proof of delivery</h5>
-            <button type="button" className="btn-close" onClick={onClose} />
+            <h5 className="modal-title" id="proof-camera-title">Proof of delivery</h5>
+            <button type="button" className="btn-close" aria-label="Close proof of delivery" onClick={onClose} />
           </div>
           <div className="modal-body">
             {error && <div className="alert alert-danger">{error}</div>}
@@ -105,7 +105,7 @@ export default function CameraProof({ onCapture, onClose }) {
             </div>
             {captured
               ? <img className="proof-preview" src={captured.url} alt="Captured delivery proof preview" />
-              : <video ref={videoRef} autoPlay playsInline className="w-100 rounded" onLoadedMetadata={() => setCameraReady(true)} />}
+              : <video ref={videoRef} autoPlay playsInline aria-label="Live delivery proof camera preview" className="w-100 rounded" onLoadedMetadata={() => setCameraReady(true)} />}
             <small className={qualityWarning ? "proof-camera-tip warning" : "proof-camera-tip"}>
               {captured
                 ? qualityWarning || "Review the photo before submitting it."

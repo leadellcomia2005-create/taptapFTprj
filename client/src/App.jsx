@@ -1,12 +1,13 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, CheckCheck, ClipboardList, LogOut, Menu, Plus, ReceiptText, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
+import { Bell, CheckCheck, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
 import { defaultViewForRole, navigationForUser, staffCanAccess, staffRoleLabels } from "./config/appConfig";
 import { fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
+import { trackCheckoutAbandonment, trackCheckoutStart } from "./services/analytics";
 import { logout } from "./services/firebase/auth";
 import { firebaseEnabled } from "./services/firebase/core";
 import { subscribeRiderLocation } from "./services/firebase/delivery";
@@ -374,7 +375,27 @@ const printReceipt = (order) => {
   return true;
 };
 
-function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications }) {
+const workspaceNavigationSections = {
+  owner: [
+    { label: "Monitor", views: ["owner-overview", "owner-sales", "owner-inventory", "owner-reports"] },
+    { label: "Manage", views: ["owner-reviews", "owner-users", "owner-audit", "owner-settings"] }
+  ],
+  staff: [
+    { label: "Operate", views: ["staff-overview", "staff-pos", "staff-kitchen", "staff-orders"] },
+    { label: "Support", views: ["staff-inventory", "staff-shifts", "staff-chat", "staff-reviews", "staff-settings"] }
+  ]
+};
+
+const storefrontCategoryLabels = {
+  All: "All",
+  "Favorite Meal": "Rice meals",
+  Alacarte: "A la carte",
+  Solo: "Solo",
+  "Special Meal": "Specials",
+  Drinks: "Drinks"
+};
+
+function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications, onHelp, helpOpen, onLogout }) {
   const navigation = navigationForUser(user);
   const homeView = defaultViewForRole(user.role);
   const customerNavigation = user.role === "customer";
@@ -388,6 +409,21 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
   };
   const drawerTitle = customerNavigation ? "Foodtrip pages" : `${user.role} pages`;
   const drawerEyebrow = customerNavigation ? "Customer menu" : "Workspace menu";
+  const groupedNavigation = (workspaceNavigationSections[user.role] || [])
+    .map((section) => ({
+      ...section,
+      items: navigation.filter(([view]) => section.views.includes(view))
+    }))
+    .filter((section) => section.items.length > 0);
+  const renderNavigationButton = ([view, label]) => (
+    <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
+  );
+  const renderWorkspaceNavigation = () => groupedNavigation.map((section) => (
+    <div className="role-nav-group" role="group" aria-label={`${section.label} pages`} key={section.label}>
+      <span className="role-nav-group-label">{section.label}</span>
+      <div className="role-nav-group-buttons">{section.items.map(renderNavigationButton)}</div>
+    </div>
+  ));
 
   return (
     <header className={`app-header ${customerNavigation ? "customer-header" : ""} ${workspaceDrawerNavigation ? "workspace-header" : ""}`}>
@@ -413,18 +449,14 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
       ) : (
         <>
           <nav className="role-navigation" aria-label={`${user.role} navigation`}>
-            {navigation.map(([view, label]) => (
-              <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
-            ))}
+            {workspaceDrawerNavigation ? renderWorkspaceNavigation() : navigation.map(renderNavigationButton)}
           </nav>
           {workspaceDrawerNavigation && (
             <>
               {drawerMenuOpen && <button className="customer-menu-backdrop workspace-menu-backdrop" aria-label="Close navigation menu" onClick={() => setDrawerMenuOpen(false)} />}
               <nav className={`customer-menu-drawer workspace-menu-drawer ${drawerMenuOpen ? "open" : ""}`} aria-label={`${user.role} mobile navigation`}>
                 <div className="customer-menu-title"><p className="eyebrow text-danger">{drawerEyebrow}</p><strong>{drawerTitle}</strong></div>
-                {navigation.map(([view, label]) => (
-                  <button className={activeView === view ? "active" : ""} aria-current={activeView === view ? "page" : undefined} key={view} onClick={() => navigateFromHeader(view)}>{label}</button>
-                ))}
+                {renderWorkspaceNavigation()}
               </nav>
             </>
           )}
@@ -432,10 +464,11 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications 
       )}
       <div className="header-actions">
         {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}
+        {customerNavigation && <button className={`header-help-button ${helpOpen ? "active" : ""}`} onClick={onHelp} aria-label={helpOpen ? "Close customer support" : "Open customer support"} aria-expanded={helpOpen} aria-controls="assistant-panel"><MessageCircle size={18} strokeWidth={2.4} aria-hidden="true" /></button>}
         <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
-        <button className="btn btn-danger btn-sm logout-button" aria-label="Log out" onClick={logout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
+        <button className="btn btn-danger btn-sm logout-button" aria-label="Log out" onClick={onLogout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
       </div>
     </header>
   );
@@ -602,10 +635,10 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
             <span>{visible.length} item{visible.length === 1 ? "" : "s"}</span>
           </div>
 
-          <div className="category-rail category-topbar" aria-label="Food categories">
+          <div className="category-rail category-topbar" role="group" aria-label="Food categories">
             {categories.map((item) => (
-              <button key={item} className={category === item ? "active" : ""} aria-pressed={category === item} onClick={() => setCategory(item)}>
-                {item}
+              <button key={item} className={category === item ? "active" : ""} aria-label={`Show ${storefrontCategoryLabels[item] || item}`} aria-pressed={category === item} onClick={() => setCategory(item)}>
+                {storefrontCategoryLabels[item] || item}
               </button>
             ))}
           </div>
@@ -724,8 +757,7 @@ function TrackingView({ order, onClose }) {
   );
 }
 
-function Assistant({ user, menu }) {
-  const [open, setOpen] = useState(false);
+function Assistant({ user, menu, open, onOpenChange }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([{ from: "bot", text: "Hi! Ask about menu items, allergens, store details or your order." }]);
   const receivedSupportReplies = useRef(new Set());
@@ -748,6 +780,14 @@ function Assistant({ user, menu }) {
       ]);
     }, user.uid);
   }, [open, user.uid]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onOpenChange(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onOpenChange, open]);
 
   const send = async (event) => {
     event.preventDefault();
@@ -768,12 +808,8 @@ function Assistant({ user, menu }) {
       setMessages((current) => [...current, { from: "bot", text: `Popular choices are ${popular}. Live assistant answers are not ready yet.`, source: "" }]);
     }
   };
-  return (
-    <>
-      <button className="assistant-launcher" aria-label={open ? "Close assistant" : "Open assistant"} aria-expanded={open} aria-controls="assistant-panel" onClick={() => setOpen(!open)}>AI</button>
-      {open && <aside className="assistant-panel" id="assistant-panel"><header><div><strong>TapTap Assistant</strong><small>Live answers + staff support</small></div><button aria-label="Close assistant" onClick={() => setOpen(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => { const sourceLabel = assistantSourceLabel(message.source); return <div key={index} className={message.from}><span>{message.text}</span>{sourceLabel && <small>{sourceLabel}</small>}</div>; })}</div><form onSubmit={send}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask or contact staff..." /><button>Send</button></form></aside>}
-    </>
-  );
+  if (!open) return null;
+  return <aside className="assistant-panel" id="assistant-panel" role="dialog" aria-label="TapTap customer support"><header><div><strong>TapTap Assistant</strong><small>Live answers + staff support</small></div><button aria-label="Close customer support" onClick={() => onOpenChange(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => { const sourceLabel = assistantSourceLabel(message.source); return <div key={index} className={message.from}><span>{message.text}</span>{sourceLabel && <small>{sourceLabel}</small>}</div>; })}</div><form onSubmit={send}><input aria-label="Message customer support" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask or contact staff..." /><button type="submit">Send</button></form></aside>;
 }
 
 export default function App() {
@@ -789,8 +825,10 @@ export default function App() {
   const [complaints, setComplaints] = useState([]);
   const [trackingOrder, setTrackingOrder] = useState(null);
   const [notice, setNotice] = useState("");
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const { notifications, notificationsOpen, setNotificationsOpen, unreadCount } = useNotificationCenter(activeUser);
-  const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice });
+  const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
+  const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
   const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
@@ -930,6 +968,15 @@ export default function App() {
   }
   if (!user.mfaVerified) return <TwoFactorPanel user={user} onComplete={setUser} />;
 
+  const openCheckout = () => {
+    trackCheckoutStart(cart);
+    setCheckoutOpen(true);
+  };
+  const closeCheckout = () => {
+    trackCheckoutAbandonment(cart, "customer_closed");
+    setCheckoutOpen(false);
+  };
+
   const workspaceHelpers = {
     buildDailyReport,
     buildLocalDecisionSupport,
@@ -958,11 +1005,11 @@ export default function App() {
     : null;
 
   return (
-    <div className={`app-shell ${user.role === "customer" ? "customer-app-shell" : ""}`}>
-      <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} />
+    <div className={`app-shell role-${user.role}-shell ${user.role === "customer" ? "customer-app-shell" : "workspace-app-shell"}`}>
+      <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} onHelp={() => setAssistantOpen((current) => !current)} helpOpen={assistantOpen} onLogout={() => { setAssistantOpen(false); logout(); }} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
       {serviceStatus.api === false && <div className="offline-banner" role="status">The app could not be reached. Restart the app, then refresh this page.</div>}
-      {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={() => setCheckoutOpen(true)} notify={setNotice} />}
+      {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={openCheckout} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
           <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} />
@@ -990,11 +1037,11 @@ export default function App() {
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
-          <Checkout cart={cart} user={currentUser} profile={profile} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={() => setCheckoutOpen(false)} notify={setNotice} onComplete={completeCheckout} />
+          <Checkout cart={cart} user={currentUser} profile={profile} online={online} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={closeCheckout} notify={setNotice} onComplete={completeCheckout} />
         </Suspense>
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
-      {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} />}
+      {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} open={assistantOpen} onOpenChange={setAssistantOpen} />}
       {user.role === "customer" && <CustomerBottomNav activeView={view} onNavigate={navigate} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}

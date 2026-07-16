@@ -249,7 +249,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
 
   return (
     <main className="rider-page dashboard-page">
-      <section className="rider-hero">
+      <section className="rider-hero workspace-overview-header rider-workspace-header">
         <div className="rider-hero-top">
           <div className="rider-avatar"><Bike size={27} strokeWidth={2.4} aria-hidden="true" /></div>
           <div>
@@ -257,7 +257,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
             <h1>Hi, {firstName}</h1>
               <span><MapPin size={14} aria-hidden="true" /> {gpsStatus === "online" ? "GPS locked" : gpsStatus === "acquiring" ? "Acquiring GPS" : gpsStatus === "error" ? "GPS error" : "GPS standby"}</span>
             </div>
-          <button className={`rider-online-toggle ${online ? "online" : ""} ${gpsStatus === "error" ? "error" : ""}`} onClick={toggleOnline} aria-live="polite">
+          <button className={`rider-online-toggle ${online ? "online" : ""} ${gpsStatus === "error" ? "error" : ""}`} type="button" onClick={toggleOnline} aria-live="polite" aria-pressed={online}>
             {gpsStatus === "acquiring" ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : gpsStatus === "error" ? <AlertTriangle size={17} aria-hidden="true" /> : <span />}
             {online ? "Online" : gpsStatus === "acquiring" ? "Cancel GPS" : gpsStatus === "error" ? "Retry GPS" : "Go online"}
           </button>
@@ -311,7 +311,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                       <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
                       <div className="rider-job-facts"><em>{estimate ? `${estimate.distanceLabel} - ${estimate.label}` : "Route pending"}</em><em>{pinQuality(order)}</em><em>{order.paymentMethod === "cod" ? `COD ${currency(order.total)}` : String(order.paymentMethod || "paid").toUpperCase()}</em></div>
                     </div>
-                    <button disabled={Boolean(busyAction)} onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> {busyAction === `Accepting ${order.id}` ? "Accepting..." : "Accept"}</button>
+                    <button type="button" disabled={Boolean(busyAction)} onClick={() => claimOrder(order)}><CheckCircle2 size={16} aria-hidden="true" /> {busyAction === `Accepting ${order.id}` ? "Accepting..." : "Accept"}</button>
                   </article>
                 );
               })}
@@ -355,13 +355,12 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
               {active.deliveryIssue && <div className="rider-issue-note"><strong>Reported issue</strong><span>{active.deliveryIssue}</span></div>}
               {retryTask && <div className="rider-retry-bar" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span><strong>{retryTask.label} failed</strong><small>Check your connection, then retry without repeating completed steps.</small></span><button disabled={Boolean(busyAction)} onClick={() => runAction(retryTask.label, retryTask.task)}>Retry</button></div>}
 
-              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
-
               {nextAction ? <button className={`rider-next-action ${nextAction.tone}`} disabled={Boolean(busyAction)} onClick={nextAction.action}><NextActionIcon size={19} aria-hidden="true" /> {busyAction || nextAction.label}</button> : <div className="rider-complete-state"><CheckCircle2 size={18} aria-hidden="true" /><span>{["delivered", "completed"].includes(active.status) ? "Delivery completed" : "No rider status action is available"}</span></div>}
+              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
               <div className="rider-action-grid secondary">
                 <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
                 {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}
-                <button className="rider-action" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={() => setIssueOpen(true)}><Clock size={17} aria-hidden="true" /> Issue</button>
+                <button className="rider-action" type="button" disabled={!["out-for-delivery", "arrived"].includes(active.status)} onClick={() => setIssueOpen(true)}><Clock size={17} aria-hidden="true" /> Issue</button>
               </div>
             </>
           ) : <div className="empty-state compact">Assigned delivery details will appear here.</div>}

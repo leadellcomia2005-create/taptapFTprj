@@ -20,6 +20,7 @@ interface SalesChartProps {
 export default function SalesChart({ values }: SalesChartProps) {
   return (
     <Line
+      aria-label="Net sales trend for the last seven days"
       data={{
         labels: ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"],
         datasets: [{

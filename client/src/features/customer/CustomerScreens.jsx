@@ -61,17 +61,80 @@ const complaintTypes = [
   ["bad-food", "Bad food"]
 ];
 
-export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
+const CHECKOUT_DRAFT_VERSION = 1;
+const checkoutDraftStorageKey = (userId) => `taptap-checkout:v${CHECKOUT_DRAFT_VERSION}:${userId}`;
+
+function readCheckoutDraft(userId, paymongoEnabled) {
+  if (!userId) return null;
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(checkoutDraftStorageKey(userId)) || "null");
+    if (parsed?.version !== CHECKOUT_DRAFT_VERSION) return null;
+    return {
+      deliveryType: parsed.deliveryType === "pickup" ? "pickup" : "delivery",
+      payment: parsed.payment === "gcash" && paymongoEnabled ? "gcash" : "cod",
+      phone: String(parsed.phone || "").slice(0, 32),
+      address: String(parsed.address || "").slice(0, 300),
+      landmark: String(parsed.landmark || "").slice(0, 160),
+      notes: String(parsed.notes || "").slice(0, 400)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCheckoutDraft(userId, draft) {
+  if (!userId) return;
+  try {
+    window.sessionStorage.setItem(checkoutDraftStorageKey(userId), JSON.stringify({
+      version: CHECKOUT_DRAFT_VERSION,
+      deliveryType: draft.deliveryType,
+      payment: draft.payment,
+      phone: String(draft.phone || "").slice(0, 32),
+      address: String(draft.address || "").slice(0, 300),
+      landmark: String(draft.landmark || "").slice(0, 160),
+      notes: String(draft.notes || "").slice(0, 400)
+    }));
+  } catch {
+    // Checkout remains usable when session storage is blocked or full.
+  }
+}
+
+function removeCheckoutDraft(userId) {
+  if (!userId) return;
+  try {
+    window.sessionStorage.removeItem(checkoutDraftStorageKey(userId));
+  } catch {
+    // Storage cleanup is best effort and must not block an order.
+  }
+}
+
+export function Checkout({ cart, user, profile, online = true, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
   const orderRequestKeyRef = useRef("");
-  const [payment, setPayment] = useState(paymongoEnabled ? "gcash" : "cod");
-  const [deliveryType, setDeliveryType] = useState("delivery");
-  const [phone, setPhone] = useState(profile?.phone || "");
-  const [address, setAddress] = useState(profile?.address || "");
-  const [landmark, setLandmark] = useState(profile?.landmark || "");
+  const checkoutCompletedRef = useRef(false);
+  const defaultPayment = paymongoEnabled ? "gcash" : "cod";
+  const [checkoutDefaults] = useState(() => {
+    const baseline = {
+      deliveryType: "delivery",
+      payment: defaultPayment,
+      phone: profile?.phone || "",
+      address: profile?.address || "",
+      landmark: profile?.landmark || "",
+      notes: ""
+    };
+    const stored = readCheckoutDraft(user.uid, paymongoEnabled);
+    return { baseline, initial: stored || baseline, restored: Boolean(stored) };
+  });
+  const { baseline: baselineDraft, initial: initialDraft } = checkoutDefaults;
+  const [draftRestored, setDraftRestored] = useState(checkoutDefaults.restored);
+  const [payment, setPayment] = useState(initialDraft?.payment || defaultPayment);
+  const [deliveryType, setDeliveryType] = useState(initialDraft?.deliveryType || "delivery");
+  const [phone, setPhone] = useState(initialDraft?.phone || profile?.phone || "");
+  const [address, setAddress] = useState(initialDraft?.address || profile?.address || "");
+  const [landmark, setLandmark] = useState(initialDraft?.landmark || profile?.landmark || "");
   const [deliveryLocation, setDeliveryLocation] = useState(profile?.deliveryLocation || null);
   const [smsOptIn, setSmsOptIn] = useState(Boolean(profile?.smsNotifications || profile?.smsNotificationsRequested));
   const [locating, setLocating] = useState(false);
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(initialDraft?.notes || "");
   const [busy, setBusy] = useState(false);
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryFee = deliveryType === "delivery" && cart.length > 0 ? 49 : 0;
@@ -84,13 +147,15 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
   const needsPhone = !validPhone;
   const needsDeliveryAddress = deliveryType === "delivery" && !address.trim();
   const needsDeliveryPin = deliveryType === "delivery" && !deliveryMarker;
-  const checkoutBlockReason = needsPhone
-    ? "Enter a valid Philippine mobile number."
-    : needsDeliveryAddress
-      ? "Add the delivery address."
-      : needsDeliveryPin
-        ? "Confirm the delivery pin."
-        : "";
+  const checkoutBlockReason = !online
+    ? "Reconnect to the internet before placing the order."
+    : needsPhone
+      ? "Enter a valid Philippine mobile number."
+      : needsDeliveryAddress
+        ? "Add the delivery address."
+        : needsDeliveryPin
+          ? "Confirm the delivery pin."
+          : "";
   const checkoutReady = !checkoutBlockReason;
   const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Cash at pickup";
   const cashPaymentDetail = deliveryType === "delivery" ? "Pay the rider on handoff" : "Pay at the counter when claiming";
@@ -101,6 +166,30 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
+
+  useEffect(() => {
+    if (checkoutCompletedRef.current) return;
+    const draft = { deliveryType, payment, phone, address, landmark, notes };
+    const matchesBaseline = JSON.stringify(draft) === JSON.stringify(baselineDraft);
+    if (!draftRestored && matchesBaseline) {
+      removeCheckoutDraft(user.uid);
+      return;
+    }
+    writeCheckoutDraft(user.uid, draft);
+  }, [address, baselineDraft, deliveryType, draftRestored, landmark, notes, payment, phone, user.uid]);
+
+  const clearCheckoutDraft = () => {
+    removeCheckoutDraft(user.uid);
+    setDeliveryType(baselineDraft.deliveryType);
+    setPayment(baselineDraft.payment);
+    setPhone(baselineDraft.phone);
+    setAddress(baselineDraft.address);
+    setLandmark(baselineDraft.landmark);
+    setNotes(baselineDraft.notes);
+    setDeliveryLocation(profile?.deliveryLocation || null);
+    setDraftRestored(false);
+    notify("Saved checkout details cleared.");
+  };
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -136,7 +225,7 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
     }));
   };
   const place = async () => {
-    if (!navigator.onLine) {
+    if (!online || !navigator.onLine) {
       notify("You are offline. Reconnect before placing an order.");
       return;
     }
@@ -176,6 +265,9 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
       };
       const orderId = await createOrder(orderPayload);
       orderRequestKeyRef.current = "";
+      checkoutCompletedRef.current = true;
+      removeCheckoutDraft(user.uid);
+      setDraftRestored(false);
       if (payment === "gcash") {
         try {
           const result = await api.createPayment({ orderId });
@@ -206,6 +298,12 @@ export function Checkout({ cart, user, profile, paymongoEnabled, smsProviderEnab
         <div className="modal-content checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
           <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
           <div className="modal-body">
+            {draftRestored && (
+              <div className="checkout-draft-notice" role="status">
+                <div><strong>Checkout details restored</strong><small>Your delivery and order notes were recovered from this browser tab.</small></div>
+                <button className="btn btn-sm btn-outline-dark" type="button" onClick={clearCheckoutDraft}>Clear</button>
+              </div>
+            )}
             {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
             <div className="checkout-mode-grid mt-3" aria-label="Order type">
               <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>Rider delivery with fee and drop-off pin</small></button>

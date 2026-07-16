@@ -200,7 +200,7 @@ export function InventoryModule({ inventory, user, notify }) {
         <strong>Inventory control</strong>
         <span>Use Receive/Deduct for normal movement. Use Request count for physical count corrections, shortages, or major stock fixes.</span>
       </div>
-      <div className="table-responsive">
+      <div className="table-responsive" tabIndex="0">
         <table className="table align-middle inventory-table">
           <thead><tr><th>Product</th><th>Current stock</th><th>Reorder point</th><th>Status</th><th>Quantity</th><th>Reason</th><th>Daily count</th><th>Action</th></tr></thead>
           <tbody>{inventory.map((item) => {
@@ -349,7 +349,7 @@ export function MenuManagementModule({ inventory, user, notify }) {
           </div>
         </form>
       )}
-      <div className="table-responsive">
+      <div className="table-responsive" tabIndex="0">
         <table className="table align-middle menu-admin-table">
           <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Reorder</th><th>Schedule</th><th>Visible</th><th>Walk-in only</th><th /></tr></thead>
           <tbody>{inventory.map((item) => {
@@ -446,7 +446,7 @@ export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false, 
       <div className={readOnly ? "col-12" : "col-xl-7"}>
         <div className="dashboard-card">
           <h3>{readOnly ? "Staff shift reconciliation history" : "Shift history"}</h3>
-          <div className="table-responsive"><table className="table align-middle"><thead><tr><th>Staff</th><th>Closed</th><th>Orders</th><th>Movements</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Notes</th></tr></thead><tbody>
+          <div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Staff</th><th>Closed</th><th>Orders</th><th>Movements</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Notes</th></tr></thead><tbody>
             {logs.length === 0 && <tr><td colSpan="8" className="text-center text-secondary py-4">No closed shifts yet.</td></tr>}
             {visibleLogs.map((log) => <tr key={log.id}><td>{log.staffName}</td><td>{new Date(log.endedAt || log.createdAt).toLocaleString("en-PH")}</td><td>{log.orderCount}</td><td>{currency(Number(log.cashIn || 0) - Number(log.cashOut || 0) - Number(log.expenses || 0))}</td><td>{currency(log.expectedCash)}</td><td>{currency(log.actualCash)}</td><td>{currency(log.variance)}</td><td>{log.notes || "-"}</td></tr>)}
           </tbody></table></div>
@@ -539,7 +539,7 @@ export function ApprovalQueueModule({ user, notify }) {
         <div><p className="eyebrow text-danger">Owner approval flow</p><h3>Sensitive action requests</h3></div>
         <span className="module-note">Stock counts, voids, menu changes, and role requests appear here.</span>
       </div>
-      <div className="table-responsive">
+      <div className="table-responsive" tabIndex="0">
         <table className="table align-middle">
           <thead><tr><th>Request</th><th>Requester</th><th>Reason</th><th>Status</th><th /></tr></thead>
           <tbody>
@@ -855,7 +855,7 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
         <label className="form-label compact-date-filter">Order date<input className="form-control" type="date" value={orderDateFilter} onChange={(event) => { setOrderDateFilter(event.target.value); setVisibleOrderCount(30); }} /></label>
       </div>
       {orderDateFilter && <button className="btn btn-sm btn-outline-dark mb-3" type="button" onClick={() => setOrderDateFilter("")}>Clear date filter</button>}
-      <div className="table-responsive">
+      <div className="table-responsive" tabIndex="0">
         <table className="table align-middle">
           <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
           <tbody>

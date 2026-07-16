@@ -30,19 +30,44 @@ await fetchOk("/assets/hero-food.avif", "hero AVIF loads", "image/");
 await fetchOk("/assets/taptap-logo.png", "logo PNG fallback loads", "image/");
 await fetchOk("/assets/taptap-logo.webp", "logo WebP loads", "image/");
 await fetchOk("/assets/taptap-logo.avif", "logo AVIF loads", "image/");
+await fetchOk("/robots.txt", "robots file loads", "text/plain");
 
 const authPanels = await readFile(new URL("../src/features/auth/AuthPanels.jsx", import.meta.url), "utf8");
 record("customer login modal entry exists", authPanels.includes("login-modal-title"));
 record("popular meal cards are wired", authPanels.includes("login-meal-card") && authPanels.includes("popularMeals"));
 record("landing menu uses current menu data", authPanels.includes("subscribeMenu") && authPanels.includes("getPopularMeals"));
+record("public menu browser is filterable", authPanels.includes('id="browse-menu"') && authPanels.includes("login-menu-categories") && authPanels.includes("activeMenuCategory"));
+record("public ordering wording matches sign-in flow", authPanels.includes("Sign in to order") && !authPanels.includes("Your account is only needed when you confirm an order"));
 record("store trust strip is present", authPanels.includes("login-trust-strip") && authPanels.includes("getOrderingDetails"));
+record("hero service copy uses readable prose", authPanels.includes("availableServiceSentence") && authPanels.includes("Available for {availableServiceSentence()}"));
+record("trust strip avoids duplicate clear-orders promise", authPanels.includes('label: "Delivery area"') && !authPanels.includes('label: websiteStoreConfig.customerPromise.label'));
+record("landing conversion events use the analytics boundary", authPanels.includes("trackLandingOrderEntry") && authPanels.includes("trackLandingMenuView") && authPanels.includes("trackRegistrationComplete"));
 record("public reviews are wired", authPanels.includes("subscribePublicReviews"));
 record("empty reviews do not use fabricated testimonials", !authPanels.includes("fallbackCustomerReviews"));
-record("secondary role access is present", authPanels.includes("login-footer-team") && authPanels.includes("openLoginModal(item.id)"));
+record("hours and FAQ use configured data", authPanels.includes("formatStoreHoursLabel") && authPanels.includes('id="frequently-asked"'));
+record("footer encoding is clean", authPanels.includes("&copy;") && !authPanels.includes(String.fromCharCode(194, 169)));
+record("secondary role access is present", authPanels.includes("login-footer-team") && authPanels.includes('openLoginModal(item.id, "footer_team")'));
+
+const appConfig = await readFile(new URL("../src/config/appConfig.ts", import.meta.url), "utf8");
+record("landing customer payments only advertise enabled methods", appConfig.includes('paymentMethods: ["cash", "cod"]'));
 
 const customerScreens = await readFile(new URL("../src/features/customer/CustomerScreens.jsx", import.meta.url), "utf8");
 record("checkout entry point exists", customerScreens.includes("export function Checkout") && customerScreens.includes("Secure checkout"));
 record("checkout validation summary exists", customerScreens.includes("checkout-validation-summary"));
+record("checkout draft is versioned and tab scoped", customerScreens.includes("CHECKOUT_DRAFT_VERSION") && customerScreens.includes("window.sessionStorage"));
+record("checkout draft excludes delivery pins", customerScreens.includes("writeCheckoutDraft") && !customerScreens.slice(customerScreens.indexOf("function writeCheckoutDraft"), customerScreens.indexOf("function removeCheckoutDraft")).includes("deliveryLocation"));
+record("checkout blocks submission while offline", customerScreens.includes('!online || !navigator.onLine') && customerScreens.includes("Reconnect to the internet"));
+
+const appState = await readFile(new URL("../src/hooks/useAppState.js", import.meta.url), "utf8");
+record("cart recovery is versioned per customer", appState.includes("CART_STORAGE_VERSION") && appState.includes("cartStorageKey(userId)"));
+record("cart storage excludes menu prices and customer data", appState.includes("cart.map(({ id, qty }) => ({ id, qty }))"));
+record("restored carts reconcile against the current menu", appState.includes("reconcileCart") && appState.includes("menuAvailability(product).available"));
+record("logout clears customer recovery data", appState.includes("clearStoredCustomerRecovery(previousUserIdRef.current)") && appState.includes("window.sessionStorage.removeItem"));
+
+const analyticsService = await readFile(new URL("../src/services/analytics.ts", import.meta.url), "utf8");
+record("analytics events are centralized and typed", analyticsService.includes("LandingOrderSource") && analyticsService.includes("CheckoutAbandonmentReason"));
+record("analytics funnel includes entry, auth, and checkout", analyticsService.includes('trackEvent("select_content"') && analyticsService.includes('trackEvent("login"') && analyticsService.includes('trackEvent("begin_checkout"'));
+record("analytics payload excludes customer private fields", !/customer(Id|Name|Email)|phone|address|location|latitude|longitude|notes|otp/i.test(analyticsService));
 
 const appShell = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 record("owner workspace is reachable", appShell.includes("<OwnerWorkspace"));
@@ -51,6 +76,7 @@ record("rider workspace is reachable", appShell.includes("<RiderWorkspace"));
 record("storefront total waits for fulfillment choice", appShell.includes("Calculated at checkout") && appShell.includes("Estimated total") && !appShell.includes("const deliveryFee = cart.length"));
 record("storefront search and availability filters exist", appShell.includes("menu-search-field") && appShell.includes("menu-availability-filter"));
 record("mobile cart sheet replaces direct floating checkout", appShell.includes("mobile-cart-sheet") && appShell.includes("Review order -"));
+record("checkout conversion events use the analytics boundary", appShell.includes("trackCheckoutStart") && appShell.includes("trackCheckoutAbandonment"));
 record("notifications require explicit read action", appShell.includes("Mark all read") && !appShell.includes("api.markAllNotificationsRead().catch"));
 
 record("2FA continuation text is role aware", authPanels.includes("Continue to ordering") && authPanels.includes("Open owner dashboard") && authPanels.includes("Open staff workspace") && authPanels.includes("Open rider dashboard"));

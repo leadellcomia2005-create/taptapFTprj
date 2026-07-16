@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 const localBrowserChannel = process.env.CI ? undefined : process.env.PLAYWRIGHT_CHANNEL || "msedge";
 const clientOrigin = "http://127.0.0.1:4173";
 const apiOrigin = "http://127.0.0.1:8181";
+const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,7 +27,7 @@ export default defineConfig({
       command: "npm run start --prefix server",
       url: `${apiOrigin}/api/status`,
       timeout: 60_000,
-      reuseExistingServer: true,
+      reuseExistingServer,
       env: {
         ...process.env,
         PORT: "8181",
@@ -43,7 +44,7 @@ export default defineConfig({
       command: "npm run dev --prefix client -- --host 127.0.0.1 --port 4173 --mode e2e",
       url: clientOrigin,
       timeout: 60_000,
-      reuseExistingServer: true,
+      reuseExistingServer,
       env: {
         ...process.env,
         VITE_API_BASE_URL: `${apiOrigin}/api`,

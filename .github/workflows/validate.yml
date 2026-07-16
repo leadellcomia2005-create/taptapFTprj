@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -33,9 +37,21 @@ jobs:
       - run: npm run lint --prefix client
       - run: npm run build --prefix client
       - run: npm run performance:check --prefix client
-      - run: npm run smoke:website --prefix client
+      - run: npm run smoke:preview --prefix client
       - run: npm run test --prefix server
       - run: npm run test:rules
       - run: npm run test:e2e
         env:
           CI: true
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-artifacts-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+            database-debug.log
+            firebase-debug.log
+          if-no-files-found: ignore
+          retention-days: 7

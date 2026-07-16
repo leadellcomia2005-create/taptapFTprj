@@ -21,7 +21,7 @@ test commands, and free-service limits are documented in
 | Firebase Authentication | Email/password accounts and verified sessions |
 | Firebase Realtime Database | Menu, users, orders, inventory, chat and rider GPS |
 | Firebase Storage | Upload integration is present; the free local setup keeps it disabled |
-| Firebase Analytics | Purchase event tracking |
+| Firebase Analytics | Privacy-limited landing, authentication, checkout and purchase funnel events |
 | Firebase Hosting | Deployment configuration is present but is not needed locally |
 | Firebase Cloud Functions | Matching secure API implementation is included but not deployed on Spark |
 | Socket.IO | Low-latency rider location and order broadcasts |
@@ -213,7 +213,7 @@ npm run lint --prefix client
 npm run build --prefix client
 npm run performance:check --prefix client
 npm run test --prefix server
-npm run smoke:website --prefix client
+npm run smoke:preview --prefix client
 npm run test:rules
 npm run test:e2e
 ```

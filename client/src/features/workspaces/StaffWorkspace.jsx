@@ -323,7 +323,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       : lowStock.slice(0, 4).map((item) => ({ id: item.id, name: item.name, detail: `Reorder at ${item.reorderPoint}`, value: item.stock }));
   return (
     <main className="container-fluid dashboard-page staff-dashboard-page">
-      <section className="staff-dashboard-hero">
+      <section className="staff-dashboard-hero workspace-overview-header staff-workspace-header">
         <div>
           <p className="eyebrow">{dashboardProfile.eyebrow}</p>
           <h1>{dashboardProfile.title}</h1>
@@ -332,12 +332,14 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
         <span className={`shift-chip ${shiftError ? "shift-error" : ""}`}>{shiftLoading ? "Checking shift..." : shiftError ? "Shift unavailable" : activeShift ? `Active shift - ${new Date(activeShift.startedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}` : "No active shift"}</span>
       </section>
       {shiftError && <div className="staff-shift-error" role="alert"><AlertCircle size={18} aria-hidden="true" /><span><strong>Shift status could not be loaded</strong><small>{shiftError}</small></span><button className="btn btn-outline-danger" onClick={loadActiveShift}><RefreshCw size={15} aria-hidden="true" /> Retry</button></div>}
-      <div className="row g-3">
-        {dashboardMetrics.map((metric) => <div className="col-md-3" key={metric.label}><button className="metric-card staff-metric-button" type="button" onClick={() => onNavigate?.(metric.view)}><small>{metric.label}</small><strong>{metric.value}</strong><span>{metric.detail}</span></button></div>)}
-        <div className="col-12"><div className={`staff-sla-strip ${delayedOrders.length ? "has-delay" : ""}`}><Clock3 size={20} aria-hidden="true" /><div><strong>{delayedOrders.length ? `${delayedOrders.length} order${delayedOrders.length === 1 ? "" : "s"} beyond prep target` : "Preparation is within target"}</strong><span>{prepOrders.length ? `Oldest active prep: ${oldestPrepClock}` : "No orders are currently preparing."}</span></div><button type="button" onClick={() => onNavigate?.("staff-kitchen")}>Open kitchen</button></div></div>
+      <div className={`staff-sla-strip ${delayedOrders.length ? "has-delay" : ""}`}><Clock3 size={20} aria-hidden="true" /><div><strong>{delayedOrders.length ? `${delayedOrders.length} order${delayedOrders.length === 1 ? "" : "s"} beyond prep target` : "Preparation is within target"}</strong><span>{prepOrders.length ? `Oldest active prep: ${oldestPrepClock}` : "No orders are currently preparing."}</span></div><button type="button" onClick={() => onNavigate?.("staff-kitchen")}>Open kitchen</button></div>
+      <div className="row g-3 staff-priority-grid">
         <div className="col-lg-8"><OrderManagement orders={prioritizedOrders.slice(0, 6)} canAdvance notify={notify} user={user} /></div>
-        <div className="col-lg-4"><div className="dashboard-card staff-focus-card"><h3>Quick actions</h3><div className="d-grid gap-2">{quickActions.map(({ label, view, Icon }, index) => <button className={index === 0 ? "btn btn-danger" : "btn btn-outline-dark"} key={view} onClick={() => onNavigate?.(view)}><Icon size={16} aria-hidden="true" /> {label}</button>)}</div><h3 className="mt-4">{staffRole === "kitchen" ? "Overdue preparation" : staffRole === "cashier" ? "Counter handoffs" : "Critical stock"}</h3>{focusRows.length === 0 && <div className="empty-chat">No urgent items for this role.</div>}{focusRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.detail}</small></span><b>{item.value}</b></div>)}</div></div>
+        <div className="col-lg-4"><div className="dashboard-card staff-focus-card"><h3>Quick actions</h3><div className="d-grid gap-2">{quickActions.map(({ label, view, Icon }, index) => <button className={`${index === 0 ? "btn btn-danger" : "btn btn-outline-dark"} staff-quick-action`} type="button" key={view} onClick={() => onNavigate?.(view)}><Icon size={16} aria-hidden="true" /> {label}</button>)}</div><h3 className="mt-4">{staffRole === "kitchen" ? "Overdue preparation" : staffRole === "cashier" ? "Counter handoffs" : "Critical stock"}</h3>{focusRows.length === 0 && <div className="empty-chat">No urgent items for this role.</div>}{focusRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.detail}</small></span><b>{item.value}</b></div>)}</div></div>
       </div>
+      <section className="staff-kpi-grid" aria-label="Staff performance metrics">
+        {dashboardMetrics.map((metric) => <button className="metric-card staff-metric-button" type="button" key={metric.label} onClick={() => onNavigate?.(metric.view)}><small>{metric.label}</small><strong>{metric.value}</strong><span>{metric.detail}</span></button>)}
+      </section>
     </main>
   );
 }

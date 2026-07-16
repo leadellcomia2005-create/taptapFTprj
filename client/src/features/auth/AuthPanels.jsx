@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Clock, CreditCard, Eye, EyeOff, MapPin, ShieldCheck, Star, Store, Truck, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Clock, CreditCard, Eye, EyeOff, MapPin, ShieldCheck, Star, Store, Truck, X } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
-import { getWebsiteOpenStatus, paymentMethodLabels, serviceAvailabilityLabels, websiteStoreConfig } from "../../config/appConfig";
+import { formatStoreHoursLabel, getWebsiteOpenStatus, paymentMethodLabels, serviceAvailabilityLabels, websiteStoreConfig } from "../../config/appConfig";
 import { demoAccounts, fallbackMenu } from "../../data/menu";
-import { gsap, prefersReducedMotion, useGSAP } from "../../lib/gsap";
 import { api } from "../../services/api";
+import {
+  trackLandingMenuView,
+  trackLandingOrderEntry,
+  trackLogin,
+  trackRegistrationComplete,
+  trackRegistrationStart
+} from "../../services/analytics";
 import {
   completeTwoFactorSession,
   friendlyAuthError,
@@ -74,19 +80,49 @@ const serviceModes = [
   { id: "walk-in", icon: MapPin, title: "Walk-in", detail: "Dine in or order takeout at the store." }
 ];
 
+const landingCategoryOrder = ["Favorite Meal", "Alacarte", "Solo", "Special Meal", "Drinks"];
+const landingCategoryLabels = {
+  all: "All",
+  "Favorite Meal": "Rice meals",
+  Alacarte: "A la carte",
+  Solo: "Solo",
+  "Special Meal": "Specials",
+  Drinks: "Drinks"
+};
+
+const getLandingMenuCategories = (menu = []) => landingCategoryOrder.filter((category) => (
+  menu.some((item) => item.category === category && item.image && !item.walkInOnly)
+));
+
+const getLandingMenuItems = (menu = [], category = "all") => menu
+  .filter((item) => item.image && !item.walkInOnly && (category === "all" || item.category === category))
+  .sort((first, second) => {
+    if (Boolean(first.featured) !== Boolean(second.featured)) return first.featured ? -1 : 1;
+    const categoryDifference = landingCategoryOrder.indexOf(first.category) - landingCategoryOrder.indexOf(second.category);
+    return categoryDifference || String(first.name).localeCompare(String(second.name));
+  });
+
+const isMenuItemOrderable = (item) => menuAvailability(item).available && !item.unavailable && Number(item.stock ?? 1) > 0;
+
 const formatPrepTime = ({ min, max }) => `${min}-${max} min`;
-const availableServiceLabel = () => Object.entries(websiteStoreConfig.serviceAvailability)
+const availableServices = () => Object.entries(websiteStoreConfig.serviceAvailability)
   .filter(([, enabled]) => enabled)
-  .map(([service]) => serviceAvailabilityLabels[service] || service)
-  .join(", ");
+  .map(([service]) => serviceAvailabilityLabels[service] || service);
+const availableServiceLabel = () => availableServices().join(" / ");
+const availableServiceSentence = () => {
+  const services = availableServices().map((service) => service.toLowerCase());
+  if (services.length < 2) return services[0] || "current service options";
+  if (services.length === 2) return services.join(" or ");
+  return `${services.slice(0, -1).join(", ")}, or ${services[services.length - 1]}`;
+};
 const paymentLabel = () => websiteStoreConfig.paymentMethods
   .map((method) => paymentMethodLabels[method] || method.toUpperCase())
-  .join(", ");
-const getOrderingDetails = (openStatus) => [
-  { icon: Clock, label: "Store", value: openStatus.label, detail: openStatus.todayHoursLabel },
+  .join(" / ");
+const getOrderingDetails = () => [
   { icon: Store, label: "Prep time", value: formatPrepTime(websiteStoreConfig.prepTimeMinutes), detail: "After order confirmation" },
-  { icon: Truck, label: "Order options", value: availableServiceLabel(), detail: websiteStoreConfig.serviceAreaLabel },
-  { icon: CreditCard, label: "Payments", value: paymentLabel(), detail: "Shown before confirmation" }
+  { icon: Truck, label: "Order options", value: availableServiceLabel(), detail: "Choose before checkout" },
+  { icon: CreditCard, label: "Payments", value: paymentLabel(), detail: "Shown before confirmation" },
+  { icon: MapPin, label: "Delivery area", value: websiteStoreConfig.serviceAreaLabel, detail: websiteStoreConfig.serviceAreaDetail }
 ];
 
 const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
@@ -210,75 +246,14 @@ function LoginPanel({ onLoggedIn }) {
   const [teamAccessOpen, setTeamAccessOpen] = useState(false);
   const [openStatus, setOpenStatus] = useState(() => getWebsiteOpenStatus());
   const [landingMenu, setLandingMenu] = useState(fallbackMenu);
+  const [activeMenuCategory, setActiveMenuCategory] = useState("all");
+  const [showFullMenu, setShowFullMenu] = useState(false);
   const [publicReviews, setPublicReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [showMobileOrderCta, setShowMobileOrderCta] = useState(false);
   const loginHomeRef = useRef(null);
   const loginModalRef = useRef(null);
   const lastFocusedElementRef = useRef(null);
-
-  useGSAP(() => {
-    if (prefersReducedMotion()) return;
-    const isSmallScreen = window.matchMedia?.("(max-width: 620px)")?.matches;
-
-    gsap.from("[data-login-nav], [data-login-hero]", {
-      y: 24,
-      autoAlpha: 0,
-      duration: 0.72,
-      stagger: 0.08,
-      ease: "power3.out"
-    });
-
-    if (!isSmallScreen) {
-      const floatingElements = gsap.utils.toArray("[data-login-float]");
-      if (floatingElements.length) {
-        gsap.to(floatingElements, {
-          y: -10,
-          rotate: 1.5,
-          duration: 2.2,
-          stagger: 0.18,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut"
-        });
-      }
-    }
-
-    gsap.utils.toArray("[data-login-section]").forEach((section) => {
-      const revealItems = section.querySelectorAll("[data-login-reveal]");
-      if (!revealItems.length) return;
-      gsap.from(revealItems, {
-        y: 34,
-        autoAlpha: 0,
-        duration: isSmallScreen ? 0.42 : 0.58,
-        stagger: isSmallScreen ? 0.035 : 0.07,
-        ease: "power2.out",
-        scrollTrigger: {
-          trigger: section,
-          start: "top 84%",
-          once: true
-        }
-      });
-    });
-  }, { scope: loginHomeRef });
-
-  useGSAP(() => {
-    if (!loginModalOpen || prefersReducedMotion()) return;
-
-    gsap.from("[data-login-modal-panel]", {
-      y: 28,
-      scale: 0.98,
-      autoAlpha: 0,
-      duration: 0.32,
-      ease: "power3.out"
-    });
-
-    gsap.from("[data-login-modal-scrim]", {
-      autoAlpha: 0,
-      duration: 0.24,
-      ease: "power2.out"
-    });
-  }, { dependencies: [loginModalOpen], scope: loginModalRef });
 
   useEffect(() => {
     if (!loginModalOpen) return undefined;
@@ -330,6 +305,19 @@ function LoginPanel({ onLoggedIn }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const targetId = decodeURIComponent(window.location.hash.slice(1));
+    if (!targetId || targetId === "home") return undefined;
+
+    const scrollToTarget = () => document.getElementById(targetId)?.scrollIntoView({ block: "start" });
+    const frame = window.requestAnimationFrame(scrollToTarget);
+    const retry = window.setTimeout(scrollToTarget, 180);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(retry);
+    };
+  }, []);
+
   useEffect(() => subscribeMenu(fallbackMenu, setLandingMenu), []);
 
   useEffect(() => {
@@ -344,12 +332,19 @@ function LoginPanel({ onLoggedIn }) {
 
   useEffect(() => {
     let active = true;
+    const loadingFallback = window.setTimeout(() => {
+      if (!active) return;
+      setPublicReviews([]);
+      setReviewsLoading(false);
+    }, 4000);
     const unsubscribe = subscribePublicReviews((reviews) => {
       if (!active) return;
+      window.clearTimeout(loadingFallback);
       const visibleReviews = reviews.map((review) => ({
         id: review.id,
+        orderId: review.orderId,
         name: review.customerLabel || "TapTap customer",
-        rating: Number(review.rating || 0).toFixed(1),
+        rating: Number(review.rating || 0),
         quote: review.comment
       }));
       setPublicReviews(visibleReviews);
@@ -357,6 +352,7 @@ function LoginPanel({ onLoggedIn }) {
     });
     return () => {
       active = false;
+      window.clearTimeout(loadingFallback);
       unsubscribe?.();
     };
   }, []);
@@ -374,6 +370,7 @@ function LoginPanel({ onLoggedIn }) {
       if (next) url.searchParams.set("register", "true");
       else url.searchParams.delete("register");
       window.history.replaceState({}, "", url);
+      if (next) trackRegistrationStart(demoModeEnabled ? "demo" : "firebase");
       return next;
     });
     setRole("customer");
@@ -415,11 +412,16 @@ function LoginPanel({ onLoggedIn }) {
     setRegistrationSteps(registrationStepDefaults);
   };
 
-  const openLoginModal = (preferredRole) => {
+  const openLoginModal = (preferredRole, source = "landing") => {
+    trackLandingOrderEntry(source, preferredRole || role);
     lastFocusedElementRef.current = document.activeElement;
     if (preferredRole && !registering) selectRole(preferredRole);
     if (!preferredRole && role === "customer") setTeamAccessOpen(false);
     setLoginModalOpen(true);
+  };
+
+  const trackMenuView = (source) => {
+    trackLandingMenuView(source);
   };
 
   const closeLoginModal = () => {
@@ -455,12 +457,14 @@ function LoginPanel({ onLoggedIn }) {
         }
         const result = await registerCustomer(validation.values, updateRegistrationStep);
         setRegistrationResult(result);
+        trackRegistrationComplete(demoModeEnabled ? "demo" : "firebase");
         setPassword("");
         setConfirmPassword("");
         setTurnstileToken("");
         setTurnstileResetKey((current) => current + 1);
       } else {
         await login(email, password, role, demoAccounts);
+        trackLogin(demoModeEnabled ? "demo" : "firebase", role);
         onLoggedIn?.();
       }
     } catch (authError) {
@@ -478,13 +482,21 @@ function LoginPanel({ onLoggedIn }) {
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
   const passwordItems = passwordChecklist(password);
-  const orderingDetails = getOrderingDetails(openStatus);
+  const orderingDetails = getOrderingDetails();
   const popularMeals = getPopularMeals(landingMenu);
+  const menuCategories = getLandingMenuCategories(landingMenu);
+  const filteredMenuItems = getLandingMenuItems(landingMenu, activeMenuCategory);
+  const visibleMenuItems = showFullMenu ? filteredMenuItems : filteredMenuItems.slice(0, 8);
+  const reviewAverage = publicReviews.length
+    ? (publicReviews.reduce((total, review) => total + review.rating, 0) / publicReviews.length).toFixed(1)
+    : null;
   const startingPriceLabel = currency(getStartingMealPrice(landingMenu));
-  const heroBadges = [
-    openStatus.label,
-    `${formatPrepTime(websiteStoreConfig.prepTimeMinutes)} prep`,
-    paymentLabel()
+  const faqItems = [
+    { question: "When can I order?", answer: `Today's configured hours are ${openStatus.todayHoursLabel}. The status above refreshes automatically in ${websiteStoreConfig.timezone}.` },
+    { question: "How long does preparation take?", answer: `Most confirmed orders need about ${formatPrepTime(websiteStoreConfig.prepTimeMinutes)} before pickup or handoff.` },
+    { question: "Which order options are available?", answer: `${availableServiceLabel()} are currently configured. Delivery orders need an exact pin and a useful landmark.` },
+    { question: "How can I pay?", answer: `${paymentLabel()} are the customer payment options currently shown before confirmation.` },
+    { question: "Can I track or cancel an order?", answer: "Signed-in customers can follow status updates. Eligible orders can be cancelled while they are still pending or newly received." }
   ];
 
   const loginCard = (
@@ -673,20 +685,20 @@ function LoginPanel({ onLoggedIn }) {
 
   return (
     <main className="login-home" ref={loginHomeRef}>
-      <a className="login-skip-link" href="#popular-meals">Skip to menu</a>
+      <a className="login-skip-link" href="#popular-meals" onClick={() => trackMenuView("skip_link")}>Skip to menu</a>
       <header className="login-home-header" data-login-nav>
         <a className="brand-lockup login-home-brand" href="#home" aria-label="TapTap Foodtrip home">
           <BrandMark />
           <div><strong>TapTap</strong><small>FOODTRIP</small></div>
         </a>
         <nav className="login-home-nav" aria-label="Homepage sections">
-          <a href="#popular-meals">Menu</a>
+          <a href="#popular-meals" onClick={() => trackMenuView("nav_favorites")}>Favorites</a>
+          <a href="#browse-menu" onClick={() => trackMenuView("nav_menu")}>Menu</a>
           <a href="#how-ordering-works">How it works</a>
           <a href="#customer-reviews">Reviews</a>
         </nav>
         <div className="login-header-actions">
-          <button type="button" className="login-team-access" onClick={() => openLoginModal("owner")}>Team access</button>
-          <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal("customer")}>
+          <button type="button" className="btn btn-danger login-nav-cta" onClick={() => openLoginModal("customer", "nav_order")}>
             Order now <ArrowRight aria-hidden="true" size={16} strokeWidth={2.6} />
           </button>
         </div>
@@ -694,26 +706,26 @@ function LoginPanel({ onLoggedIn }) {
 
       <section className="login-screen" id="home" aria-label="TapTap Foodtrip homepage">
         <div className="login-visual">
-          <div className="login-restaurant-top" data-login-hero>
-            <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
+          <div className="login-status-line" data-login-hero aria-live="polite">
             <span className={`login-open-chip ${openStatus.open ? "is-open" : "is-closed"}`}>
               <i aria-hidden="true" /> {openStatus.label}
             </span>
+            <span className="login-status-detail">{openStatus.detail}</span>
           </div>
           <div className="login-restaurant-copy">
-            <p className="eyebrow" data-login-hero>Pinoy rice meals, ready your way</p>
-            <h1 data-login-hero>TapTap Foodtrip: rice meals from {startingPriceLabel}.</h1>
+            <p className="eyebrow" data-login-hero>Pinoy comfort food, made for your day</p>
+            <h1 data-login-hero>TapTap Foodtrip <span>rice meals</span></h1>
             <p className="login-hero-copy" data-login-hero>
-              Browse current favorites, then choose delivery, pickup, or walk-in when you are ready to order.
+              <span>Pinoy favorites from {startingPriceLabel}.</span>
+              <span>Available for {availableServiceSentence()}.</span>
             </p>
-            <div className="login-hero-badges" aria-label="TapTap ordering highlights" data-login-hero>
-              {heroBadges.map((badge) => <span key={badge}>{badge}</span>)}
-            </div>
             <div className="login-hero-actions" data-login-hero>
-              <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>
+              <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer", "hero_order")}>
                 Order now <ArrowRight aria-hidden="true" size={17} strokeWidth={2.6} />
               </button>
-              <a className="btn btn-outline-light" href="#popular-meals">View menu</a>
+              <a className="login-menu-link" href="#popular-meals" onClick={() => trackMenuView("hero_menu")}>
+                View menu <ArrowRight aria-hidden="true" size={16} strokeWidth={2.4} />
+              </a>
             </div>
           </div>
           <div className="login-hero-promise" data-login-hero>
@@ -721,29 +733,6 @@ function LoginPanel({ onLoggedIn }) {
             <div><strong>{websiteStoreConfig.customerPromise.label}</strong><small>{websiteStoreConfig.customerPromise.detail}</small></div>
           </div>
         </div>
-        <aside className="login-home-panel" data-login-hero aria-label="Order options">
-          <p className="eyebrow text-danger">Order your way</p>
-          <h2>Choose the handoff that fits your day.</h2>
-          <p>Browse without signing in. Your account is only needed when you confirm an order.</p>
-          <div className="login-service-choice-list">
-            {serviceModes.filter((item) => websiteStoreConfig.serviceAvailability[item.id]).map((item) => {
-              const Icon = item.icon;
-              return (
-                <article key={item.id}>
-                  <Icon aria-hidden="true" size={20} strokeWidth={2.3} />
-                  <div><strong>{item.title}</strong><small>{item.detail}</small></div>
-                </article>
-              );
-            })}
-          </div>
-          <div className="login-order-card-footer">
-            <div><small>Rice meals from</small><strong>{startingPriceLabel}</strong></div>
-            <button type="button" className="btn btn-danger" onClick={() => openLoginModal("customer")}>
-              Start order <ArrowRight aria-hidden="true" size={16} strokeWidth={2.6} />
-            </button>
-          </div>
-          <p className="login-service-area-note"><MapPin aria-hidden="true" size={17} /> {websiteStoreConfig.serviceAreaLabel}. {websiteStoreConfig.serviceAreaDetail}</p>
-        </aside>
       </section>
 
       <section className="login-trust-strip" aria-label="Store and ordering details">
@@ -766,25 +755,115 @@ function LoginPanel({ onLoggedIn }) {
             <p className="eyebrow text-danger">Popular meals</p>
             <h2>Start with a TapTap favorite.</h2>
           </div>
-          <p>Names, prices, and availability come from the current customer menu.</p>
+          <div className="login-section-sidecopy">
+            <p>Prices and availability come directly from the current customer menu.</p>
+            <a href="#browse-menu" onClick={() => trackMenuView("popular_full_menu")}>Browse the full menu <ArrowRight aria-hidden="true" size={15} /></a>
+          </div>
         </div>
         <div className="login-meal-showcase">
           {popularMeals.map((meal) => (
             <article className="login-meal-card" key={meal.id} data-login-reveal>
-              <img src={meal.image} alt={meal.name} loading="lazy" width={300} height={300} decoding="async" />
+              <img src={meal.image} alt={`${meal.name} rice meal`} loading="lazy" width={360} height={270} decoding="async" sizes="(max-width: 620px) 112px, (max-width: 1100px) 45vw, 280px" />
               <div>
                 <span className="login-meal-tag">{meal.availabilityLabel}</span>
                 <strong>{meal.name}</strong>
                 <p>{meal.detail}</p>
                 <div className="login-meal-card-actions">
                   <span className="login-price-pill">{currency(meal.price)}</span>
-                  <button type="button" className="btn btn-outline-danger btn-sm" aria-label={`Order ${meal.name}`} onClick={() => openLoginModal("customer")}>
-                    Order this <ArrowRight aria-hidden="true" size={15} strokeWidth={2.5} />
+                  <button type="button" className="btn btn-outline-danger btn-sm" aria-label={`Sign in to order ${meal.name}`} onClick={() => openLoginModal("customer", "popular_meal")}>
+                    Sign in to order <ArrowRight aria-hidden="true" size={15} strokeWidth={2.5} />
                   </button>
                 </div>
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="login-business-section login-menu-browser" id="browse-menu" data-login-section>
+        <div className="login-section-heading login-section-heading-split" data-login-reveal>
+          <div>
+            <p className="eyebrow text-danger">Current menu</p>
+            <h2>Browse before you sign in.</h2>
+          </div>
+          <p>Filter the live menu, check what is available, then sign in when you are ready to order.</p>
+        </div>
+        <div className="login-menu-categories" role="group" aria-label="Filter menu by category" data-login-reveal>
+          {["all", ...menuCategories].map((category) => (
+            <button
+              type="button"
+              key={category}
+              className={activeMenuCategory === category ? "active" : ""}
+              aria-pressed={activeMenuCategory === category}
+              onClick={() => {
+                setActiveMenuCategory(category);
+                setShowFullMenu(false);
+              }}
+            >
+              {landingCategoryLabels[category] || category}
+            </button>
+          ))}
+        </div>
+        <div className="login-menu-browser-grid">
+          {visibleMenuItems.map((meal) => {
+            const availability = menuAvailability(meal);
+            const orderable = isMenuItemOrderable(meal);
+            return (
+              <article className="login-menu-browser-card" key={meal.id} data-login-reveal>
+                <img src={meal.image} alt={meal.name} loading="lazy" width={320} height={240} decoding="async" sizes="(max-width: 620px) 96px, (max-width: 1000px) 42vw, 260px" />
+                <div>
+                  <span className={`login-meal-tag ${orderable ? "is-available" : "is-unavailable"}`}>
+                    {orderable ? availability.label : "Unavailable"}
+                  </span>
+                  <strong>{meal.name}</strong>
+                  <small>{landingCategoryLabels[meal.category] || meal.category}</small>
+                  <div className="login-menu-browser-actions">
+                    <b>{currency(meal.price)}</b>
+                    <button type="button" className="btn btn-outline-danger btn-sm" disabled={!orderable} onClick={() => openLoginModal("customer", "menu_item")}>
+                      {orderable ? "Sign in to order" : "Unavailable"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        {filteredMenuItems.length > 8 && (
+          <button type="button" className="login-menu-expand" aria-expanded={showFullMenu} onClick={() => setShowFullMenu((current) => !current)}>
+            {showFullMenu ? "Show fewer meals" : `View full ${landingCategoryLabels[activeMenuCategory] || "menu"}`}
+            <ChevronDown aria-hidden="true" size={17} />
+          </button>
+        )}
+      </section>
+
+      <section className="login-business-section login-service-section" id="service-options" data-login-section>
+        <div className="login-section-heading login-section-heading-split" data-login-reveal>
+          <div>
+            <p className="eyebrow text-danger">Order your way</p>
+            <h2>Choose the handoff that fits your day.</h2>
+          </div>
+          <p>Ordering details stay simple and use the same checkout flow already connected to your account.</p>
+        </div>
+        <div className="login-service-layout">
+          <div className="login-service-choice-list">
+            {serviceModes.filter((item) => websiteStoreConfig.serviceAvailability[item.id]).map((item) => {
+              const Icon = item.icon;
+              return (
+                <article key={item.id} data-login-reveal>
+                  <Icon aria-hidden="true" size={21} strokeWidth={2.3} />
+                  <div><strong>{item.title}</strong><small>{item.detail}</small></div>
+                </article>
+              );
+            })}
+          </div>
+          <aside className="login-coverage-note" data-login-reveal aria-label="Delivery coverage note">
+            <MapPin aria-hidden="true" size={22} strokeWidth={2.3} />
+            <div>
+              <span>Delivery coverage</span>
+              <strong>{websiteStoreConfig.serviceAreaLabel}</strong>
+              <p>{websiteStoreConfig.serviceAreaDetail}</p>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -805,45 +884,85 @@ function LoginPanel({ onLoggedIn }) {
         </div>
       </section>
 
-      <section className="login-business-section login-review-section" id="customer-reviews" data-login-section>
+      <section className={`login-business-section login-review-section ${!reviewsLoading && publicReviews.length === 0 ? "is-empty" : ""}`} id="customer-reviews" data-login-section>
         <div className="login-section-heading compact" data-login-reveal>
           <p className="eyebrow text-danger">Approved customer reviews</p>
           <h2>Feedback shared after real TapTap orders.</h2>
-          <p>Only reviews approved for public display appear on this page.</p>
+          <p>{reviewAverage ? `${reviewAverage} average from ${publicReviews.length} approved public ${publicReviews.length === 1 ? "review" : "reviews"}.` : "Only approved customer feedback appears here."}</p>
         </div>
         <div className="login-review-grid" aria-live="polite">
           {reviewsLoading && (
-            <article className="login-review-state" data-login-reveal>
-              <strong>Loading recent reviews...</strong>
-              <p>Checking approved public feedback.</p>
-            </article>
+            <p className="login-review-state" data-login-reveal>Loading approved customer feedback...</p>
           )}
           {!reviewsLoading && publicReviews.length === 0 && (
-            <article className="login-review-state" data-login-reveal>
-              <strong>No public reviews yet.</strong>
-              <p>Approved customer feedback will appear here when available.</p>
-            </article>
+            <p className="login-review-state" data-login-reveal>Approved customer feedback will appear here when available.</p>
           )}
           {!reviewsLoading && publicReviews.slice(0, 3).map((review, index) => (
             <article key={review.id || `${review.name}-${index}`} data-login-reveal>
-              <div className="login-review-rating" aria-label={`${review.rating} out of 5 rating`}>
+              <div className="login-review-rating" aria-label={`${review.rating.toFixed(1)} out of 5 rating`}>
                 <Star aria-hidden="true" size={16} fill="currentColor" strokeWidth={2.4} />
-                <strong>{review.rating}</strong>
+                <strong>{review.rating.toFixed(1)}</strong>
               </div>
               <p>{review.quote}</p>
-              <span>{review.name}</span>
+              <span>{review.name}{review.orderId && <small><ShieldCheck aria-hidden="true" size={14} /> Verified order</small>}</span>
             </article>
           ))}
         </div>
       </section>
 
+      <section className="login-business-section login-location-section" id="location-hours" data-login-section>
+        <div className="login-section-heading login-section-heading-split" data-login-reveal>
+          <div>
+            <p className="eyebrow text-danger">Coverage and hours</p>
+            <h2>Plan the handoff before checkout.</h2>
+          </div>
+          <p>These details come from the same typed store configuration used by the live status above.</p>
+        </div>
+        <div className="login-location-layout">
+          <article data-login-reveal>
+            <MapPin aria-hidden="true" size={22} strokeWidth={2.3} />
+            <div>
+              <span>Service area</span>
+              <strong>{websiteStoreConfig.serviceAreaLabel}</strong>
+              <p>{websiteStoreConfig.serviceAreaDetail}</p>
+            </div>
+          </article>
+          <article className="login-hours-panel" data-login-reveal>
+            <Clock aria-hidden="true" size={22} strokeWidth={2.3} />
+            <div>
+              <span>Weekly store hours</span>
+              <dl>
+                {websiteStoreConfig.hours.map((hours) => (
+                  <div key={hours.day}><dt>{hours.label}</dt><dd>{formatStoreHoursLabel(hours)}</dd></div>
+                ))}
+              </dl>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section className="login-business-section login-faq-section" id="frequently-asked" data-login-section>
+        <div className="login-section-heading compact" data-login-reveal>
+          <p className="eyebrow text-danger">Before you order</p>
+          <h2>Quick answers to common questions.</h2>
+        </div>
+        <div className="login-faq-list">
+          {faqItems.map((item) => (
+            <details key={item.question} data-login-reveal>
+              <summary>{item.question}<ChevronDown aria-hidden="true" size={18} /></summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
       <section className="login-final-cta" data-login-section>
-        <div data-login-reveal>
+        <div>
           <p className="eyebrow">Ready for your next meal?</p>
           <h2>Choose a favorite and start your foodtrip.</h2>
           <p>Browse first, confirm the total, and track the order from one customer account.</p>
         </div>
-        <button type="button" className="btn btn-warning login-bottom-cta" onClick={() => openLoginModal("customer")} data-login-reveal>
+        <button type="button" className="btn btn-warning login-bottom-cta" onClick={() => openLoginModal("customer", "final_order")}>
           Order now <ArrowRight aria-hidden="true" size={17} strokeWidth={2.6} />
         </button>
       </section>
@@ -855,7 +974,7 @@ function LoginPanel({ onLoggedIn }) {
             <p>{websiteStoreConfig.customerPromise.detail}</p>
           </div>
           <div className="login-footer-facts">
-            <div><Clock aria-hidden="true" size={18} /><span><strong>{openStatus.todayHoursLabel}</strong><small>{openStatus.label}</small></span></div>
+            <div><Clock aria-hidden="true" size={18} /><span><strong>{openStatus.todayHoursLabel}</strong><small>Today's hours</small></span></div>
             <div><Truck aria-hidden="true" size={18} /><span><strong>{availableServiceLabel()}</strong><small>{websiteStoreConfig.serviceAreaLabel}</small></span></div>
             <div><CreditCard aria-hidden="true" size={18} /><span><strong>{paymentLabel()}</strong><small>Payment options</small></span></div>
           </div>
@@ -864,20 +983,20 @@ function LoginPanel({ onLoggedIn }) {
             <span>Secure sign-in for store operations.</span>
             <div>
               {loginRoleOptions.filter((item) => item.id !== "customer").map((item) => (
-                <button type="button" key={item.id} onClick={() => openLoginModal(item.id)}>{item.label}</button>
+                <button type="button" key={item.id} onClick={() => openLoginModal(item.id, "footer_team")}>{item.label}</button>
               ))}
             </div>
           </div>
         </div>
         <div className="login-footer-bottom">
-          <span>© {new Date().getFullYear()} TapTap Foodtrip</span>
-          <button type="button" onClick={() => openLoginModal("customer")}>Customer sign in</button>
+          <span>&copy; {new Date().getFullYear()} TapTap Foodtrip</span>
+          <button type="button" onClick={() => openLoginModal("customer", "footer_sign_in")}>Customer sign in</button>
         </div>
       </footer>
 
       <div className={`login-mobile-sticky-cta ${showMobileOrderCta ? "is-visible" : ""}`} aria-label="Quick customer ordering">
         <span>Meals from {startingPriceLabel}</span>
-        <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer")}>
+        <button type="button" className="btn btn-warning" onClick={() => openLoginModal("customer", "mobile_sticky_order")}>
           Order now
         </button>
       </div>

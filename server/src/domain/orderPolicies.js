@@ -32,8 +32,11 @@ export function validateOrderItems(items) {
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new HttpError(400, "Add between 1 and 50 order items.");
   }
+  const productIds = new Set();
   return items.map((item) => {
     if (!validRecordId(item?.id)) throw new HttpError(400, "An order item has an invalid product ID.");
+    if (productIds.has(item.id)) throw new HttpError(400, "Each product may appear only once in an order.");
+    productIds.add(item.id);
     const qty = Number(item.qty);
     if (!Number.isInteger(qty) || qty < 1 || qty > 50) {
       throw new HttpError(400, "Item quantities must be whole numbers from 1 to 50.");

@@ -45,8 +45,12 @@ screens receive them. Subscriptions return cleanup functions and are removed by 
 
 | Area | Location | Responsibility |
 | --- | --- | --- |
-| Transport | `server/src/index.js` | Express routes, status endpoint, request mapping, and Socket.IO setup |
-| Middleware | `server/src/middleware/` | Headers, rate limits, authentication, role checks, and validation helpers |
+| Startup | `server/src/index.js` | Dependency composition, HTTP startup, signals, and graceful shutdown |
+| HTTP transport | `server/src/app.js` and `server/src/routes/` | Express configuration, route mapping, health endpoints, and response contracts |
+| Socket transport | `server/src/sockets/` and `server/src/realtime/` | Authenticated rooms, rider updates, and server-side event publishing |
+| Configuration | `server/src/config/` and `server/src/integrations/firebaseAdmin.js` | Validated environment configuration and isolated Admin SDK bootstrap |
+| Middleware | `server/src/middleware/` | Request IDs, rate limits, revoked-token authentication, role checks, runtime validation, and centralized errors |
+| Observability | `server/src/observability/` | Structured JSON event logging without customer payloads or secrets |
 | Application boundaries | `server/src/application/` | Stable use-case imports grouped by orders, catalog, feedback, delivery, and workforce |
 | Domain | `server/src/domain/` | Order transitions, authorization policies, idempotency, aggregates, and 2FA policy |
 | Repository | `server/src/repositories/firebaseRepository.js` | Firebase read, update, and transaction operations |
@@ -80,8 +84,14 @@ core explicitly and rerun the complete test suite.
 The backend applies these invariants:
 
 - Clients send item IDs and quantities; the server reloads prices and recalculates totals.
-- Order creation keys prevent accidental duplicate submissions for seven days.
-- Stock deduction, cancellation restoration, and rider claims use Firebase transactions.
+- Order creation keys prevent accidental duplicate submissions for seven days. The server binds
+  each key to a request fingerprint, so reusing a key for different order data is rejected.
+- Stock deduction, cancellation restoration, and rider claims use Firebase transactions. Cancellation
+  recovery uses a transaction-owned marker so a retry can finish history and aggregate writes without
+  returning stock twice.
+- Role-specific order queries use indexed customer, rider, status, and archive fields instead of
+  loading unrelated role data. API callers can opt into bounded cursor pagination without breaking the
+  legacy unpaginated response. Unassigned rider jobs come from a private-data-safe projection.
 - Inventory and payment movements are append-only server records.
 - Daily sales aggregates use Asia/Manila date keys and server increment operations.
 - Available rider jobs use a sanitized projection without customer address or private details.
@@ -126,6 +136,7 @@ must never be sent to Analytics. Event definitions, funnel setup, and reporting 
 | Variable | Purpose |
 | --- | --- |
 | `PORT`, `CLIENT_ORIGIN` | Local HTTP port and allowed website origin |
+| `TRUST_PROXY`, `SHUTDOWN_TIMEOUT_MS` | Known proxy hop count and graceful shutdown deadline |
 | `FIREBASE_DATABASE_URL` | Admin SDK Realtime Database target |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Ignored local service-account path or use application-default credentials |
 | `TWO_FACTOR_ENCRYPTION_KEY` | Server-only TOTP secret encryption key |
@@ -134,6 +145,22 @@ must never be sent to Analytics. Event definitions, funnel setup, and reporting 
 | `ENABLE_OPENAI`, `ENABLE_TWILIO`, `ENABLE_PAYMONGO` | Explicit provider opt-ins; keep `false` while deferred |
 
 Never put server secrets in `client/.env` or commit any `.env` file.
+
+## Backend Operations
+
+- `GET /health/live` confirms that the Node process can serve HTTP.
+- `GET /health/ready` returns success only when Firebase Admin is ready.
+- Every response includes `X-Request-ID`; a valid caller-supplied ID is preserved for tracing.
+- API failures use a centralized JSON error shape. Raw Firebase initialization failures are not public.
+- Structured logs redact credentials, contact details, addresses, delivery locations, proof data, OTPs,
+  and signatures. Unexpected HTTP and Socket.IO failures return generic public errors with traceable codes.
+- Firebase ID tokens are checked for revocation on API and Socket.IO authentication.
+- Owner role changes preserve unrelated claims, revoke refresh tokens, and prevent demoting the final owner.
+- Owner account suspension disables Firebase Authentication access, revokes refresh tokens, records an
+  audit event, prevents suspension of the final owner, and is available from the owner user dashboard.
+- Order creation accepts `Idempotency-Key`; identical retries replay the original result without a second
+  stock deduction, while a different payload with the same key returns a conflict.
+- The production container runs as the unprivileged Node user and checks `/health/live`.
 
 ### Demo Versus Production
 
@@ -178,7 +205,13 @@ npm run test:e2e
 `npm run test:rules` starts the Database emulator and requires Java. Playwright starts isolated
 demo servers on ports 4173 and 8181. It covers the landing and registration flow, COD checkout,
 owner reports, staff POS/order queue, rider delivery/proof workflow, console errors,
-accessibility, touch targets, and 375 px overflow.
+accessibility, touch targets, and responsive layouts at 320x700, 375x812, 430x932, 768x1024,
+812x375, and desktop widths.
+
+`npm run validate:release` runs every required release gate in order. Both deployment commands invoke
+it first, so a failed typecheck, lint, build, bundle budget, preview smoke, server test, Rules test, or
+Playwright test prevents Firebase deployment. The GitHub validation workflow runs the same gates with
+Node.js 22 and Java 21 on every push and pull request.
 
 ## Free-Service Boundary
 

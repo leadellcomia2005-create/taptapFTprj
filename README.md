@@ -146,8 +146,8 @@ when you run `npm run dev`; no Cloud Functions, Cloud Run or App Hosting
 deployment is required.
 
 - Keep billing disabled in the Firebase Console.
-- Run `npm run deploy` only to build the client and deploy Realtime Database
-  rules.
+- Run `npm run deploy` only after installing the test prerequisites. It runs the
+  complete release validation gate, then deploys Realtime Database rules only.
 - Do not run `npm run deploy:paid-services` unless you intentionally upgrade
   the Firebase project and configure the paid services.
 - Firebase Storage proof uploads remain disabled in the free setup. Compressed
@@ -171,7 +171,8 @@ This repository is linked to Firebase project
    custom role claims, menu, store details and inventory.
 6. Leave Storage, Cloud Functions, Cloud Run and App Hosting undeployed to
    keep this setup free.
-7. The default `npm run deploy` command deploys Database rules only.
+7. The default `npm run deploy` command runs the complete release validation
+   gate and deploys Database rules only when every check passes.
 8. Keep OpenAI, Twilio, and PayMongo credentials empty during the current
    update. Their optional integrations are deferred.
 9. The paid deployment command remains intentionally separate and must not be

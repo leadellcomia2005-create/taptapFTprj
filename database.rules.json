@@ -25,7 +25,7 @@
     },
     "orders": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid) || (auth.token.role == 'rider' && query.orderByChild == 'riderId' && query.equalTo == auth.uid))",
-      ".indexOn": ["customerId", "riderId", "status"],
+      ".indexOn": ["customerId", "riderId", "status", "archivedAt", "cashierId", "source", "createdAt"],
       "$orderId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (data.child('customerId').val() == auth.uid || data.child('riderId').val() == auth.uid || auth.token.role == 'owner' || auth.token.role == 'staff')",
         ".write": false
@@ -81,11 +81,22 @@
     "auditLogs": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'",
       ".write": false,
-      ".indexOn": ["userId"]
+      ".indexOn": ["userId", "createdAt"]
     },
     "shiftLogs": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff')",
-      ".write": false
+      ".write": false,
+      ".indexOn": ["staffId", "createdAt"]
+    },
+    "complaints": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["customerId", "status", "createdAt"]
+    },
+    "approvalRequests": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["requesterId", "status", "createdAt"]
     },
     "reviews": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid))",

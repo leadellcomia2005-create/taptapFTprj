@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, MapPin, PackageCheck, RotateCcw, Star } from "lucide-react";
+import { Clock3, MapPin, PackageCheck, Phone, ReceiptText, RotateCcw, Star, WalletCards } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { api } from "../../services/api";
@@ -8,109 +8,40 @@ import { createOrder, resendReceiptEmail, updateOrder } from "../../services/fir
 import { saveUserProfile } from "../../services/firebase/users";
 import { currency, statusLabel } from "../../utils/display";
 import { createRequestKey } from "../../utils/operations";
+import {
+  complaintTypes,
+  customerSecurityMethodLabels,
+  defaultStorePin,
+  formatProfileDate,
+  isValidPhilippineMobile,
+  locationToMarker,
+  normalizePhilippinePhone,
+  phoneIsVerified,
+  readCheckoutDraft,
+  removeCheckoutDraft,
+  sanitizeCheckoutLocation,
+  writeCheckoutDraft
+} from "./customerHelpers";
 
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));
 
-const defaultStorePin = {
-  lat: Number(import.meta.env.VITE_STORE_LATITUDE || 14.4509229),
-  lng: Number(import.meta.env.VITE_STORE_LONGITUDE || 120.9764514),
-  accuracy: 0,
-  source: "map-picker"
-};
-
-function normalizePhilippinePhone(value = "") {
-  const digits = String(value).replace(/\D/g, "");
-  if (digits.startsWith("639") && digits.length === 12) return `+${digits}`;
-  if (digits.startsWith("09") && digits.length === 11) return `+63${digits.slice(1)}`;
-  if (digits.startsWith("9") && digits.length === 10) return `+63${digits}`;
-  return value.trim();
-}
-
-function isValidPhilippineMobile(value = "") {
-  return /^\+639\d{9}$/.test(value);
-}
-
-function locationToMarker(location) {
-  const lat = Number(location?.lat);
-  const lng = Number(location?.lng);
-  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
-}
-
-function phoneIsVerified(profile, phone) {
-  const normalized = normalizePhilippinePhone(phone);
-  return Boolean(profile?.phoneVerified && normalizePhilippinePhone(profile?.phone || "") === normalized);
-}
-
-function formatProfileDate(value) {
-  const timestamp = Number(value || 0);
-  if (!timestamp) return "";
-  return new Date(timestamp).toLocaleString("en-PH");
-}
-
-const customerSecurityMethodLabels = {
-  passkey: "Passkey",
-  totp: "Security app",
-  email: "Email code",
-  sms: "SMS code"
-};
-
-const complaintTypes = [
-  ["wrong-item", "Wrong item"],
-  ["missing-item", "Missing item"],
-  ["late-order", "Late order"],
-  ["bad-food", "Bad food"]
-];
-
-const CHECKOUT_DRAFT_VERSION = 1;
-const checkoutDraftStorageKey = (userId) => `taptap-checkout:v${CHECKOUT_DRAFT_VERSION}:${userId}`;
-
-function readCheckoutDraft(userId, paymongoEnabled) {
-  if (!userId) return null;
-  try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(checkoutDraftStorageKey(userId)) || "null");
-    if (parsed?.version !== CHECKOUT_DRAFT_VERSION) return null;
-    return {
-      deliveryType: parsed.deliveryType === "pickup" ? "pickup" : "delivery",
-      payment: parsed.payment === "gcash" && paymongoEnabled ? "gcash" : "cod",
-      phone: String(parsed.phone || "").slice(0, 32),
-      address: String(parsed.address || "").slice(0, 300),
-      landmark: String(parsed.landmark || "").slice(0, 160),
-      notes: String(parsed.notes || "").slice(0, 400)
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeCheckoutDraft(userId, draft) {
-  if (!userId) return;
-  try {
-    window.sessionStorage.setItem(checkoutDraftStorageKey(userId), JSON.stringify({
-      version: CHECKOUT_DRAFT_VERSION,
-      deliveryType: draft.deliveryType,
-      payment: draft.payment,
-      phone: String(draft.phone || "").slice(0, 32),
-      address: String(draft.address || "").slice(0, 300),
-      landmark: String(draft.landmark || "").slice(0, 160),
-      notes: String(draft.notes || "").slice(0, 400)
-    }));
-  } catch {
-    // Checkout remains usable when session storage is blocked or full.
-  }
-}
-
-function removeCheckoutDraft(userId) {
-  if (!userId) return;
-  try {
-    window.sessionStorage.removeItem(checkoutDraftStorageKey(userId));
-  } catch {
-    // Storage cleanup is best effort and must not block an order.
-  }
+function CheckoutSectionHeading({ icon: Icon, id, title, detail }) {
+  return (
+    <div className="checkout-section-heading">
+      <span className="checkout-section-icon"><Icon size={18} aria-hidden="true" /></span>
+      <div><h3 id={id}>{title}</h3>{detail && <p>{detail}</p>}</div>
+    </div>
+  );
 }
 
 export function Checkout({ cart, user, profile, online = true, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
   const orderRequestKeyRef = useRef("");
   const checkoutCompletedRef = useRef(false);
+  const placingRef = useRef(false);
+  const phoneInputRef = useRef(null);
+  const addressInputRef = useRef(null);
+  const pinActionRef = useRef(null);
+  const validationSummaryRef = useRef(null);
   const defaultPayment = paymongoEnabled ? "gcash" : "cod";
   const [checkoutDefaults] = useState(() => {
     const baseline = {
@@ -119,7 +50,8 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
       phone: profile?.phone || "",
       address: profile?.address || "",
       landmark: profile?.landmark || "",
-      notes: ""
+      notes: "",
+      deliveryLocation: sanitizeCheckoutLocation(profile?.deliveryLocation)
     };
     const stored = readCheckoutDraft(user.uid, paymongoEnabled);
     return { baseline, initial: stored || baseline, restored: Boolean(stored) };
@@ -131,11 +63,13 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   const [phone, setPhone] = useState(initialDraft?.phone || profile?.phone || "");
   const [address, setAddress] = useState(initialDraft?.address || profile?.address || "");
   const [landmark, setLandmark] = useState(initialDraft?.landmark || profile?.landmark || "");
-  const [deliveryLocation, setDeliveryLocation] = useState(profile?.deliveryLocation || null);
+  const [deliveryLocation, setDeliveryLocation] = useState(initialDraft?.deliveryLocation || sanitizeCheckoutLocation(profile?.deliveryLocation));
   const [smsOptIn, setSmsOptIn] = useState(Boolean(profile?.smsNotifications || profile?.smsNotificationsRequested));
   const [locating, setLocating] = useState(false);
   const [notes, setNotes] = useState(initialDraft?.notes || "");
   const [busy, setBusy] = useState(false);
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [touched, setTouched] = useState({ phone: false, address: false });
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryFee = deliveryType === "delivery" && cart.length > 0 ? 49 : 0;
   const total = subtotal + deliveryFee;
@@ -157,8 +91,12 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
           ? "Confirm the delivery pin."
           : "";
   const checkoutReady = !checkoutBlockReason;
-  const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Cash at pickup";
-  const cashPaymentDetail = deliveryType === "delivery" ? "Pay the rider on handoff" : "Pay at the counter when claiming";
+  const phoneInvalid = needsPhone && (attemptedSubmit || touched.phone);
+  const addressInvalid = needsDeliveryAddress && (attemptedSubmit || touched.address);
+  const pinInvalid = needsDeliveryPin && attemptedSubmit;
+  const effectivePayment = payment === "gcash" && paymongoEnabled ? "gcash" : "cod";
+  const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Pay on pickup";
+  const cashPaymentDetail = deliveryType === "delivery" ? "Pay the rider on handoff" : "Pay at the counter";
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -168,15 +106,19 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   }, [onClose]);
 
   useEffect(() => {
+    if (payment !== effectivePayment) setPayment(effectivePayment);
+  }, [effectivePayment, payment]);
+
+  useEffect(() => {
     if (checkoutCompletedRef.current) return;
-    const draft = { deliveryType, payment, phone, address, landmark, notes };
+    const draft = { deliveryType, payment: effectivePayment, phone, address, landmark, notes, deliveryLocation: sanitizeCheckoutLocation(deliveryLocation) };
     const matchesBaseline = JSON.stringify(draft) === JSON.stringify(baselineDraft);
     if (!draftRestored && matchesBaseline) {
       removeCheckoutDraft(user.uid);
       return;
     }
     writeCheckoutDraft(user.uid, draft);
-  }, [address, baselineDraft, deliveryType, draftRestored, landmark, notes, payment, phone, user.uid]);
+  }, [address, baselineDraft, deliveryLocation, deliveryType, draftRestored, effectivePayment, landmark, notes, phone, user.uid]);
 
   const clearCheckoutDraft = () => {
     removeCheckoutDraft(user.uid);
@@ -186,8 +128,10 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
     setAddress(baselineDraft.address);
     setLandmark(baselineDraft.landmark);
     setNotes(baselineDraft.notes);
-    setDeliveryLocation(profile?.deliveryLocation || null);
+    setDeliveryLocation(baselineDraft.deliveryLocation || null);
     setDraftRestored(false);
+    setAttemptedSubmit(false);
+    setTouched({ phone: false, address: false });
     notify("Saved checkout details cleared.");
   };
 
@@ -224,19 +168,35 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
       source: current?.source === "gps" ? "gps-adjusted" : "map-picker"
     }));
   };
-  const place = async () => {
-    if (!online || !navigator.onLine) {
-      notify("You are offline. Reconnect before placing an order.");
+  const focusFirstCheckoutIssue = (offline = false) => {
+    const target = offline
+      ? validationSummaryRef.current
+      : needsPhone
+        ? phoneInputRef.current
+        : needsDeliveryAddress
+          ? addressInputRef.current
+          : needsDeliveryPin
+            ? pinActionRef.current
+            : validationSummaryRef.current;
+    window.requestAnimationFrame(() => {
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({
+        block: "center",
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+      });
+    });
+  };
+  const place = async (event) => {
+    event?.preventDefault();
+    if (placingRef.current) return;
+    setAttemptedSubmit(true);
+    const offline = !online || !navigator.onLine;
+    if (offline || !checkoutReady) {
+      notify(offline ? "Reconnect to the internet before placing the order." : checkoutBlockReason);
+      focusFirstCheckoutIssue(offline);
       return;
     }
-    if (!validPhone || (deliveryType === "delivery" && !address.trim())) {
-      notify(deliveryType === "delivery" ? "Enter a mobile number and delivery address before placing the order." : "Enter a mobile number before placing the order.");
-      return;
-    }
-    if (deliveryType === "delivery" && !deliveryMarker) {
-      notify("Confirm the exact delivery pin before placing the order.");
-      return;
-    }
+    placingRef.current = true;
     setBusy(true);
     try {
       const orderPayload = {
@@ -259,7 +219,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
         } : null,
         deliveryType,
         notes,
-        paymentMethod: payment,
+        paymentMethod: effectivePayment,
         total,
         items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
       };
@@ -268,7 +228,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
       checkoutCompletedRef.current = true;
       removeCheckoutDraft(user.uid);
       setDraftRestored(false);
-      if (payment === "gcash") {
+      if (effectivePayment === "gcash") {
         try {
           const result = await api.createPayment({ orderId });
           if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
@@ -283,6 +243,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
     } catch (error) {
       notify(error.message || "The order could not be placed. Please try again.");
     } finally {
+      placingRef.current = false;
       setBusy(false);
     }
   };
@@ -295,8 +256,8 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <div className="modal-header"><h5 className="modal-title" id="checkout-title">Secure checkout</h5><button className="btn-close" aria-label="Close checkout" onClick={onClose} /></div>
+        <form className="modal-content checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title" aria-busy={busy} noValidate onSubmit={place}>
+          <div className="modal-header"><h2 className="modal-title" id="checkout-title">Secure checkout</h2><button className="btn-close" type="button" aria-label="Close checkout" onClick={onClose} /></div>
           <div className="modal-body">
             {draftRestored && (
               <div className="checkout-draft-notice" role="status">
@@ -304,62 +265,91 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
                 <button className="btn btn-sm btn-outline-dark" type="button" onClick={clearCheckoutDraft}>Clear</button>
               </div>
             )}
-            {cart.map((item) => <div className="d-flex justify-content-between border-bottom py-2" key={item.id}><span>{item.qty}× {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
-            <div className="checkout-mode-grid mt-3" aria-label="Order type">
-              <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>Rider delivery with fee and drop-off pin</small></button>
-              <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>No delivery fee, claim at store</small></button>
-            </div>
-            <label className="form-label mt-3">Mobile number <span className="checkout-required">Required</span><input className={`form-control ${phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" aria-describedby="checkout-phone-hint" aria-invalid={Boolean(phone && !validPhone)} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" /></label>
-            <small className={`checkout-field-hint ${phone && !validPhone ? "error" : ""}`} id="checkout-phone-hint">{phone && !validPhone ? "Use a valid PH mobile number such as 0917 123 4567." : "Used for order updates, receipts, and rider handoff."}</small>
-            <div className="checkout-sms-panel">
-              <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
-              <div className="checkout-sms-actions">
-                <label className="checkout-sms-checkbox"><input type="checkbox" disabled={!smsReady} checked={Boolean(smsReady && smsOptIn)} onChange={(event) => setSmsOptIn(event.target.checked)} /> Send me SMS order updates</label>
-                {!verifiedPhone && <button className="btn btn-sm btn-outline-dark" type="button" disabled={!validPhone || !smsProviderEnabled} onClick={verifyPhone}>Verify phone</button>}
+
+            <section className="checkout-section" aria-labelledby="checkout-order-type-title">
+              <CheckoutSectionHeading icon={PackageCheck} id="checkout-order-type-title" title="Order type" detail="Choose delivery or store pickup." />
+              <div className="checkout-mode-grid" role="group" aria-label="Order type">
+                <button className={deliveryType === "delivery" ? "active" : ""} type="button" aria-pressed={deliveryType === "delivery"} onClick={() => setDeliveryType("delivery")}><strong>Delivery</strong><small>Rider delivery with fee and drop-off pin</small></button>
+                <button className={deliveryType === "pickup" ? "active" : ""} type="button" aria-pressed={deliveryType === "pickup"} onClick={() => setDeliveryType("pickup")}><strong>Pickup</strong><small>No delivery fee, claim at store</small></button>
               </div>
-              <small>{smsReady ? "SMS order updates can be sent to this verified number." : smsProviderEnabled ? "Verify this phone first before SMS updates can be enabled." : "Phone OTP and SMS updates are not connected yet."}</small>
-            </div>
-            {deliveryType === "delivery" && <>
-              <div className="checkout-address-stack">
-                <label className="form-label">Delivery address <span className="checkout-required">Required</span><textarea className={`form-control ${needsDeliveryAddress ? "is-invalid" : ""}`} autoComplete="street-address" aria-describedby="checkout-address-hint" aria-invalid={needsDeliveryAddress} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" /></label>
-                <small className={`checkout-field-hint ${needsDeliveryAddress ? "error" : ""}`} id="checkout-address-hint">{needsDeliveryAddress ? "Add a complete address before placing a delivery order." : "Include barangay, street, house number, or building name."}</small>
-                <label className="form-label">Landmark<input className="form-control" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></label>
+            </section>
+
+            <section className="checkout-section" aria-labelledby="checkout-contact-title">
+              <CheckoutSectionHeading icon={Phone} id="checkout-contact-title" title="Contact details" detail="Used for receipts and rider handoff." />
+              <div>
+                <label className="form-label" htmlFor="checkout-phone">Mobile number <span className="checkout-required">Required</span></label>
+                <input ref={phoneInputRef} className={`form-control ${phoneInvalid ? "is-invalid" : ""}`} id="checkout-phone" type="tel" inputMode="tel" autoComplete="tel" aria-describedby="checkout-phone-hint" aria-invalid={phoneInvalid} value={phone} onBlur={() => setTouched((current) => ({ ...current, phone: true }))} onChange={(event) => setPhone(event.target.value)} placeholder="0917 123 4567" />
+                <small className={`checkout-field-hint ${phoneInvalid ? "error" : ""}`} id="checkout-phone-hint" role={phoneInvalid ? "alert" : undefined}>{phoneInvalid ? "Use a valid Philippine mobile number such as 0917 123 4567." : "Your saved profile number is used when available."}</small>
               </div>
-              <div className="checkout-location-panel">
-                <div className="module-heading"><div><p className="eyebrow text-danger">Delivery pin</p><h3>Confirm exact drop-off</h3></div><span className="module-note">Use GPS on HTTPS/Cloudflare, then drag the pin if needed.</span></div>
-                <div className="checkout-location-actions">
-                  <button className="btn btn-outline-dark btn-sm" type="button" disabled={locating} onClick={useCurrentLocation}>{locating ? "Getting location..." : "Use my current location"}</button>
-                  <button className="btn btn-danger btn-sm" type="button" onClick={confirmManualPin}>{deliveryMarker ? "Update map pin" : "Choose pin on map"}</button>
+              {smsProviderEnabled && (
+                <div className="checkout-sms-panel">
+                  <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
+                  <div className="checkout-sms-actions">
+                    <label className="checkout-sms-checkbox"><input type="checkbox" disabled={!smsReady} checked={Boolean(smsReady && smsOptIn)} onChange={(event) => setSmsOptIn(event.target.checked)} /> Send me SMS order updates</label>
+                    {!verifiedPhone && <button className="btn btn-sm btn-outline-dark" type="button" disabled={!validPhone} onClick={verifyPhone}>Verify phone</button>}
+                  </div>
+                  <small>{smsReady ? "SMS order updates can be sent to this verified number." : "Verify this phone before enabling SMS updates."}</small>
                 </div>
-                {deliveryMarker ? (
-                  <>
-                    <div className="checkout-location-map"><Suspense fallback={<SectionLoader label="Loading pin map..." />}><DeliveryMap customer={deliveryMarker} editableCustomer onCustomerChange={updatePin} /></Suspense></div>
-                    <div className="pin-coordinate-grid">
-                      <label className="form-label">Latitude<input className="form-control" type="number" step="0.000001" value={Number(deliveryLocation?.lat || 0)} onChange={(event) => updatePin({ lat: Number(event.target.value), lng: Number(deliveryLocation?.lng || 0) })} /></label>
-                      <label className="form-label">Longitude<input className="form-control" type="number" step="0.000001" value={Number(deliveryLocation?.lng || 0)} onChange={(event) => updatePin({ lat: Number(deliveryLocation?.lat || 0), lng: Number(event.target.value) })} /></label>
-                    </div>
-                    <small className="text-secondary">Pin source: {deliveryLocation?.source || "map-picker"}{deliveryLocation?.accuracy ? ` - accuracy about ${Math.round(deliveryLocation.accuracy)}m` : ""}</small>
-                  </>
-                ) : <div className="empty-chat checkout-pin-empty">No pin selected yet. Use GPS or choose a pin on the map.</div>}
+              )}
+            </section>
+
+            {deliveryType === "delivery" && (
+              <section className="checkout-section" aria-labelledby="checkout-delivery-title">
+                <CheckoutSectionHeading icon={MapPin} id="checkout-delivery-title" title="Delivery details" detail="Confirm the address, landmark, and rider drop-off pin." />
+                <div className="checkout-address-stack">
+                  <div>
+                    <label className="form-label" htmlFor="checkout-address">Delivery address <span className="checkout-required">Required</span></label>
+                    <textarea ref={addressInputRef} className={`form-control ${addressInvalid ? "is-invalid" : ""}`} id="checkout-address" autoComplete="street-address" aria-describedby="checkout-address-hint" aria-invalid={addressInvalid} value={address} onBlur={() => setTouched((current) => ({ ...current, address: true }))} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" />
+                    <small className={`checkout-field-hint ${addressInvalid ? "error" : ""}`} id="checkout-address-hint" role={addressInvalid ? "alert" : undefined}>{addressInvalid ? "Add a complete delivery address." : "Include the barangay, street, and house or building number."}</small>
+                  </div>
+                  <div><label className="form-label" htmlFor="checkout-landmark">Landmark</label><input className="form-control" id="checkout-landmark" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></div>
+                </div>
+                <div className={`checkout-location-panel ${pinInvalid ? "invalid" : ""}`} aria-describedby="checkout-pin-hint" aria-invalid={pinInvalid}>
+                  <div className="module-heading"><div><p className="eyebrow text-danger">Delivery pin</p><h4>Confirm exact drop-off</h4></div><span className="module-note">Required for rider delivery</span></div>
+                  <div className="checkout-location-actions">
+                    <button className="btn btn-outline-dark btn-sm" type="button" disabled={locating} onClick={useCurrentLocation}>{locating ? "Getting location..." : "Use my current location"}</button>
+                    <button ref={pinActionRef} className="btn btn-danger btn-sm" type="button" onClick={confirmManualPin}>{deliveryMarker ? "Update map pin" : "Choose pin on map"}</button>
+                  </div>
+                  {deliveryMarker ? (
+                    <>
+                      <div className="checkout-location-map"><Suspense fallback={<SectionLoader label="Loading pin map..." />}><DeliveryMap customer={deliveryMarker} editableCustomer onCustomerChange={updatePin} /></Suspense></div>
+                      <div className="pin-coordinate-grid">
+                        <label className="form-label">Latitude<input className="form-control" type="number" step="0.000001" value={Number(deliveryLocation?.lat || 0)} onChange={(event) => updatePin({ lat: Number(event.target.value), lng: Number(deliveryLocation?.lng || 0) })} /></label>
+                        <label className="form-label">Longitude<input className="form-control" type="number" step="0.000001" value={Number(deliveryLocation?.lng || 0)} onChange={(event) => updatePin({ lat: Number(deliveryLocation?.lat || 0), lng: Number(event.target.value) })} /></label>
+                      </div>
+                    </>
+                  ) : <div className="empty-chat checkout-pin-empty">No delivery pin selected.</div>}
+                  <small className={`checkout-field-hint ${pinInvalid ? "error" : ""}`} id="checkout-pin-hint" role={pinInvalid ? "alert" : undefined}>{pinInvalid ? "Choose or capture the exact rider drop-off pin." : deliveryMarker ? `Pin confirmed from ${deliveryLocation?.source || "map-picker"}.` : "A confirmed pin is required for delivery."}</small>
+                </div>
+              </section>
+            )}
+
+            <section className="checkout-section" aria-labelledby="checkout-payment-title">
+              <CheckoutSectionHeading icon={WalletCards} id="checkout-payment-title" title="Payment" detail={deliveryType === "delivery" ? "Choose how to pay for delivery." : "Choose how to pay at pickup."} />
+              <div className={`checkout-payment-grid ${paymongoEnabled ? "" : "single"}`} role="group" aria-label="Payment method">
+                {paymongoEnabled && <button type="button" className={`payment-option ${effectivePayment === "gcash" ? "active" : ""}`} aria-pressed={effectivePayment === "gcash"} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>Online checkout</small></button>}
+                <button type="button" className={`payment-option ${effectivePayment === "cod" ? "active" : ""}`} aria-pressed={effectivePayment === "cod"} onClick={() => setPayment("cod")}><strong>{cashPaymentLabel}</strong><small>{cashPaymentDetail}</small></button>
               </div>
-            </>}
-            <label className="form-label">Order notes<textarea className="form-control" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: extra request, pickup note, or rider instruction" /></label>
-            <div className="checkout-payment-heading">
-              <strong>Payment method</strong>
-              <small>{deliveryType === "delivery" ? "Choose online payment or pay during delivery." : "Choose online payment or pay when you pick up."}</small>
-            </div>
-            <div className="row g-2">
-              <div className="col-6"><button className={`payment-option ${payment === "gcash" ? "active" : ""}`} aria-pressed={payment === "gcash"} disabled={!paymongoEnabled} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>{paymongoEnabled ? "Online checkout" : "GCash unavailable right now"}</small></button></div>
-              <div className="col-6"><button className={`payment-option ${payment === "cod" ? "active" : ""}`} aria-pressed={payment === "cod"} onClick={() => setPayment("cod")}><strong>{cashPaymentLabel}</strong><small>{cashPaymentDetail}</small></button></div>
-            </div>
-            <div className="checkout-total"><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>
-            {deliveryFee > 0 && <small className="text-secondary d-block mt-2">Delivery fee: {currency(deliveryFee)}</small>}
-            <div className={`checkout-validation-summary ${checkoutReady ? "ready" : ""}`} role="status" aria-live="polite">
-              {checkoutReady ? "Ready to place order." : checkoutBlockReason}
-            </div>
+            </section>
+
+            <section className="checkout-section" aria-labelledby="checkout-review-title">
+              <CheckoutSectionHeading icon={ReceiptText} id="checkout-review-title" title="Order review" detail="Confirm the items and final total before placing the order." />
+              <div className="checkout-review-list">
+                {cart.map((item) => <div className="checkout-review-item" key={item.id}><span><b>{item.qty}x</b> {item.name}</span><strong>{currency(item.price * item.qty)}</strong></div>)}
+              </div>
+              <div><label className="form-label" htmlFor="checkout-notes">Order notes</label><textarea className="form-control" id="checkout-notes" rows="2" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional: extra request, pickup note, or rider instruction" /></div>
+              <div className="checkout-review-totals">
+                <div><span>Subtotal</span><strong>{currency(subtotal)}</strong></div>
+                <div><span>{deliveryType === "delivery" ? "Delivery fee" : "Pickup fee"}</span><strong>{currency(deliveryFee)}</strong></div>
+                <div><span>{deliveryType === "delivery" ? "Total including delivery" : "Pickup total"}</span><strong>{currency(total)}</strong></div>
+              </div>
+            </section>
           </div>
-          <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || !checkoutReady} onClick={place}>{busy ? "Processing..." : "Place order"}</button></div>
-        </div>
+          <div className="modal-footer checkout-footer">
+            <div ref={validationSummaryRef} className={`checkout-validation-summary ${checkoutReady ? "ready" : ""}`} role="status" aria-live="polite" tabIndex="-1">{checkoutReady ? "Ready to place order." : checkoutBlockReason}</div>
+            <div className="checkout-footer-actions"><button className="btn btn-outline-secondary" type="button" onClick={onClose}>Cancel</button><button className="btn btn-danger" type="submit" disabled={busy}>{busy ? "Processing..." : <>Place order <span aria-hidden="true">·</span> {currency(total)}</>}</button></div>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const dayFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Manila",
   year: "numeric",
@@ -10,6 +12,39 @@ const increment = (value) => ({ ".sv": { increment: Number(value || 0) } });
 export function normalizeIdempotencyKey(value) {
   const key = typeof value === "string" ? value.trim() : "";
   return /^[A-Za-z0-9_-]{12,128}$/.test(key) ? key : "";
+}
+
+export function orderRequestFingerprint(user, input = {}) {
+  const items = Array.isArray(input.items)
+    ? input.items
+        .map((item) => ({ id: String(item?.id || ""), qty: Number(item?.qty || 0) }))
+        .sort((left, right) => left.id.localeCompare(right.id) || left.qty - right.qty)
+    : [];
+  const location = input.deliveryLocation && typeof input.deliveryLocation === "object"
+    ? {
+        lat: Number(input.deliveryLocation.lat),
+        lng: Number(input.deliveryLocation.lng),
+        source: String(input.deliveryLocation.source || "")
+      }
+    : null;
+  const request = {
+    actorId: String(user?.uid || ""),
+    actorRole: String(user?.role || ""),
+    items,
+    paymentMethod: String(input.paymentMethod || ""),
+    deliveryType: String(input.deliveryType || ""),
+    phone: String(input.phone || "").replace(/\D/g, ""),
+    address: String(input.address || "").trim(),
+    landmark: String(input.landmark || "").trim(),
+    notes: String(input.notes || "").trim(),
+    location,
+    discount: Number(input.discount || 0),
+    discountReason: String(input.discountReason || "").trim(),
+    cashReceived: Number(input.cashReceived || 0),
+    diningOption: String(input.diningOption || ""),
+    smsNotifications: Boolean(input.smsNotifications)
+  };
+  return createHash("sha256").update(JSON.stringify(request)).digest("hex");
 }
 
 export function manilaDateKey(timestamp = Date.now()) {

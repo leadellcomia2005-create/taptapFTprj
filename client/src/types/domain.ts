@@ -146,6 +146,7 @@ export interface DeliveryProof {
   storageMode?: "database" | "storage";
   sizeBytes?: number;
   handoff?: DeliveryProofHandoff;
+  photoQualityWarning?: string;
   riderId: EntityId;
   riderName?: string;
   orderId?: EntityId;
@@ -199,6 +200,10 @@ export interface Order {
   cancelledBy?: EntityId;
   cancelledByRole?: UserRole;
   cancelReason?: string;
+  statusBeforeCancellation?: OrderStatus;
+  cancellationRecoveryId?: EntityId;
+  cancellationSourceId?: EntityId;
+  inventoryRestoredAt?: TimestampMs;
   codCollectedAt?: TimestampMs;
   codHandoffRequestedAt?: TimestampMs;
   codHandoffRequestedBy?: EntityId;
@@ -300,13 +305,10 @@ export interface PublicReview {
 export type ComplaintStatus = "pending" | "reviewed" | "resolved" | "rejected";
 
 export type ComplaintType =
-  | "wrong_item"
-  | "missing_item"
-  | "late_delivery"
-  | "food_quality"
-  | "payment"
-  | "service"
-  | "other";
+  | "wrong-item"
+  | "missing-item"
+  | "late-order"
+  | "bad-food";
 
 export interface Complaint {
   id: EntityId;
@@ -410,6 +412,7 @@ export type NotificationType =
   | "complaint"
   | "shift"
   | "chat"
+  | "admin"
   | "system";
 
 export interface Notification {
@@ -433,6 +436,7 @@ export interface AppUser {
   staffRole?: StaffRole;
   emailVerified?: boolean;
   mfaVerified?: boolean;
+  suspended?: boolean;
   phone?: string;
   phoneVerified?: boolean;
   phoneVerifiedAt?: TimestampMs | null;

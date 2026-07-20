@@ -52,10 +52,11 @@ const appConfig = await readFile(new URL("../src/config/appConfig.ts", import.me
 record("landing customer payments only advertise enabled methods", appConfig.includes('paymentMethods: ["cash", "cod"]'));
 
 const customerScreens = await readFile(new URL("../src/features/customer/CustomerScreens.jsx", import.meta.url), "utf8");
+const customerHelpers = await readFile(new URL("../src/features/customer/customerHelpers.ts", import.meta.url), "utf8");
 record("checkout entry point exists", customerScreens.includes("export function Checkout") && customerScreens.includes("Secure checkout"));
 record("checkout validation summary exists", customerScreens.includes("checkout-validation-summary"));
-record("checkout draft is versioned and tab scoped", customerScreens.includes("CHECKOUT_DRAFT_VERSION") && customerScreens.includes("window.sessionStorage"));
-record("checkout draft excludes delivery pins", customerScreens.includes("writeCheckoutDraft") && !customerScreens.slice(customerScreens.indexOf("function writeCheckoutDraft"), customerScreens.indexOf("function removeCheckoutDraft")).includes("deliveryLocation"));
+record("checkout draft is versioned and tab scoped", customerHelpers.includes("checkoutDraftVersion") && customerHelpers.includes("window.sessionStorage"));
+record("checkout draft preserves sanitized delivery pins", customerHelpers.includes("sanitizeCheckoutLocation") && customerHelpers.slice(customerHelpers.indexOf("function writeCheckoutDraft"), customerHelpers.indexOf("function removeCheckoutDraft")).includes("deliveryLocation"));
 record("checkout blocks submission while offline", customerScreens.includes('!online || !navigator.onLine') && customerScreens.includes("Reconnect to the internet"));
 
 const appState = await readFile(new URL("../src/hooks/useAppState.js", import.meta.url), "utf8");
@@ -86,6 +87,7 @@ const ownerWorkspace = await readFile(new URL("../src/features/workspaces/OwnerW
 record("owner dashboard is exception first", ownerWorkspace.includes("Today&apos;s exceptions") && ownerWorkspace.includes("Needs a decision") && ownerWorkspace.includes("owner-attention-grid"));
 record("owner profit is not hardcoded", !ownerWorkspace.includes("totalSales * 0.58") && ownerWorkspace.includes("Average paid order"));
 record("owner planning controls disclose local persistence", ownerWorkspace.includes("Saved only on this browser for planning") && ownerWorkspace.includes("Customer pricing was not changed"));
+record("owner account suspension is visible and reasoned", ownerWorkspace.includes("setUserSuspension") && ownerWorkspace.includes("Account action reason") && ownerWorkspace.includes("active sessions were revoked"));
 
 const staffWorkspace = await readFile(new URL("../src/features/workspaces/StaffWorkspace.jsx", import.meta.url), "utf8");
 record("staff dashboard adapts to staff scope", staffWorkspace.includes("staffDashboardProfiles") && staffWorkspace.includes("staffRole === \"kitchen\"") && staffWorkspace.includes("staffRole === \"inventory\""));

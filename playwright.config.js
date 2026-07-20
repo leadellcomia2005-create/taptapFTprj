@@ -8,7 +8,7 @@ const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./test-results",
-  timeout: 30_000,
+  timeout: 60_000,
   expect: { timeout: 8_000 },
   fullyParallel: false,
   workers: 1,

@@ -15,6 +15,7 @@ import {
   availableDeliveryProjection,
   normalizeIdempotencyKey,
   orderCreationAggregateUpdates,
+  orderRequestFingerprint,
   orderTransitionAggregateUpdates,
   paymentMovementRecord,
   retentionTimestamp
@@ -22,6 +23,8 @@ import {
 
 const deliveryFee = 49;
 const paymentMethods = ["gcash", "cod", "cash"];
+const cancellationRestorationKey = "__cancellationRestorations";
+const cancellationLeaseMs = 2 * 60 * 1000;
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -86,7 +89,7 @@ function parseProofHandoff(input = {}, order = {}) {
   return proof;
 }
 
-async function persistProofImage(orderId, dataUrl) {
+async function persistProofImage(orderId, dataUrl, logger) {
   const encoded = dataUrl.slice("data:image/jpeg;base64,".length);
   const imageBuffer = Buffer.from(encoded, "base64");
   const configuredBucket = String(process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, "");
@@ -106,8 +109,8 @@ async function persistProofImage(orderId, dataUrl) {
     });
     const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
     return { downloadUrl, storagePath, storageBucket: bucket.name, sizeBytes: imageBuffer.length, storageMode: "storage" };
-  } catch (error) {
-    console.warn("Delivery proof storage fallback:", error.message);
+  } catch {
+    logger?.warn("delivery_proof_storage_fallback", { orderId, storageMode: "database" });
     return { dataUrl, sizeBytes: imageBuffer.length, storageMode: "database" };
   }
 }
@@ -154,18 +157,20 @@ function stockHistoryEntry({ item, itemId, beforeStock, afterStock, delta, reaso
 const activeDeliveryStatuses = new Set(["ready", "out-for-delivery", "arrived"]);
 
 async function chooseLeastBusyRider(db) {
-  const [usersSnapshot, ordersSnapshot] = await Promise.all([
+  const [usersSnapshot, ...activeOrderSnapshots] = await Promise.all([
     db.ref("users").once("value"),
-    db.ref("orders").once("value")
+    ...[...activeDeliveryStatuses].map((status) => db.ref("orders").orderByChild("status").equalTo(status).once("value"))
   ]);
   const riders = Object.entries(usersSnapshot.val() || {})
     .map(([uid, profile]) => ({ uid, ...profile }))
     .filter((profile) => profile.role === "rider");
   if (riders.length === 0) return null;
   const activeCounts = new Map(riders.map((rider) => [rider.uid, 0]));
-  for (const order of Object.values(ordersSnapshot.val() || {})) {
-    if (order.riderId && activeDeliveryStatuses.has(order.status) && activeCounts.has(order.riderId)) {
-      activeCounts.set(order.riderId, activeCounts.get(order.riderId) + 1);
+  for (const snapshot of activeOrderSnapshots) {
+    for (const order of Object.values(snapshot.val() || {})) {
+      if (order.riderId && activeCounts.has(order.riderId)) {
+        activeCounts.set(order.riderId, activeCounts.get(order.riderId) + 1);
+      }
     }
   }
   return riders
@@ -181,6 +186,228 @@ async function transactionWithInitial(ref, initialValue, update) {
     firstCall = false;
     return update(value);
   }, undefined, false);
+}
+
+function cancellationRequested(input = {}) {
+  return input.cancel === true || input.status === "cancelled";
+}
+
+function canFinalizeCancellation(user, order) {
+  return ["owner", "staff"].includes(user?.role) || (user?.role === "customer" && order?.customerId === user.uid);
+}
+
+function combinedOrderItems(items = []) {
+  const combined = new Map();
+  for (const item of items) {
+    const quantity = Number(item?.qty || 0);
+    if (!validRecordId(item?.id) || !Number.isInteger(quantity) || quantity <= 0) {
+      throw new HttpError(409, "The order contains invalid inventory details and cannot be cancelled automatically.");
+    }
+    const current = combined.get(item.id);
+    combined.set(item.id, current ? { ...current, qty: current.qty + quantity } : { ...item, qty: quantity });
+  }
+  return [...combined.values()];
+}
+
+async function claimCancellationFinalization(orderRef, recoveryId) {
+  const token = randomUUID();
+  const now = Date.now();
+  const initial = (await orderRef.once("value")).val();
+  let claimError;
+  const transaction = await transactionWithInitial(orderRef, initial, (current) => {
+    claimError = null;
+    if (!current || current.cancellationRecoveryId !== recoveryId) {
+      claimError = new HttpError(409, "Cancellation recovery details do not match this order.");
+      return undefined;
+    }
+    if (current.inventoryRestoredAt) return undefined;
+    const activeClaim = current.cancellationFinalizationClaim;
+    if (activeClaim?.token && Number(activeClaim.expiresAt || 0) > now) {
+      claimError = new HttpError(409, "This cancellation is already being finalized. Please retry in a moment.");
+      return undefined;
+    }
+    return {
+      ...current,
+      cancellationFinalizationClaim: { token, startedAt: now, expiresAt: now + cancellationLeaseMs }
+    };
+  });
+  if (!transaction.committed) {
+    const current = (await orderRef.once("value")).val();
+    if (current?.inventoryRestoredAt) return { complete: true, order: current };
+    throw claimError || new HttpError(409, "This cancellation is already being finalized. Please retry in a moment.");
+  }
+  return { complete: false, token, order: transaction.snapshot.val() };
+}
+
+async function releaseCancellationFinalization(orderRef, token) {
+  if (!token) return;
+  const initial = (await orderRef.once("value")).val();
+  await transactionWithInitial(orderRef, initial, (current) => {
+    if (!current || current.inventoryRestoredAt || current.cancellationFinalizationClaim?.token !== token) return undefined;
+    const next = { ...current };
+    delete next.cancellationFinalizationClaim;
+    return next;
+  }).catch(() => {});
+}
+
+async function cancellationInventoryUpdates(db, user, orderId, order, recoveryId) {
+  const items = combinedOrderItems(order.items || []);
+  const inventoryRef = db.ref("inventory");
+  const initial = (await inventoryRef.once("value")).val();
+  const token = randomUUID();
+  const startedAt = Date.now();
+  let restorationError;
+  const transaction = await transactionWithInitial(inventoryRef, initial, (inventory) => {
+    restorationError = null;
+    if (!inventory || typeof inventory !== "object") {
+      restorationError = new HttpError(409, "Inventory could not be restored for this cancellation.");
+      return undefined;
+    }
+    const existingMarker = inventory[cancellationRestorationKey]?.[orderId];
+    if (existingMarker?.recoveryId === recoveryId) return inventory;
+    if (existingMarker) {
+      restorationError = new HttpError(409, "A different cancellation recovery is already recorded for this order.");
+      return undefined;
+    }
+    const nextInventory = { ...inventory };
+    for (const item of items) {
+      const currentItem = inventory[item.id];
+      if (!currentItem || !Number.isFinite(Number(currentItem.stock))) {
+        restorationError = new HttpError(409, `${item.name || item.id} is missing from inventory and requires owner review.`);
+        return undefined;
+      }
+      nextInventory[item.id] = {
+        ...currentItem,
+        stock: Number(currentItem.stock) + item.qty
+      };
+    }
+    nextInventory[cancellationRestorationKey] = {
+      ...(inventory[cancellationRestorationKey] || {}),
+      [orderId]: { recoveryId, token, startedAt }
+    };
+    return nextInventory;
+  });
+  if (!transaction.committed) throw restorationError || new HttpError(409, "Inventory could not be restored for this cancellation.");
+
+  const inventory = transaction.snapshot.val() || {};
+  const marker = inventory[cancellationRestorationKey]?.[orderId];
+  if (!marker || marker.recoveryId !== recoveryId) {
+    throw new HttpError(409, "Inventory cancellation recovery could not be verified.");
+  }
+  const restoredAt = Number(marker.startedAt || startedAt);
+  const updates = {
+    [`inventory/${cancellationRestorationKey}/${orderId}`]: null,
+    [`orders/${orderId}/inventoryRestoredAt`]: restoredAt,
+    [`orders/${orderId}/cancellationFinalizationClaim`]: null
+  };
+  for (const item of items) {
+    const nextStock = Number(inventory[item.id]?.stock || 0);
+    updates[`public/menu/${item.id}/stock`] = nextStock;
+    const historyId = db.ref(`stockHistory/${item.id}`).push().key;
+    updates[`stockHistory/${item.id}/${historyId}`] = stockHistoryEntry({
+      item,
+      itemId: item.id,
+      beforeStock: nextStock - item.qty,
+      afterStock: nextStock,
+      delta: item.qty,
+      reason: `Cancelled order ${orderId}`,
+      user,
+      action: "order_cancel_restored",
+      orderId
+    });
+  }
+  return { updates, restoredAt };
+}
+
+async function finalizeCancelledOrder(db, user, orderId, previous, order, changes) {
+  const orderRef = db.ref(`orders/${orderId}`);
+  const claim = await claimCancellationFinalization(orderRef, order.cancellationRecoveryId);
+  if (claim.complete) return claim.order;
+  const claimedOrder = claim.order;
+  const now = Date.now();
+  try {
+    const restoration = await cancellationInventoryUpdates(
+      db,
+      user,
+      orderId,
+      claimedOrder,
+      claimedOrder.cancellationRecoveryId
+    );
+    const updates = {
+      [`auditLogs/AUD-${claimedOrder.cancelledAt || now}-${orderId}-cancel`]: {
+        action: "order_updated",
+        orderId,
+        status: "cancelled",
+        details: auditDetails(previous, claimedOrder, ["status", "paymentStatus", "cancelReason", "refundStatus"]),
+        actorId: user.uid,
+        actorName: user.name || user.email,
+        actorRole: user.role,
+        createdAt: now
+      },
+      [`availableDeliveries/${orderId}`]: null,
+      ...orderTransitionAggregateUpdates(previous, claimedOrder, now),
+      ...restoration.updates
+    };
+    if (claimedOrder.customerId !== "walk-in") {
+      Object.assign(updates, notificationUpdates(db, [claimedOrder.customerId], {
+        title: "Order cancelled",
+        message: `${orderId} was cancelled: ${changes.cancelReason || claimedOrder.cancelReason}.`,
+        type: "order",
+        orderId
+      }));
+    }
+    await db.ref().update(updates);
+    const finalized = { ...claimedOrder, inventoryRestoredAt: restoration.restoredAt };
+    delete finalized.cancellationFinalizationClaim;
+    return finalized;
+  } catch (error) {
+    await releaseCancellationFinalization(orderRef, claim.token);
+    throw error;
+  }
+}
+
+async function cancelOrderForApprovedVoid(db, user, orderId, reason, approvalId) {
+  const orderRef = db.ref(`orders/${orderId}`);
+  const initial = (await orderRef.once("value")).val();
+  if (!initial) throw new HttpError(404, "Order not found.");
+  if (initial.status === "cancelled") {
+    if (initial.cancellationSourceId === approvalId && initial.cancellationRecoveryId && !initial.inventoryRestoredAt) {
+      const previous = { ...initial, status: initial.statusBeforeCancellation || "received" };
+      return finalizeCancelledOrder(db, user, orderId, previous, initial, initial);
+    }
+    return initial;
+  }
+
+  const recoveryId = randomUUID();
+  let previous;
+  const transaction = await transactionWithInitial(orderRef, initial, (current) => {
+    if (!current || current.status === "cancelled") return undefined;
+    previous = { ...current };
+    const now = Date.now();
+    return {
+      ...current,
+      status: "cancelled",
+      cancelReason: reason,
+      cancelledAt: now,
+      cancelledBy: user.uid,
+      cancelledByRole: user.role,
+      updatedAt: now,
+      statusBeforeCancellation: current.status,
+      cancellationRecoveryId: recoveryId,
+      cancellationSourceId: approvalId
+    };
+  });
+  if (!transaction.committed) {
+    const current = (await orderRef.once("value")).val();
+    if (current?.status === "cancelled" && current.cancellationSourceId === approvalId) {
+      return current.inventoryRestoredAt
+        ? current
+        : finalizeCancelledOrder(db, user, orderId, { ...current, status: current.statusBeforeCancellation || "received" }, current, current);
+    }
+    throw new HttpError(409, "The order changed before the approved void was applied.");
+  }
+  const order = transaction.snapshot.val();
+  return finalizeCancelledOrder(db, user, orderId, previous, order, order);
 }
 
 export async function createOrderRecord(db, user, input) {
@@ -275,7 +502,8 @@ export async function createOrderRecord(db, user, input) {
   if (deliveryType === "delivery" && !order.address) throw new HttpError(400, "A delivery address is required.");
   if (user.role === "customer" && deliveryType === "delivery" && !order.deliveryLocation) throw new HttpError(400, "Confirm the delivery pin before placing the order.");
 
-  const orderClaim = await claimOrderCreation(db, user, input.idempotencyKey);
+  const requestHash = orderRequestFingerprint(user, input);
+  const orderClaim = await claimOrderCreation(db, user, input.idempotencyKey, requestHash);
   if (orderClaim.existing) return orderClaim.existing;
 
   let transactionError;
@@ -347,6 +575,7 @@ export async function createOrderRecord(db, user, input) {
       status: "complete",
       actorId: user.uid,
       orderId,
+      requestHash,
       createdAt,
       expiresAt: retentionTimestamp(createdAt, 7)
     };
@@ -406,9 +635,29 @@ export async function updateOrderRecord(db, user, orderId, input) {
   const orderRef = db.ref(`orders/${orderId}`);
   const initialOrder = (await orderRef.once("value")).val();
   if (!initialOrder) throw new HttpError(404, "Order not found.");
+  if (
+    cancellationRequested(input) &&
+    initialOrder.status === "cancelled" &&
+    initialOrder.cancellationRecoveryId &&
+    !initialOrder.inventoryRestoredAt
+  ) {
+    if (!canFinalizeCancellation(user, initialOrder)) throw new HttpError(403, "You cannot finalize this cancellation.");
+    const previous = { ...initialOrder, status: initialOrder.statusBeforeCancellation || "received" };
+    const changes = {
+      status: "cancelled",
+      cancelReason: initialOrder.cancelReason,
+      cancelledAt: initialOrder.cancelledAt,
+      cancelledBy: initialOrder.cancelledBy,
+      cancelledByRole: initialOrder.cancelledByRole,
+      updatedAt: initialOrder.updatedAt
+    };
+    const order = await finalizeCancelledOrder(db, user, orderId, previous, initialOrder, changes);
+    return { order, changes: { ...changes, inventoryRestoredAt: order.inventoryRestoredAt } };
+  }
   let previous;
   let changes;
   let updateError;
+  const cancellationRecoveryId = randomUUID();
   const transaction = await transactionWithInitial(orderRef, initialOrder, (order) => {
     if (!order) {
       updateError = new HttpError(404, "Order not found.");
@@ -417,6 +666,13 @@ export async function updateOrderRecord(db, user, orderId, input) {
     previous = { ...order };
     try {
       changes = authorizeOrderUpdate(user, order, input);
+      if (changes.status === "cancelled") {
+        changes = {
+          ...changes,
+          statusBeforeCancellation: order.status,
+          cancellationRecoveryId
+        };
+      }
     } catch (error) {
       updateError = error;
       return undefined;
@@ -426,6 +682,10 @@ export async function updateOrderRecord(db, user, orderId, input) {
   if (!transaction.committed) throw updateError || new HttpError(409, "The order changed before this update was applied.");
 
   let order = transaction.snapshot.val();
+  if (changes.status === "cancelled") {
+    order = await finalizeCancelledOrder(db, user, orderId, previous, order, changes);
+    return { order, changes: { ...changes, inventoryRestoredAt: order.inventoryRestoredAt } };
+  }
   const now = Date.now();
   let autoAssignedRider = null;
   if (
@@ -525,49 +785,6 @@ export async function updateOrderRecord(db, user, orderId, input) {
       orderId
     }));
   }
-  if (changes.status === "cancelled" && previous.status !== "cancelled") {
-    const inventoryRef = db.ref("inventory");
-    const inventorySnapshot = await inventoryRef.once("value");
-    const restored = await transactionWithInitial(inventoryRef, inventorySnapshot.val(), (inventory) => {
-      if (!inventory) return undefined;
-      const nextInventory = { ...inventory };
-      for (const item of previous.items || []) {
-        const current = Number(inventory[item.id]?.stock || 0);
-        nextInventory[item.id] = { ...inventory[item.id], stock: current + Number(item.qty || 0) };
-      }
-      return nextInventory;
-    });
-    if (!restored.committed) throw new HttpError(409, "Inventory could not be restored for this cancellation.");
-    const restoredValues = restored.snapshot.val() || {};
-    const restoredInventory = {};
-    for (const item of previous.items || []) {
-      const current = Number(inventorySnapshot.child(`${item.id}/stock`).val() || 0);
-      const nextStock = Number(restoredValues[item.id]?.stock || 0);
-      const historyId = db.ref(`stockHistory/${item.id}`).push().key;
-      restoredInventory[`public/menu/${item.id}/stock`] = nextStock;
-      restoredInventory[`stockHistory/${item.id}/${historyId}`] = stockHistoryEntry({
-        item,
-        itemId: item.id,
-        beforeStock: Number(current || 0),
-        afterStock: nextStock,
-        delta: Number(item.qty || 0),
-        reason: `Cancelled order ${orderId}`,
-        user,
-        action: "order_cancel_restored",
-        orderId
-      });
-    }
-    restoredInventory[`orders/${orderId}/inventoryRestoredAt`] = now;
-    Object.assign(updates, restoredInventory);
-    if (order.customerId !== "walk-in") {
-      Object.assign(updates, notificationUpdates(db, [order.customerId], {
-        title: "Order cancelled",
-        message: `${orderId} was cancelled: ${changes.cancelReason}.`,
-        type: "order",
-        orderId
-      }));
-    }
-  }
   if (changes.codRemittedAt) {
     const ownerIds = await userIdsForRoles(db, ["owner"]);
     Object.assign(updates, notificationUpdates(db, ownerIds, {
@@ -581,42 +798,62 @@ export async function updateOrderRecord(db, user, orderId, input) {
   return { order, changes };
 }
 
-async function claimOrderCreation(db, user, requestedKey) {
+async function claimOrderCreation(db, user, requestedKey, requestHash) {
   const key = normalizeIdempotencyKey(requestedKey);
   if (requestedKey && !key) throw new HttpError(400, "Invalid order request key.");
   if (!key) return { key: "", path: "", existing: null };
   const path = `idempotency/orderCreation/${user.uid}/${key}`;
   const claimRef = db.ref(path);
   const initial = (await claimRef.once("value")).val();
+  if (initial?.requestHash && initial.requestHash !== requestHash) {
+    throw new HttpError(409, "This order request key was already used for different order details.", { code: "IDEMPOTENCY_CONFLICT" });
+  }
   if (initial?.orderId) {
     const order = (await db.ref(`orders/${initial.orderId}`).once("value")).val();
     if (order) return { key, path, existing: { id: initial.orderId, order, idempotent: true } };
   }
 
   const now = Date.now();
+  const claimToken = randomUUID();
+  let fingerprintConflict = false;
   const transaction = await transactionWithInitial(claimRef, initial, (current) => {
+    if (current?.requestHash && current.requestHash !== requestHash) {
+      fingerprintConflict = true;
+      return undefined;
+    }
     if (current?.orderId) return undefined;
     if (current?.status === "processing" && Number(current.expiresAt || 0) > now) return undefined;
     return {
       status: "processing",
       actorId: user.uid,
+      requestHash,
+      claimToken,
       createdAt: now,
       expiresAt: now + 10 * 60 * 1000
     };
   });
   if (!transaction.committed) {
     const current = (await claimRef.once("value")).val();
+    if (fingerprintConflict || (current?.requestHash && current.requestHash !== requestHash)) {
+      throw new HttpError(409, "This order request key was already used for different order details.", { code: "IDEMPOTENCY_CONFLICT" });
+    }
     if (current?.orderId) {
       const order = (await db.ref(`orders/${current.orderId}`).once("value")).val();
       if (order) return { key, path, existing: { id: current.orderId, order, idempotent: true } };
     }
     throw new HttpError(409, "This order request is already being processed. Please wait a moment and retry.");
   }
-  return { key, path, existing: null };
+  return { key, path, requestHash, claimToken, existing: null };
 }
 
 async function releaseOrderCreationClaim(db, claim) {
-  if (claim?.path) await db.ref(claim.path).remove().catch(() => {});
+  if (!claim?.path || !claim.claimToken) return;
+  const claimRef = db.ref(claim.path);
+  const initial = (await claimRef.once("value")).val();
+  await transactionWithInitial(claimRef, initial, (current) => {
+    if (!current || current.claimToken !== claim.claimToken || current.status !== "processing") return undefined;
+    return null;
+  }).catch(() => {});
 }
 
 export async function createMenuItemRecord(db, user, input = {}) {
@@ -763,11 +1000,10 @@ export async function updateReviewRecord(db, user, reviewId, input = {}) {
   const review = (await reviewRef.once("value")).val();
   if (!review) throw new HttpError(404, "Review not found.");
   const updatedAt = Date.now();
-  const firstName = cleanText(review.customerName, 80).split(/\s+/)[0];
   const publicReview = status === "approved"
     ? {
         orderId: review.orderId || reviewId,
-        customerLabel: firstName ? `${firstName} customer` : "TapTap customer",
+        customerLabel: "Verified customer",
         rating: Number(review.rating || 0),
         comment: cleanText(review.comment, 1000),
         items: Array.isArray(review.items) ? review.items.map((item) => cleanText(item, 120)).filter(Boolean).slice(0, 3) : [],
@@ -796,7 +1032,10 @@ export async function updateReviewRecord(db, user, reviewId, input = {}) {
 }
 
 export async function listComplaintsRecord(db, user) {
-  const complaints = Object.entries((await db.ref("complaints").once("value")).val() || {})
+  const complaintsRef = user.role === "customer"
+    ? db.ref("complaints").orderByChild("customerId").equalTo(user.uid)
+    : db.ref("complaints");
+  const complaints = Object.entries((await complaintsRef.once("value")).val() || {})
     .map(([id, complaint]) => ({ id, ...complaint }))
     .filter((complaint) => user.role !== "customer" || complaint.customerId === user.uid)
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
@@ -967,7 +1206,7 @@ export async function saveRiderLocationRecord(db, user, orderId, input) {
   return { location, order };
 }
 
-export async function saveDeliveryProofRecord(db, user, orderId, input) {
+export async function saveDeliveryProofRecord(db, user, orderId, input, { logger } = {}) {
   if (user.role !== "rider") throw new HttpError(403, "Rider access required.");
   if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await db.ref(`orders/${orderId}`).once("value")).val();
@@ -975,7 +1214,7 @@ export async function saveDeliveryProofRecord(db, user, orderId, input) {
   if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
   if (order.status !== "arrived") throw new HttpError(409, "Proof can be captured only after arrival.");
   const handoff = parseProofHandoff(input.handoff, order);
-  const image = await persistProofImage(orderId, validateDeliveryProof(input.dataUrl));
+  const image = await persistProofImage(orderId, validateDeliveryProof(input.dataUrl), logger);
   const proofOfDeliveryRef = `deliveryProofs/${orderId}`;
   const createdAt = Date.now();
   await db.ref(proofOfDeliveryRef).set({
@@ -1069,9 +1308,12 @@ export async function closeActiveShiftRecord(db, user, input = {}) {
   const activeShift = (await activeRef.once("value")).val();
   if (!activeShift) throw new HttpError(409, "Start a shift before closing one.");
   const now = Date.now();
-  const orders = Object.values((await db.ref("orders").once("value")).val() || {})
+  const ordersQuery = user.role === "owner"
+    ? db.ref("orders").orderByChild("source").equalTo("walk-in-pos")
+    : db.ref("orders").orderByChild("cashierId").equalTo(user.uid);
+  const orders = Object.values((await ordersQuery.once("value")).val() || {})
     .filter((order) => Number(order.createdAt || 0) >= Number(activeShift.startedAt || 0))
-    .filter((order) => order.cashierId === user.uid || (user.role === "owner" && order.source === "walk-in-pos"));
+    .filter((order) => !order.archivedAt);
   const cashSales = orders
     .filter((order) => order.paymentMethod === "cash" || (order.paymentMethod === "cod" && ["delivered", "completed"].includes(order.status)))
     .reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -1161,7 +1403,10 @@ export async function createApprovalRequestRecord(db, user, input = {}) {
 
 export async function listApprovalRequestsRecord(db, user) {
   if (!["owner", "staff"].includes(user.role)) throw new HttpError(403, "Owner or staff access required.");
-  const requests = Object.entries((await db.ref("approvalRequests").once("value")).val() || {})
+  const requestsRef = user.role === "staff"
+    ? db.ref("approvalRequests").orderByChild("requesterId").equalTo(user.uid)
+    : db.ref("approvalRequests");
+  const requests = Object.entries((await requestsRef.once("value")).val() || {})
     .map(([id, request]) => ({ id, ...request }))
     .filter((request) => user.role === "owner" || request.requesterId === user.uid)
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
@@ -1235,39 +1480,23 @@ export async function resolveApprovalRequestRecord(db, user, requestId, input = 
       const uid = cleanText(request.payload?.uid || request.targetId, 128);
       const role = cleanText(request.payload?.role, 30);
       if (!validRecordId(uid) || !["owner", "staff", "rider", "customer"].includes(role)) throw new HttpError(400, "Invalid role change.");
-      await getAuth().setCustomUserClaims(uid, { role });
+      const currentProfile = (await db.ref(`users/${uid}`).once("value")).val() || {};
+      if (currentProfile.role === "owner" && role !== "owner") {
+        const profiles = (await db.ref("users").once("value")).val() || {};
+        const otherOwnerExists = Object.entries(profiles).some(([profileUid, profile]) => profileUid !== uid && profile?.role === "owner");
+        if (!otherOwnerExists) throw new HttpError(409, "Assign another owner before removing the final owner account.");
+      }
+      const auth = getAuth();
+      const account = await auth.getUser(uid);
+      await auth.setCustomUserClaims(uid, { ...(account.customClaims || {}), role });
+      await auth.revokeRefreshTokens(uid);
       updates[`users/${uid}/role`] = role;
+      updates[`users/${uid}/sessionRevokedAt`] = now;
     }
     if (request.type === "void_order") {
       const orderId = cleanText(request.payload?.orderId || request.targetId, 128);
-      const order = (await db.ref(`orders/${orderId}`).once("value")).val();
-      if (!order) throw new HttpError(404, "Order not found.");
-      if (order.status !== "cancelled") {
-        const reason = request.reason;
-        const inventorySnapshot = await db.ref("inventory").once("value");
-        updates[`orders/${orderId}/status`] = "cancelled";
-        updates[`orders/${orderId}/cancelReason`] = reason;
-        updates[`orders/${orderId}/cancelledAt`] = now;
-        updates[`orders/${orderId}/cancelledBy`] = user.uid;
-        updates[`orders/${orderId}/cancelledByRole`] = user.role;
-        for (const item of order.items || []) {
-          const beforeStock = Number(inventorySnapshot.child(`${item.id}/stock`).val() || 0);
-          const afterStock = beforeStock + Number(item.qty || 0);
-          updates[`inventory/${item.id}/stock`] = afterStock;
-          updates[`public/menu/${item.id}/stock`] = afterStock;
-          updates[`stockHistory/${item.id}/${db.ref(`stockHistory/${item.id}`).push().key}`] = stockHistoryEntry({
-            item,
-            itemId: item.id,
-            beforeStock,
-            afterStock,
-            delta: Number(item.qty || 0),
-            reason,
-            user,
-            action: "owner_void_restored",
-            orderId
-          });
-        }
-      }
+      if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
+      await cancelOrderForApprovedVoid(db, user, orderId, request.reason, requestId);
     }
   }
 
@@ -1279,7 +1508,10 @@ export async function archiveCompletedOrdersRecord(db, user, input = {}) {
   if (user.role !== "owner") throw new HttpError(403, "Owner access required.");
   const olderThanDays = Math.max(1, Math.min(365, Number(input.olderThanDays || 30)));
   const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
-  const orders = (await db.ref("orders").once("value")).val() || {};
+  const terminalSnapshots = await Promise.all(
+    ["delivered", "cancelled"].map((status) => db.ref("orders").orderByChild("status").equalTo(status).once("value"))
+  );
+  const orders = Object.assign({}, ...terminalSnapshots.map((snapshot) => snapshot.val() || {}));
   const updates = {};
   let archived = 0;
   let proofsPreserved = 0;
@@ -1310,9 +1542,82 @@ export async function archiveCompletedOrdersRecord(db, user, input = {}) {
 }
 
 export async function listOrdersForUser(db, user) {
-  const orders = (await db.ref("orders").once("value")).val() || {};
-  return Object.entries(orders)
+  const ordersRef = db.ref("orders");
+  let orders = {};
+  let available = {};
+  if (user.role === "customer") {
+    orders = (await ordersRef.orderByChild("customerId").equalTo(user.uid).once("value")).val() || {};
+  } else if (user.role === "rider") {
+    const [assignedSnapshot, availableSnapshot] = await Promise.all([
+      ordersRef.orderByChild("riderId").equalTo(user.uid).once("value"),
+      db.ref("availableDeliveries").once("value")
+    ]);
+    orders = assignedSnapshot.val() || {};
+    available = availableSnapshot.val() || {};
+  } else if (["owner", "staff"].includes(user.role)) {
+    orders = (await ordersRef.orderByChild("archivedAt").equalTo(null).once("value")).val() || {};
+  } else {
+    throw new HttpError(403, "Order access requires a supported role.");
+  }
+
+  const visibleOrders = Object.entries(orders)
     .map(([id, order]) => ({ id, ...order }))
     .filter((order) => !order.archivedAt)
-    .filter((order) => canAccessOrder(user, order, { allowAvailableRiderOrder: true }));
+    .filter((order) => canAccessOrder(user, order));
+  if (user.role === "rider") {
+    visibleOrders.push(...Object.entries(available).map(([id, order]) => ({ id, ...order, available: true })));
+  }
+  return visibleOrders.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+}
+
+function pagedEqualQuery(ref, child, value, { limit, before }) {
+  let result = ref.orderByChild(child).startAt(value);
+  result = before ? result.endAt(value, before) : result.endAt(value);
+  return result.limitToLast(limit + (before ? 2 : 1));
+}
+
+function pagedKeyQuery(ref, { limit, before }) {
+  let result = ref.orderByKey();
+  if (before) result = result.endAt(before);
+  return result.limitToLast(limit + (before ? 2 : 1));
+}
+
+export async function listOrdersPageForUser(db, user, options = {}) {
+  const limit = Math.max(1, Math.min(200, Number(options.limit || 50)));
+  const before = validRecordId(options.before) ? options.before : null;
+  const ordersRef = db.ref("orders");
+  let orders = {};
+  let available = {};
+  if (user.role === "customer") {
+    orders = (await pagedEqualQuery(ordersRef, "customerId", user.uid, { limit, before }).once("value")).val() || {};
+  } else if (user.role === "rider") {
+    const [assignedSnapshot, availableSnapshot] = await Promise.all([
+      pagedEqualQuery(ordersRef, "riderId", user.uid, { limit, before }).once("value"),
+      pagedKeyQuery(db.ref("availableDeliveries"), { limit, before }).once("value")
+    ]);
+    orders = assignedSnapshot.val() || {};
+    available = availableSnapshot.val() || {};
+  } else if (["owner", "staff"].includes(user.role)) {
+    orders = (await pagedEqualQuery(ordersRef, "archivedAt", null, { limit, before }).once("value")).val() || {};
+  } else {
+    throw new HttpError(403, "Order access requires a supported role.");
+  }
+
+  const visibleOrders = Object.entries(orders)
+    .map(([id, order]) => ({ id, ...order }))
+    .filter((order) => !order.archivedAt)
+    .filter((order) => canAccessOrder(user, order));
+  if (user.role === "rider") {
+    visibleOrders.push(...Object.entries(available).map(([id, order]) => ({ id, ...order, available: true })));
+  }
+  const unique = [...new Map(visibleOrders.map((order) => [order.id, order])).values()]
+    .filter((order) => order.id !== before)
+    .sort((left, right) => String(right.id).localeCompare(String(left.id)));
+  const hasMore = unique.length > limit;
+  const selected = unique.slice(0, limit);
+  const nextCursor = hasMore && selected.length ? selected.at(-1).id : null;
+  return {
+    orders: selected.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0)),
+    pagination: { limit, nextCursor }
+  };
 }

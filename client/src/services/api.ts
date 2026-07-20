@@ -30,9 +30,13 @@ type ApiPayload = Partial<ApiErrorResponse> & Record<string, unknown>;
 type ApiResult = Record<string, unknown>;
 
 export interface RegisterCustomerRequest extends JsonObject {
-  name?: string;
-  email?: string;
-  password?: string;
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  termsAccepted: true;
+  privacyAccepted: true;
+  botField?: string;
   turnstileToken?: string;
 }
 
@@ -42,8 +46,8 @@ export interface TwoFactorStatusResponse extends ApiResult {
   emailVerified?: boolean;
 }
 
-export type TwoFactorPurpose = "login" | "setup" | "verify" | string;
-export type TwoFactorMethod = "totp" | "email" | "sms" | string;
+export type TwoFactorPurpose = "setup" | "challenge";
+export type TwoFactorMethod = "totp" | "email" | "sms";
 
 export type OrderCreateRequest = Partial<Order> & {
   items: Array<Pick<MenuItem, "id"> & { qty: number }>;
@@ -190,6 +194,7 @@ export const api = {
   createOrder: (order: OrderCreateRequest) =>
     request("/orders", {
       method: "POST",
+      headers: order.idempotencyKey ? { "Idempotency-Key": order.idempotencyKey } : undefined,
       body: JSON.stringify(order),
     }),
   updateOrder: (orderId: EntityId, values: OrderUpdateRequest) =>
@@ -314,6 +319,11 @@ export const api = {
     request(`/admin/users/${encodeURIComponent(uid)}/2fa/unlock`, {
       method: "POST",
       body: "{}",
+    }),
+  setUserSuspension: (uid: EntityId, suspended: boolean, reason = "") =>
+    request(`/admin/users/${encodeURIComponent(uid)}/suspension`, {
+      method: "PATCH",
+      body: JSON.stringify({ suspended, reason }),
     }),
   sendAdminMessage: (uid: EntityId, title: string, message: string) =>
     request(`/admin/users/${encodeURIComponent(uid)}/message`, {

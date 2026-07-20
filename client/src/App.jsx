@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, CheckCheck, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
+import { Bell, CheckCheck, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
@@ -536,7 +536,7 @@ function NotificationCenter({ notifications, onClose }) {
   );
 }
 
-function StoreCartPanel({ cart, cartCount, cartSubtotal, add, decrease, remove, onCheckout }) {
+function StoreCartPanel({ cart, cartCount, cartSubtotal, add, decrease, remove, removedItem, onUndo, onCheckout }) {
   return (
     <div className="store-cart-panel" aria-label="Current order">
       <div className="cart-panel-heading">
@@ -567,12 +567,18 @@ function StoreCartPanel({ cart, cartCount, cartSubtotal, add, decrease, remove, 
           </div>
         ))}
       </div>
+      {removedItem && (
+        <div className="cart-undo-banner" role="status" aria-live="polite">
+          <div><strong>{removedItem.item.name}</strong><span>Removed from your cart.</span></div>
+          <button type="button" onClick={onUndo}><RotateCcw size={15} aria-hidden="true" />Undo</button>
+        </div>
+      )}
       <div className="store-cart-totals">
         <div><span>Subtotal</span><strong>{currency(cartSubtotal)}</strong></div>
         <div><span>Delivery</span><strong>Calculated at checkout</strong></div>
         <div><span>Estimated total</span><strong>{currency(cartSubtotal)}</strong></div>
       </div>
-      <button className="btn btn-danger w-100" disabled={!cart.length} onClick={onCheckout}>Choose delivery or pickup</button>
+      <button className="btn btn-danger w-100" disabled={!cart.length} onClick={onCheckout}>Continue to checkout <span aria-hidden="true">·</span> {currency(cartSubtotal)}</button>
     </div>
   );
 }
@@ -582,6 +588,7 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
   const [search, setSearch] = useState("");
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [removedItem, setRemovedItem] = useState(null);
   const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && menuAvailability(item).available), [menu]);
   const categories = useMemo(() => ["All", ...new Set(customerMenu.map((item) => item.category))], [customerMenu]);
   const visible = useMemo(() => customerMenu.filter((item) => {
@@ -615,8 +622,42 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
   const decrease = useCallback((productId) => setCart((current) => current
     .map((item) => item.id === productId ? { ...item, qty: item.qty - 1 } : item)
     .filter((item) => item.qty > 0)), [setCart]);
-  // erick: buong item ang tinatanggal kapag nagkamali ang customer sa cart.
-  const remove = useCallback((productId) => setCart((current) => current.filter((item) => item.id !== productId)), [setCart]);
+  const remove = useCallback((productId) => {
+    const index = cart.findIndex((item) => item.id === productId);
+    if (index < 0) return;
+    setRemovedItem({ item: cart[index], index });
+    setCart((current) => current.filter((item) => item.id !== productId));
+  }, [cart, setCart]);
+  const undoRemove = useCallback(() => {
+    if (!removedItem) return;
+    const product = customerMenu.find((item) => item.id === removedItem.item.id);
+    const availableStock = Math.max(0, Math.floor(Number(product?.stock ?? 0)));
+    const existingQty = Number(cart.find((item) => item.id === removedItem.item.id)?.qty || 0);
+    const restoreQty = Math.min(Number(removedItem.item.qty || 0), Math.max(0, availableStock - existingQty));
+    if (!product || restoreQty < 1) {
+      setRemovedItem(null);
+      notify?.(`${removedItem.item.name} is no longer available to restore.`);
+      return;
+    }
+    setCart((current) => {
+      const existing = current.find((item) => item.id === product.id);
+      if (existing) {
+        return current.map((item) => item.id === product.id ? { ...product, stock: availableStock, qty: Math.min(availableStock, item.qty + restoreQty) } : item);
+      }
+      const next = [...current];
+      next.splice(Math.min(removedItem.index, next.length), 0, { ...product, stock: availableStock, qty: restoreQty });
+      return next;
+    });
+    setRemovedItem(null);
+    notify?.(restoreQty < removedItem.item.qty
+      ? `Restored ${restoreQty} ${removedItem.item.name} based on current stock.`
+      : `${removedItem.item.name} restored to your cart.`);
+  }, [cart, customerMenu, notify, removedItem, setCart]);
+  useEffect(() => {
+    if (!removedItem) return undefined;
+    const timer = window.setTimeout(() => setRemovedItem(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [removedItem]);
   const checkout = () => {
     setMobileCartOpen(false);
     onCheckout();
@@ -682,7 +723,7 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
         </section>
 
         <aside className="store-cart-column">
-          <StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} onCheckout={checkout} />
+          <StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} removedItem={removedItem} onUndo={undoRemove} onCheckout={checkout} />
 
           <div className="storefront-brand-card checkout-brand-card">
             <BrandMark />
@@ -694,7 +735,7 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
         </aside>
       </section>
       {cart.length > 0 && <button className="floating-checkout btn btn-danger" onClick={() => setMobileCartOpen(true)}>Review order - {cartCount} item{cartCount === 1 ? "" : "s"}</button>}
-      {mobileCartOpen && <><button className="mobile-cart-backdrop" aria-label="Close order summary" onClick={() => setMobileCartOpen(false)} /><aside className="mobile-cart-sheet" aria-label="Mobile order summary"><header><div><p className="eyebrow text-danger">Order summary</p><strong>Review your cart</strong></div><button aria-label="Close order summary" onClick={() => setMobileCartOpen(false)}><X size={20} aria-hidden="true" /></button></header><StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} onCheckout={checkout} /></aside></>}
+      {mobileCartOpen && <><button className="mobile-cart-backdrop" aria-label="Close order summary" onClick={() => setMobileCartOpen(false)} /><aside className="mobile-cart-sheet" aria-label="Mobile order summary"><header><div><p className="eyebrow text-danger">Order summary</p><strong>Review your cart</strong></div><button aria-label="Close order summary" onClick={() => setMobileCartOpen(false)}><X size={20} aria-hidden="true" /></button></header><StoreCartPanel cart={cart} cartCount={cartCount} cartSubtotal={cartSubtotal} add={add} decrease={decrease} remove={remove} removedItem={removedItem} onUndo={undoRemove} onCheckout={checkout} /></aside></>}
     </main>
   );
 });

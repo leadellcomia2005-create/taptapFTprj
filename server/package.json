@@ -10,20 +10,24 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@google-cloud/dialogflow": "latest",
-    "cors": "latest",
-    "dotenv": "latest",
-    "express": "latest",
-    "express-rate-limit": "latest",
-    "firebase-admin": "latest",
-    "helmet": "latest",
-    "nodemailer": "^9.0.3",
-    "openai": "latest",
-    "qrcode": "^1.5.4",
-    "socket.io": "^4.8.1",
-    "twilio": "latest"
+    "@google-cloud/dialogflow": "7.6.2",
+    "cors": "2.8.6",
+    "dotenv": "17.4.2",
+    "express": "5.2.1",
+    "express-rate-limit": "8.5.2",
+    "firebase-admin": "14.0.0",
+    "helmet": "8.2.0",
+    "nodemailer": "9.0.3",
+    "openai": "6.42.0",
+    "qrcode": "1.5.4",
+    "socket.io": "4.8.3",
+    "twilio": "6.0.2",
+    "zod": "4.4.3"
   },
   "overrides": {
-    "uuid": "^11.1.1"
+    "uuid": "11.1.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "4.8.3"
   }
 }

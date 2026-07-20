@@ -5,7 +5,7 @@ import { saveRiderLocation, uploadProof } from "../../services/firebase/delivery
 import { updateOrder } from "../../services/firebase/orders";
 import { getSocket, sendRiderLocation } from "../../services/socket";
 import { estimateDeliveryRoute } from "../../utils/operations";
-import { ReasonModal } from "./SharedWorkspaceModules";
+import { ReasonModal } from "./WorkspaceModals";
 import { currency, isUnremittedCod, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
 
 const CameraProof = lazy(() => import("../../components/CameraProof"));

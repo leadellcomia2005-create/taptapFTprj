@@ -10,6 +10,7 @@ import {
 import {
   equalTo,
   get,
+  limitToLast,
   orderByChild,
   query,
   ref,
@@ -143,6 +144,7 @@ test("customers can read only their order and cannot change protected profile fi
   await assertSucceeds(update(ref(database, "users/customer-1"), { address: "Updated address" }));
   await assertFails(update(ref(database, "users/customer-1"), { phoneVerified: true }));
   await assertFails(update(ref(database, "users/customer-1"), { role: "owner" }));
+  await assertSucceeds(get(query(ref(database, "orders"), orderByChild("customerId"), equalTo("customer-1"), limitToLast(20))));
 });
 
 test("owner and staff operational access remains scoped", async () => {

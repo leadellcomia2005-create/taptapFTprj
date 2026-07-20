@@ -667,7 +667,7 @@ export function subscribeInventory(fallback, callback) {
       reorderPoint: inventory[item.id]?.reorderPoint ?? 10
     }));
     const added = Object.entries(inventory)
-      .filter(([id]) => !fallbackIds.has(id))
+      .filter(([id]) => !id.startsWith("__") && !fallbackIds.has(id))
       .map(([id, item]) => ({ id, ...(menu[id] || {}), ...item }));
     callback([...merged, ...added]);
   };
@@ -848,7 +848,8 @@ export function subscribeOrders(user, callback) {
   if (firebaseEnabled) {
     const normalize = (snapshot) => firebaseRecordList(snapshot.val(), isOrder).filter((order) => !order.archivedAt);
     if (["owner", "staff"].includes(user.role)) {
-      return onValue(ref(db, "orders"), (snapshot) => callback(normalize(snapshot)));
+      const activeOrders = query(ref(db, "orders"), orderByChild("archivedAt"), equalTo(null));
+      return onValue(activeOrders, (snapshot) => callback(normalize(snapshot)));
     }
     if (user.role === "customer") {
       const customerOrders = query(ref(db, "orders"), orderByChild("customerId"), equalTo(user.uid));

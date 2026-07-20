@@ -6,157 +6,11 @@ import { api } from "../../services/api";
 import { updateOrder } from "../../services/firebase/orders";
 import { bestSellers, forecastRunouts, orderPrepClock, peakOrderHours, slowMovingItems } from "../../utils/operations";
 import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
+import { ReasonModal } from "./WorkspaceModals";
 import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, isUnremittedCod, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
+import { auditActionLabel, auditCategories, auditCategory, auditDetailText, auditFriendlyMessage, auditRecordLabel, auditSearchText, auditSeverity, ownerPlanningDefaults, ownerPlanningStorageKey, safeAuditIdentifier, securityAuditActions } from "./ownerAudit";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
-const ownerPlanningStorageKey = "taptap-owner-planning";
-
-function ownerPlanningDefaults() {
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(ownerPlanningStorageKey) || "{}");
-    return {
-      salesGoal: Math.max(1, Number(saved.salesGoal || 100000)),
-      activePromotion: String(saved.activePromotion || "No active promotion")
-    };
-  } catch {
-    return { salesGoal: 100000, activePromotion: "No active promotion" };
-  }
-}
-
-const securityAuditActions = new Set([
-  "registration_security_check_passed",
-  "registration_started",
-  "registration_failed",
-  "registration_rate_limited",
-  "admin_user_created",
-  "role_changed",
-  "account_created",
-  "2fa_failure",
-  "2fa_lockout",
-  "2fa_success",
-  "2fa_password_reset_unlock",
-  "2fa_setup_started",
-  "2fa_sms_sent",
-  "2fa_email_sent",
-  "2fa_enabled",
-  "2fa_reset",
-  "2fa_unlocked",
-  "passkey_registered",
-  "passkey_verified"
-]);
-
-function auditActionLabel(action = "") {
-  return String(action || "audit event")
-    .replace(/^2fa_/, "Security ")
-    .replace(/^passkey_/, "Passkey ")
-    .replace(/^registration_/, "Registration ")
-    .replaceAll("_", " ");
-}
-
-function safeAuditIdentifier(entry = {}) {
-  if (entry.emailHash) return `Email hash ${String(entry.emailHash).slice(0, 12)}`;
-  if (entry.ipHash) return `IP hash ${String(entry.ipHash).slice(0, 12)}`;
-  if (entry.targetUserId) return `User ${String(entry.targetUserId).slice(0, 12)}`;
-  if (entry.userId) return `User ${String(entry.userId).slice(0, 12)}`;
-  if (entry.actorId) return `Actor ${String(entry.actorId).slice(0, 12)}`;
-  return "Safe identifier unavailable";
-}
-
-function auditDetailText(entry) {
-  if (entry.details?.before || entry.details?.after) {
-    const before = Object.entries(entry.details.before || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
-    const after = Object.entries(entry.details.after || {}).map(([key, value]) => `${key}: ${value ?? "-"}`).join(", ");
-    return [before && `Before ${before}`, after && `After ${after}`].filter(Boolean).join(" | ") || "-";
-  }
-  if (entry.provider) return `${entry.provider} check`;
-  if (entry.method) return `${entry.method} security`;
-  if (entry.hostname) return `Host ${entry.hostname}`;
-  return entry.status || entry.reason || (entry.quantity ? `Quantity ${entry.quantity}` : "-");
-}
-
-function auditCategory(entry = {}) {
-  const action = String(entry.action || "");
-  if (securityAuditActions.has(action) || action.startsWith("2fa_") || action.startsWith("passkey_") || action.startsWith("registration_")) return "security";
-  if (action === "admin_user_created" || action === "role_changed" || entry.targetUserId || action.includes("user")) return "users";
-  if (entry.orderId || action.includes("order") || action.includes("rider") || action.includes("cod")) return "orders";
-  if (entry.itemId || entry.itemName || action.includes("inventory") || action.includes("menu_") || action.includes("stock_")) return "inventory";
-  if (entry.shiftLogId || action.includes("shift") || action.includes("cash")) return "shifts";
-  return "system";
-}
-
-function auditSeverity(entry = {}) {
-  const action = String(entry.action || "");
-  if (["role_changed", "admin_user_created", "2fa_reset", "2fa_unlocked", "2fa_lockout", "owner_void_restored", "orders_archived"].includes(action)) return "critical";
-  if (["registration_failed", "registration_rate_limited", "inventory_adjusted", "order_cancel_restored", "complaint_created", "approval_rejected"].includes(action)) return "warning";
-  if (String(entry.reason || "").toLowerCase().includes("too many")) return "warning";
-  return "info";
-}
-
-function auditRecordLabel(entry = {}) {
-  return entry.orderId || entry.itemName || entry.itemId || entry.shiftLogId || entry.approvalId || entry.complaintId || entry.reviewId || entry.targetUserId || entry.userId || entry.uid || "-";
-}
-
-function auditFriendlyMessage(entry = {}) {
-  const action = String(entry.action || "");
-  const labels = {
-    account_created: "Customer account was created",
-    admin_user_created: "Owner created a team account",
-    approval_approved: "Owner approved a request",
-    approval_rejected: "Owner rejected a request",
-    approval_requested: "Staff requested approval",
-    complaint_created: "Customer submitted a complaint",
-    complaint_updated: "Complaint was updated",
-    inventory_adjusted: "Inventory stock was adjusted",
-    inventory_received: "Inventory stock was received",
-    menu_item_created: "Menu item was created",
-    menu_item_updated: "Menu item was updated",
-    menu_stock_updated: "Menu stock was updated",
-    order_cancel_restored: "Cancelled order stock was restored",
-    order_created: "Order was created",
-    order_deducted: "Order stock was deducted",
-    order_updated: "Order status was updated",
-    orders_archived: "Old orders were archived",
-    owner_void_restored: "Owner void restored inventory",
-    registration_failed: "Registration attempt was blocked",
-    registration_rate_limited: "Registration was temporarily limited",
-    registration_security_check_passed: "Registration security check passed",
-    registration_started: "Customer registration started",
-    review_moderated: "Review moderation was updated",
-    rider_auto_assigned: "Rider was auto-assigned",
-    role_changed: "Owner changed a user role",
-    shift_closed: "Staff shift was closed",
-    shift_started: "Staff shift was opened",
-    stock_count_approved: "Stock count was approved"
-  };
-  if (action.startsWith("2fa_")) return `Account security ${action.replace(/^2fa_/, "").replaceAll("_", " ")}`;
-  if (action.startsWith("passkey_")) return `Passkey ${action.replace(/^passkey_/, "").replaceAll("_", " ")}`;
-  return labels[action] || auditActionLabel(action);
-}
-
-function auditSearchText(entry = {}) {
-  return [
-    auditFriendlyMessage(entry),
-    auditActionLabel(entry.action),
-    auditRecordLabel(entry),
-    safeAuditIdentifier(entry),
-    auditDetailText(entry),
-    entry.actorName,
-    entry.actorRole,
-    entry.status,
-    entry.reason
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
-const auditCategories = [
-  ["all", "All logs"],
-  ["security", "Security"],
-  ["orders", "Orders"],
-  ["inventory", "Inventory"],
-  ["users", "Users / Roles"],
-  ["shifts", "Shift / Cash"],
-  ["system", "System"]
-];
-
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
@@ -185,6 +39,9 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [creatingUser, setCreatingUser] = useState(false);
   const [createdUserNotice, setCreatedUserNotice] = useState("");
   const [managedUsers, setManagedUsers] = useState([]);
+  const [suspensionTarget, setSuspensionTarget] = useState(null);
+  const [suspensionBusy, setSuspensionBusy] = useState(false);
+  const [suspensionError, setSuspensionError] = useState("");
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
   const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
@@ -323,6 +180,33 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       notify(error.message);
     }
   };
+  const openSuspensionAction = (account) => {
+    setSuspensionError("");
+    setSuspensionTarget(account);
+  };
+  const closeSuspensionAction = () => {
+    if (suspensionBusy) return;
+    setSuspensionTarget(null);
+    setSuspensionError("");
+  };
+  const updateSuspension = async (reason) => {
+    if (!suspensionTarget || suspensionBusy) return;
+    const nextSuspended = !suspensionTarget.suspended;
+    setSuspensionBusy(true);
+    setSuspensionError("");
+    try {
+      await api.setUserSuspension(suspensionTarget.uid, nextSuspended, reason);
+      notify(nextSuspended
+        ? `${suspensionTarget.name}'s account was suspended and active sessions were revoked.`
+        : `${suspensionTarget.name}'s account was reactivated. They can sign in again.`);
+      await refreshUsers();
+      setSuspensionTarget(null);
+    } catch (error) {
+      setSuspensionError(error.message);
+    } finally {
+      setSuspensionBusy(false);
+    }
+  };
   const sendAdminMessage = async (event) => {
     event.preventDefault();
     try {
@@ -433,13 +317,14 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="col-xl-7">
           <div className="dashboard-card">
             <div className="module-heading"><div><p className="eyebrow text-danger">Security status</p><h3>User accounts and security</h3></div><button className="btn btn-sm btn-outline-dark" onClick={refreshUsers}>Refresh list</button></div>
-            <div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Security</th><th>Security controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex flex-wrap gap-2"><button className="btn btn-sm btn-outline-danger" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}</div></td></tr>)}</tbody></table></div>
+            <div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Staff scope</th><th>Account</th><th>Security</th><th>Controls</th></tr></thead><tbody>{managedUsers.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No users found.</td></tr>}{managedUsers.map((account) => <tr key={account.uid}><td><strong>{account.name}</strong><small className="d-block text-secondary">{account.uid}</small></td><td>{account.email}</td><td><span className="role-badge">{account.role}</span></td><td>{account.role === "staff" ? staffRoleLabels[account.staffRole] || "Manager" : "-"}</td><td><span className={`stock-badge ${account.suspended ? "low" : "healthy"}`}>{account.suspended ? "Suspended" : "Active"}</span></td><td><span className={`stock-badge ${account.twoFactorEnabled && !account.twoFactorLocked ? "healthy" : "low"}`}>{account.twoFactorLocked ? "Locked" : account.twoFactorEnabled ? `${securityMethodLabels[account.twoFactorMethod] || "Security"} enabled` : "Not set up"}</span></td><td><div className="d-flex flex-wrap gap-2"><button className="btn btn-sm btn-outline-danger" type="button" onClick={() => securityAction(account.uid, "reset")}>Reset security</button>{account.twoFactorLocked && <button className="btn btn-sm btn-dark" type="button" onClick={() => securityAction(account.uid, "unlock")}>Unlock</button>}<button className={`btn btn-sm ${account.suspended ? "btn-outline-dark" : "btn-danger"}`} type="button" disabled={!account.suspended && account.uid === user.uid} title={!account.suspended && account.uid === user.uid ? "You cannot suspend the account you are currently using." : undefined} onClick={() => openSuspensionAction(account)}>{account.suspended ? "Reactivate" : "Suspend"}</button></div></td></tr>)}</tbody></table></div>
           </div>
         </div>
 
         <div className="col-xl-6"><form className="dashboard-card" onSubmit={updateRole}><h3>Assign existing user role</h3><p className="module-note">Use this when an account already exists and only needs a role correction.</p><label className="form-label">Account ID<input className="form-control" required value={roleForm.uid} onChange={(event) => setRoleForm((current) => ({ ...current, uid: event.target.value }))} /></label><label className="form-label">Role<select className="form-select" value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}><option>owner</option><option>staff</option><option>rider</option><option>customer</option></select></label>{roleForm.role === "staff" && <label className="form-label">Staff access scope<select className="form-select" value={roleForm.staffRole} onChange={(event) => setRoleForm((current) => ({ ...current, staffRole: event.target.value }))}>{Object.entries(staffRoleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}<button className="btn btn-danger w-100 mt-3">Update role</button></form></div>
         <div className="col-xl-6"><form className="dashboard-card" onSubmit={sendAdminMessage}><h3>Private admin notification</h3><label className="form-label">Recipient<select className="form-select" required value={adminMessage.uid} onChange={(event) => setAdminMessage((current) => ({ ...current, uid: event.target.value }))}><option value="">Select a user</option>{managedUsers.map((account) => <option key={account.uid} value={account.uid}>{account.name} ({account.role})</option>)}</select></label><label className="form-label">Title<input className="form-control" required value={adminMessage.title} onChange={(event) => setAdminMessage((current) => ({ ...current, title: event.target.value }))} /></label><label className="form-label">Message<textarea className="form-control" required maxLength="1000" rows="3" value={adminMessage.message} onChange={(event) => setAdminMessage((current) => ({ ...current, message: event.target.value }))} /></label><button className="btn btn-dark w-100 mt-3">Send only to this user</button></form></div>
       </div>
+      {suspensionTarget && <ReasonModal title={`${suspensionTarget.suspended ? "Reactivate" : "Suspend"} ${suspensionTarget.name}`} label="Account action reason" placeholder={suspensionTarget.suspended ? "Example: Review completed and access can be restored..." : "Example: Access review, team departure, or suspected compromise..."} confirmText={suspensionTarget.suspended ? "Reactivate account" : "Suspend account"} submitting={suspensionBusy} error={suspensionError} onClose={closeSuspensionAction} onSubmit={updateSuspension} />}
     </main>
   );
   if (section === "owner-reviews") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Customer voice</p><h2>Reviews & Complaints</h2></div></div><div className="row g-3"><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div><div className="col-12"><ReviewModerationModule reviews={reviews} user={user} notify={notify} /></div></div></main>;

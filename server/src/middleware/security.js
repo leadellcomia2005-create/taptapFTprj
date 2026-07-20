@@ -27,8 +27,10 @@ export function requireRoles(...allowedRoles) {
 }
 
 export function errorResponse(error) {
+  const suppliedStatus = Number(error?.status);
+  const status = Number.isInteger(suppliedStatus) && suppliedStatus >= 400 && suppliedStatus <= 599 ? suppliedStatus : 500;
   return {
-    status: error?.status || 500,
-    message: error?.status ? error.message : "The server could not complete the request."
+    status,
+    message: status < 500 ? error.message : "The server could not complete the request."
   };
 }

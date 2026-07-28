@@ -168,6 +168,7 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
         containerRef.current.replaceChildren();
         widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: siteKey,
+          action: "customer_registration",
           theme: "light",
           callback(token) {
             setStatus("verified");

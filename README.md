@@ -6,6 +6,13 @@ prototype remains in the separate `taptap-foodtrip` folder.
 The current modular-monolith boundaries, security model, environment modes,
 test commands, and free-service limits are documented in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Staging isolation, backups, restore rehearsals, deployment checks, rollback,
+and emergency owner access are documented in
+[`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md).
+Privacy-safe operational metrics, alert thresholds, and the current CSP/App Check decisions are in
+[`docs/SECURITY_MONITORING.md`](docs/SECURITY_MONITORING.md).
+FCM, Analytics, Performance Monitoring, Turnstile, and PWA opt-in setup is in
+[`docs/NO_COST_INTEGRATIONS.md`](docs/NO_COST_INTEGRATIONS.md).
 
 ## Technology coverage
 
@@ -22,12 +29,14 @@ test commands, and free-service limits are documented in
 | Firebase Realtime Database | Menu, users, orders, inventory, chat and rider GPS |
 | Firebase Storage | Upload integration is present; the free local setup keeps it disabled |
 | Firebase Analytics | Privacy-limited landing, authentication, checkout and purchase funnel events |
+| Firebase Cloud Messaging | Optional user-enabled browser order alerts with private token storage |
+| Firebase Performance Monitoring | Optional lazy production traces without customer data |
 | Firebase Hosting | Deployment configuration is present but is not needed locally |
 | Firebase Cloud Functions | Matching secure API implementation is included but not deployed on Spark |
 | Socket.IO | Low-latency rider location and order broadcasts |
 | Dialogflow ES | FAQ and known-intent chatbot responses |
 | OpenAI API | Optional code retained but deferred and disabled for this update |
-| PayMongo | Optional code retained; COD/manual payment is the tested path |
+| PayMongo | Optional hosted GCash checkout with test/live isolation and signed webhook confirmation |
 | Twilio | Optional code retained; website notifications, TOTP, and email are the tested paths |
 | TOTP / QR code | Mandatory two-factor enrollment and per-session verification |
 | Gmail SMTP | Customer-only six-digit email OTP as an alternative 2FA method |
@@ -138,6 +147,11 @@ The site key is public and safe for the browser. The secret key must stay on
 the backend. If Turnstile keys are not configured, the app still uses the
 hidden bot field and registration rate limits.
 
+The widget and server both use the `customer_registration` action. Optional
+hostname overrides and the development-only bypass are documented in
+`docs/NO_COST_INTEGRATIONS.md`. The server rejects a bypass when
+`NODE_ENV=production`.
+
 ## Free Spark setup
 
 The working project uses Firebase Authentication and Realtime Database on the
@@ -173,8 +187,9 @@ This repository is linked to Firebase project
    keep this setup free.
 7. The default `npm run deploy` command runs the complete release validation
    gate and deploys Database rules only when every check passes.
-8. Keep OpenAI, Twilio, and PayMongo credentials empty during the current
-   update. Their optional integrations are deferred.
+8. Keep OpenAI and Twilio credentials empty unless those integrations are
+   intentionally enabled. PayMongo can remain disabled or be configured in
+   test mode using [the credential-safe setup guide](docs/PAYMONGO_TEST_SETUP.md).
 9. The paid deployment command remains intentionally separate and must not be
    used for the free-first setup: `npm run deploy:paid-services`.
 
@@ -193,14 +208,14 @@ Set its environment variables and update `VITE_SOCKET_URL` to the Cloud Run
 URL before building the client. Every rider GPS update is broadcast by
 Socket.IO and mirrored into Firebase Realtime Database.
 
-## Deferred third-party integrations
+## Optional third-party integrations
 
-OpenAI, Twilio, and PayMongo are deliberately not configured, called, or
-webhook-tested in this update. Their optional code and disabled fallbacks are
-preserved. Credentials alone do not activate them; their `ENABLE_OPENAI`,
-`ENABLE_TWILIO`, or `ENABLE_PAYMONGO` server flag must also be exactly `true`.
-COD/manual payment, deterministic assistant responses, website
-notifications, TOTP, and existing email options cover local demonstrations.
+OpenAI and Twilio remain deferred. PayMongo hosted checkout is implemented but
+stays disabled until a mode-matched secret key, webhook secret, and
+`ENABLE_PAYMONGO=true` are configured. See
+[`docs/PAYMONGO_TEST_SETUP.md`](docs/PAYMONGO_TEST_SETUP.md) before enabling it.
+COD/manual payment, deterministic assistant responses, website notifications,
+TOTP, and existing email options continue to cover local demonstrations.
 
 Camera, geolocation, and passkeys require HTTPS outside localhost.
 
@@ -247,8 +262,9 @@ does not remove dependencies, source assets, environment files, or credentials.
   order rooms. Rider GPS updates are assignment-checked and rate-limited.
 - Customer support messages, reviews and notifications are queried and
   authorized by account or role instead of being downloaded globally.
-- Any future PayMongo or Twilio webhook must validate provider signatures
-  before either integration is enabled.
+- The PayMongo webhook verifies the raw-body HMAC signature, mode, session,
+  order reference, currency, and amount before recording payment. Any future
+  Twilio webhook must apply equivalent provider authentication.
 - Never commit `.env`, Firebase service-account JSON or API keys.
 - Realtime Database rules are covered by the Emulator Suite; Storage remains
   denied and Functions remain undeployed.

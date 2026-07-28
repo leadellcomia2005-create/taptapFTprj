@@ -27,7 +27,12 @@ test("shares canonical role, order, complaint, notification, and location contra
     title: "Order ready",
     message: "Your order is ready.",
     type: "order",
-    createdAt: 1
+    createdAt: 1,
+    entityType: "order",
+    entityId: "order-1",
+    displayReference: "TAP-4821",
+    amount: 475,
+    actionView: "orders"
   }).success, true);
   assert.equal(orderContractSchema.safeParse({
     customerId: "customer-1",

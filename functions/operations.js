@@ -11,10 +11,13 @@ export {
   createMenuItemRecord,
   createOrderRecord,
   listOrdersForUser,
-  saveDeliveryProofRecord,
-  saveRiderLocationRecord,
   saveShiftLogRecord,
   updateMenuItemRecord,
   updateOrderRecord,
   updateReviewRecord
 } from "../server/src/business.js";
+
+export {
+  saveDeliveryProofRecord,
+  saveRiderLocationRecord
+} from "../server/src/application/delivery.js";

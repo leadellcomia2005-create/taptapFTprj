@@ -181,8 +181,15 @@ export interface Order {
   paymentMethod: PaymentMethod;
   paymentStatus?: PaymentStatus;
   paymentProvider?: "paymongo" | PaymentMethod | string;
+  providerSessionId?: string;
+  providerPaymentId?: string;
+  providerEventId?: string;
+  providerLivemode?: boolean;
+  providerPaidAt?: TimestampMs;
+  checkoutCreatedAt?: TimestampMs;
   paymentRequiredAt?: TimestampMs | null;
   paymentConfirmedAt?: TimestampMs | null;
+  refundStatus?: "owner-review" | "pending" | "completed" | string;
   status: OrderStatus;
   source?: "online" | "walk-in-pos" | string;
   cashierId?: EntityId | null;
@@ -415,6 +422,17 @@ export type NotificationType =
   | "admin"
   | "system";
 
+export type NotificationEntityType =
+  | "order"
+  | "complaint"
+  | "delivery"
+  | "payment"
+  | "inventory"
+  | "review"
+  | "shift"
+  | "chat"
+  | "system";
+
 export interface Notification {
   id: EntityId;
   targetUserId?: EntityId;
@@ -423,6 +441,11 @@ export interface Notification {
   message: string;
   type: NotificationType | string;
   orderId?: EntityId;
+  entityType?: NotificationEntityType;
+  entityId?: EntityId;
+  displayReference?: string;
+  amount?: number;
+  actionView?: string;
   readAt?: TimestampMs | null;
   createdAt: TimestampMs;
   expiresAt?: TimestampMs;

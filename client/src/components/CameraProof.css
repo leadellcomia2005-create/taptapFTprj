@@ -1,0 +1,90 @@
+.camera-modal {
+  z-index: 1100;
+}
+
+.proof-requirement-card {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #fff8f6;
+  border: 1px solid rgba(217, 54, 36, .18);
+  border-radius: 10px;
+}
+
+.proof-requirement-card strong,
+.proof-requirement-card span {
+  display: block;
+}
+
+.proof-requirement-card strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.proof-requirement-card span {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.proof-handoff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.proof-handoff-grid label small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.proof-signature {
+  grid-column: 1 / -1;
+}
+
+.proof-preview {
+  width: 100%;
+  max-height: 48vh;
+  display: block;
+  object-fit: contain;
+  background: #17130f;
+  border-radius: 8px;
+}
+
+.proof-camera-tip,
+.proof-required-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.proof-camera-tip.warning,
+.proof-required-note {
+  color: var(--red);
+  font-weight: 800;
+}
+
+@media (max-width: 560px) {
+  .proof-handoff-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .proof-signature {
+    grid-column: auto;
+  }
+
+  .proof-preview {
+    max-height: 42vh;
+  }
+}

@@ -23,6 +23,7 @@ async function fetchOk(pathname, name, expectedType = "") {
 const landing = await fetchOk("/", "landing page serves", "text/html");
 const landingHtml = await landing.text();
 record("landing page has React root", landingHtml.includes('id="root"'));
+record("landing page links the web manifest", landingHtml.includes('rel="manifest"') && landingHtml.includes("/manifest.webmanifest"));
 
 await fetchOk("/assets/hero-food.png", "hero PNG fallback loads", "image/");
 await fetchOk("/assets/hero-food.webp", "hero WebP loads", "image/");
@@ -31,6 +32,15 @@ await fetchOk("/assets/taptap-logo.png", "logo PNG fallback loads", "image/");
 await fetchOk("/assets/taptap-logo.webp", "logo WebP loads", "image/");
 await fetchOk("/assets/taptap-logo.avif", "logo AVIF loads", "image/");
 await fetchOk("/robots.txt", "robots file loads", "text/plain");
+const manifestResponse = await fetchOk("/manifest.webmanifest", "PWA manifest loads", "application/manifest+json");
+const manifest = await manifestResponse.json();
+record("PWA manifest uses TapTap branding", manifest.name === "TapTap Foodtrip" && manifest.start_url === "/" && manifest.icons?.length >= 1);
+const offlineResponse = await fetchOk("/offline.html", "offline fallback loads", "text/html");
+record("offline fallback explains private data is not cached", (await offlineResponse.text()).includes("private records are never served from an offline cache"));
+const serviceWorkerResponse = await fetchOk("/service-worker.js", "shared PWA and messaging worker loads", "javascript");
+const serviceWorker = await serviceWorkerResponse.text();
+record("service worker excludes private routes", serviceWorker.includes("/api/") && serviceWorker.includes("checkout") && serviceWorker.includes("notifications"));
+record("service worker removes old static caches", serviceWorker.includes("caches.keys") && serviceWorker.includes("caches.delete"));
 
 const authPanels = await readFile(new URL("../src/features/auth/AuthPanels.jsx", import.meta.url), "utf8");
 record("customer login modal entry exists", authPanels.includes("login-modal-title"));
@@ -71,6 +81,9 @@ record("analytics funnel includes entry, auth, and checkout", analyticsService.i
 record("analytics payload excludes customer private fields", !/customer(Id|Name|Email)|phone|address|location|latitude|longitude|notes|otp/i.test(analyticsService));
 
 const appShell = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+const notificationCenter = await readFile(new URL("../src/components/NotificationCenter.tsx", import.meta.url), "utf8");
+const pushNotifications = await readFile(new URL("../src/services/pushNotifications.ts", import.meta.url), "utf8");
+const pwaService = await readFile(new URL("../src/services/pwa.ts", import.meta.url), "utf8");
 record("owner workspace is reachable", appShell.includes("<OwnerWorkspace"));
 record("staff workspace is reachable", appShell.includes("<StaffWorkspace"));
 record("rider workspace is reachable", appShell.includes("<RiderWorkspace"));
@@ -78,7 +91,11 @@ record("storefront total waits for fulfillment choice", appShell.includes("Calcu
 record("storefront search and availability filters exist", appShell.includes("menu-search-field") && appShell.includes("menu-availability-filter"));
 record("mobile cart sheet replaces direct floating checkout", appShell.includes("mobile-cart-sheet") && appShell.includes("Review order -"));
 record("checkout conversion events use the analytics boundary", appShell.includes("trackCheckoutStart") && appShell.includes("trackCheckoutAbandonment"));
-record("notifications require explicit read action", appShell.includes("Mark all read") && !appShell.includes("api.markAllNotificationsRead().catch"));
+record("notifications require explicit read action", notificationCenter.includes("Mark all read") && notificationCenter.includes("markNotificationRead(notification.id, user.uid)") && !notificationCenter.includes("api.markAllNotificationsRead().catch"));
+record("notifications clear only read records", notificationCenter.includes("Clear read notifications") && notificationCenter.includes("clearReadNotifications(user.uid)") && !notificationCenter.includes("window.confirm"));
+record("notification destinations are role scoped", notificationCenter.includes("navigationForUser(user)") && notificationCenter.includes("allowedViews.has(requested)"));
+record("notification permission is requested only by the explicit enable action", pushNotifications.includes("export async function enablePushNotifications") && pushNotifications.indexOf("Notification.requestPermission()") > pushNotifications.indexOf("export async function enablePushNotifications") && notificationCenter.includes("onClick={handlePushPreference}"));
+record("one production service worker handles PWA and messaging", pwaService.includes('register("/service-worker.js"') && !pwaService.includes("firebase-messaging-sw"));
 
 record("2FA continuation text is role aware", authPanels.includes("Continue to ordering") && authPanels.includes("Open owner dashboard") && authPanels.includes("Open staff workspace") && authPanels.includes("Open rider dashboard"));
 record("POS-specific customer continuation text is removed", !authPanels.includes("Verify and open POS"));

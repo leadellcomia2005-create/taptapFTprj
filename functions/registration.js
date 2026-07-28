@@ -83,7 +83,15 @@ export function validateCustomerRegistration(input = {}) {
   return { name, email, password, turnstileToken, termsAccepted: true, privacyAccepted: true };
 }
 
-export async function verifyTurnstileToken({ secret, token, req }) {
+export async function verifyTurnstileToken({
+  secret,
+  token,
+  req,
+  expectedAction = "customer_registration",
+  allowedHostnames = [],
+  fetchImpl = fetch,
+  now = Date.now()
+}) {
   const cleanSecret = typeof secret === "string" ? secret.trim() : "";
   const cleanToken = typeof token === "string" ? token.trim() : "";
   if (!cleanSecret) return { configured: false };
@@ -97,7 +105,7 @@ export async function verifyTurnstileToken({ secret, token, req }) {
 
   let payload;
   try {
-    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    const response = await fetchImpl("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       body
     });
@@ -112,11 +120,29 @@ export async function verifyTurnstileToken({ secret, token, req }) {
     throw new HttpError(400, "Complete the security check before creating an account.");
   }
 
+  const action = cleanText(payload.action || "", 80);
+  const hostname = cleanText(payload.hostname || "", 120).toLowerCase();
+  const challengeTs = cleanText(payload.challenge_ts || "", 80);
+  const challengeTime = Date.parse(challengeTs);
+  const normalizedHostnames = allowedHostnames
+    .map((value) => cleanText(value, 120).toLowerCase())
+    .filter(Boolean);
+
+  if (
+    action !== expectedAction
+    || !Number.isFinite(challengeTime)
+    || challengeTime > now + 60_000
+    || now - challengeTime > 5 * 60_000
+    || (normalizedHostnames.length > 0 && !normalizedHostnames.includes(hostname))
+  ) {
+    throw new HttpError(400, "Complete the security check before creating an account.");
+  }
+
   return {
     configured: true,
-    hostname: cleanText(payload.hostname || "", 120),
-    action: cleanText(payload.action || "", 80),
-    challengeTs: cleanText(payload.challenge_ts || "", 80)
+    hostname,
+    action,
+    challengeTs
   };
 }
 

@@ -10,8 +10,9 @@ import { sendOrderReceiptEmail } from "../services.js";
 import { createOrderSchema, orderListQuerySchema, recordIdParams, updateOrderSchema } from "../contracts/schemas.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.js";
+import { dispatchOrderPush } from "../pushNotifications.js";
 
-export function createOrdersRouter({ firebase, authentication, realtime }) {
+export function createOrdersRouter({ config, firebase, authentication, realtime, logger }) {
   const router = Router();
   const { authenticate } = authentication;
 
@@ -34,12 +35,32 @@ export function createOrdersRouter({ firebase, authentication, realtime }) {
     const receiptEmail = result.idempotent
       ? { sent: false, skipped: "idempotent-replay" }
       : await sendOrderReceiptEmail({ id: result.id, ...result.order }).catch(() => ({ sent: false }));
+    if (!result.idempotent) {
+      await dispatchOrderPush({
+        firebase,
+        db: firebase.db(),
+        orderId: result.id,
+        order: result.order,
+        created: true,
+        appBaseUrl: config.appBaseUrl,
+        logger
+      });
+    }
     realtime.emit(["role:owner", "role:staff", `user:${req.user.uid}`], "order:created", result);
     res.status(result.idempotent ? 200 : 201).json({ ...result, receiptEmail });
   }));
 
   router.patch("/orders/:orderId", authenticate, validateParams(recordIdParams("orderId")), validateBody(updateOrderSchema), asyncRoute(async (req, res) => {
     const result = await updateOrderRecord(firebase.db(), req.user, req.params.orderId, req.body);
+    await dispatchOrderPush({
+      firebase,
+      db: firebase.db(),
+      orderId: req.params.orderId,
+      order: result.order,
+      changes: result.changes,
+      appBaseUrl: config.appBaseUrl,
+      logger
+    });
     realtime.emit([
       `order:${req.params.orderId}`,
       "role:owner",

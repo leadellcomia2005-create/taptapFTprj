@@ -12,10 +12,13 @@ export function notFoundHandler(req, res) {
   });
 }
 
-export function createErrorHandler(logger) {
+export function createErrorHandler(logger, metrics) {
   return (error, req, res, next) => {
     if (res.headersSent) return next(error);
     const response = errorResponse(error);
+    if (response.status === 409 && /stock|inventory|oversell|available/i.test(String(error?.message || ""))) {
+      metrics?.increment("stockConflicts");
+    }
     const publicError = response.status < 500;
     if (response.status >= 500) {
       logger.error("http_request_failed", {

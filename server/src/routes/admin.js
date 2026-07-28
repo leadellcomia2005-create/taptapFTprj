@@ -5,11 +5,19 @@ import {
   adminMessageSchema,
   archiveOrdersSchema,
   managedAccountSchema,
+  recoveryApplySchema,
+  recoveryPreviewSchema,
+  recoveryScanQuerySchema,
   recordIdParams,
   roleChangeSchema
 } from "../contracts/schemas.js";
+import {
+  executeRecoveryAction,
+  previewRecoveryAction,
+  scanRecoveryIssues
+} from "../application/recovery.js";
 import { asyncRoute } from "../middleware/errors.js";
-import { validateBody, validateParams } from "../middleware/validation.js";
+import { validateBody, validateParams, validateQuery } from "../middleware/validation.js";
 import { createNotification } from "../notifications.js";
 import { HttpError, requireRoles } from "../security.js";
 import { resetTwoFactor, unlockTwoFactor } from "../twoFactor.js";
@@ -45,12 +53,30 @@ async function listAllUsers(auth) {
   return users;
 }
 
-export function createAdminRouter({ firebase, authentication }) {
+export function createAdminRouter({ firebase, authentication, metrics }) {
   const router = Router();
   const { authenticate } = authentication;
 
   router.post("/admin/archive-orders", authenticate, requireRoles("owner"), validateBody(archiveOrdersSchema), asyncRoute(async (req, res) => {
     res.json(await archiveCompletedOrdersRecord(firebase.db(), req.user, req.body));
+  }));
+
+  router.get("/admin/recovery/scan", authenticate, requireRoles("owner"), validateQuery(recoveryScanQuerySchema), asyncRoute(async (req, res) => {
+    const result = await scanRecoveryIssues(firebase.db(), req.user, req.validatedQuery);
+    metrics?.recordRecoverySummary(result.summary);
+    res.json(result);
+  }));
+
+  router.get("/admin/metrics", authenticate, requireRoles("owner"), (_req, res) => {
+    res.json({ metrics: metrics?.snapshot() || null });
+  });
+
+  router.post("/admin/recovery/preview", authenticate, requireRoles("owner"), validateBody(recoveryPreviewSchema), asyncRoute(async (req, res) => {
+    res.json(await previewRecoveryAction(firebase.db(), req.user, req.body));
+  }));
+
+  router.post("/admin/recovery/apply", authenticate, requireRoles("owner"), validateBody(recoveryApplySchema), asyncRoute(async (req, res) => {
+    res.json(await executeRecoveryAction(firebase.db(), req.user, req.body));
   }));
 
   router.post("/admin/roles", authenticate, requireRoles("owner"), validateBody(roleChangeSchema), asyncRoute(async (req, res) => {

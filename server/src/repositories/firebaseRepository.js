@@ -10,6 +10,19 @@ export function createFirebaseRepository(db) {
     async read(path) {
       return (await db.ref(path).once("value")).val();
     },
+    async readPage(path, { orderBy = "createdAt", equalTo, limit, cursor } = {}) {
+      let target = orderBy === "key"
+        ? db.ref(path).orderByKey()
+        : db.ref(path).orderByChild(orderBy);
+      if (equalTo !== undefined) {
+        target = target.startAt(equalTo);
+        target = cursor?.id ? target.endAt(equalTo, cursor.id) : target.endAt(equalTo);
+      } else if (cursor) {
+        target = target.endAt(cursor.value, cursor.id);
+      }
+      const extra = cursor ? 2 : 1;
+      return (await target.limitToLast(limit + extra).once("value")).val() || {};
+    },
     async set(path, value) {
       await db.ref(path).set(value);
       return value;

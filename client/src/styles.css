@@ -862,13 +862,6 @@ button { font: inherit; }
 .route-eta-chip strong { font-size: 12px; }
 .route-eta-chip span { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .tracking-status-text { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.camera-modal { z-index: 1100; }
-.proof-handoff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; padding: 12px; background: var(--paper-soft); border: 1px solid var(--line); border-radius: 8px; }
-.proof-handoff-grid label small { color: var(--muted); font-size: 8px; font-weight: 800; text-transform: none; letter-spacing: 0; }
-.proof-signature { grid-column: 1 / -1; }
-.proof-preview { width: 100%; max-height: 48vh; display: block; object-fit: contain; background: #17130f; border-radius: 8px; }
-.proof-camera-tip,.proof-required-note { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 1.45; }
-.proof-camera-tip.warning,.proof-required-note { color: var(--red); font-weight: 800; }
 .proof-viewer-modal { overflow: hidden; border: 0; border-radius: 14px; }
 .proof-viewer-modal .modal-header { align-items: flex-start; background: var(--paper-soft); border-bottom: 1px solid var(--line); }
 .proof-viewer-modal .modal-title { margin: 2px 0 0; font: 700 24px var(--display); }
@@ -1190,17 +1183,6 @@ button { font: inherit; }
 .assistant-panel form { display: flex; gap: 7px; padding: 11px; }.assistant-panel input { min-width: 0; flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; }.assistant-panel form button { color: white; border: 0; background: var(--red); border-radius: 8px; font-size: 9px; font-weight: 800; }
 .offline-banner { position: sticky; top: 0; z-index: 1040; padding: 10px 18px; color: #fff8ef; background: #3a211b; text-align: center; font-size: 11px; font-weight: 800; box-shadow: 0 8px 22px rgba(32,25,20,.18); }
 .app-toast { position: fixed; z-index: 1200; left: 50%; bottom: 25px; padding: 12px 18px; color: white; background: var(--ink); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.22); transform: translateX(-50%); font-size: 10px; }
-.notification-backdrop { position: fixed; z-index: 1240; inset: 0; border: 0; background: rgba(20,17,13,.35); backdrop-filter: blur(2px); }
-.notification-center { position: fixed; z-index: 1250; top: 0; right: 0; width: min(420px,100vw); height: 100dvh; display: flex; flex-direction: column; background: white; box-shadow: -20px 0 60px rgba(25,20,14,.2); }
-.notification-center > header { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 23px; border-bottom: 1px solid var(--line); }
-.notification-center > header h3 { margin: 5px 0 0; font: 700 27px var(--display); }.notification-center > header button { color: var(--muted); border: 0; background: transparent; font-size: 25px; }
-.notification-tools { display: flex; align-items: center; gap: 10px; }.notification-center > header .clear-notifications { color: var(--red); font-size: 9px; font-weight: 800; }.clear-notifications:disabled { opacity: .4; }
-.notification-list { overflow-y: auto; padding: 12px; }
-.notification-list > article { position: relative; width: 100%; display: grid; grid-template-columns: 38px minmax(0,1fr) 8px 24px; gap: 11px; padding: 14px; text-align: left; border-bottom: 1px solid var(--line); background: white; border-radius: 10px; }
-.notification-list > article.unread { background: #fff7f5; }.notification-list > article > i { width: 7px; height: 7px; align-self: center; background: var(--red); border-radius: 50%; }
-.notification-dismiss { width: 24px; height: 24px; padding: 0; color: var(--muted); border: 0; background: transparent; border-radius: 50%; font-size: 9px; font-weight: 900; }.notification-dismiss:hover { color: white; background: var(--red); }
-.notification-icon { width: 38px; height: 38px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 11px; font-size: 10px; font-weight: 900; }.notification-icon.order,.notification-icon.sale { background: var(--red); }.notification-icon.chat { background: #3e6e9b; }.notification-icon.delivery { background: var(--green); }.notification-icon.review { color: var(--ink); background: var(--gold); }
-.notification-list strong,.notification-list time { display: block; }.notification-list strong { font-size: 10px; }.notification-list p { margin: 4px 0; color: var(--muted); font-size: 9px; line-height: 1.5; }.notification-list time { color: #aaa096; font-size: 7px; }
 
 @media (max-width: 1180px) {
   .storefront-shell { grid-template-columns: 1fr; }
@@ -1372,9 +1354,6 @@ button { font: inherit; }
   .proof-photo-frame { min-height: 240px; }
   .proof-photo-frame img { max-height: 54vh; }
   .proof-detail-grid { grid-template-columns: 1fr; }
-  .proof-handoff-grid { grid-template-columns: 1fr; }
-  .proof-signature { grid-column: auto; }
-  .proof-preview { max-height: 42vh; }
   .checkout-sms-actions { align-items: stretch; flex-direction: column; }
   .checkout-sms-actions .btn { width: 100%; }
   .checkout-draft-notice { align-items: stretch; flex-direction: column; }
@@ -3075,21 +3054,6 @@ button:not(:disabled),
 }
 
 /* Four-role dashboard workflow improvements */
-.mark-notifications-read {
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  color: var(--green);
-  border: 1px solid rgba(40,117,81,.24);
-  background: #edf8f1;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 900;
-}
-.mark-notifications-read:disabled { opacity: .48; cursor: not-allowed; }
-.notification-dismiss { display: grid; place-items: center; }
 .storefront-filter-bar {
   display: grid;
   grid-template-columns: minmax(240px,1fr) auto;
@@ -3655,28 +3619,6 @@ button:not(:disabled),
 }
 .readiness-fix b {
   color: var(--red);
-}
-.proof-requirement-card {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding: 12px;
-  background: #fff8f6;
-  border: 1px solid rgba(217,54,36,.18);
-  border-radius: 10px;
-}
-.proof-requirement-card strong,
-.proof-requirement-card span {
-  display: block;
-}
-.proof-requirement-card strong {
-  color: var(--ink);
-  font-size: 11px;
-}
-.proof-requirement-card span {
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.45;
 }
 .rider-proof-note {
   display: grid;
@@ -4884,6 +4826,15 @@ button:not(:disabled),
   }
 }
 
+@media (min-width: 621px) and (max-width: 900px) {
+  .login-home-header {
+    grid-template-columns: auto minmax(0,1fr) auto;
+  }
+  .login-home-nav {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 620px) {
   .login-home {
     padding-bottom: 84px;
@@ -5176,11 +5127,7 @@ button:not(:disabled),
 
 @media (max-width: 760px) {
   .notification-button,
-  .notification-dismiss,
-  .notification-center > header button,
   .pos-remove { min-width: 44px; min-height: 44px; }
-  .notification-tools { gap: 6px; }
-  .mark-notifications-read { min-height: 44px; }
   .dashboard-card .form-control,
   .dashboard-card .form-select,
   .report-date-field input { min-height: 44px; }

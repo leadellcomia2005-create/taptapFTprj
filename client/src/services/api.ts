@@ -67,6 +67,28 @@ export type ReviewUpdateRequest = Partial<Review>;
 export type ComplaintUpdateRequest = Partial<Complaint>;
 export type ShiftLogRequest = Partial<ShiftLog>;
 export type NotificationRequest = Partial<Notification>;
+export type HistoryCollection = "audit-logs" | "reports" | "complaints" | "reviews" | "notifications" | "shift-logs";
+
+export interface PaymentCheckoutResponse extends ApiResult {
+  id: string;
+  checkoutUrl: string;
+  reused: boolean;
+}
+
+export interface PushNotificationStatusResponse extends ApiResult {
+  configured: boolean;
+  enabled: boolean;
+  tokenCount: number;
+}
+
+export interface HistoryPage<T extends ApiResult = ApiResult> extends ApiResult {
+  records: Array<T & { id: EntityId }>;
+  pagination: {
+    limit: number;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
+}
 
 export interface ApprovalRequest extends JsonObject {
   type: string;
@@ -80,6 +102,56 @@ export interface ManagedUserRequest extends JsonObject {
   temporaryPassword?: string;
   role: UserRole | string;
   staffRole?: StaffRole | string;
+}
+
+export type RecoveryIssueType =
+  | "incomplete_cancellation"
+  | "order_quantity_mismatch"
+  | "failed_notification_delivery"
+  | "missing_order_aggregate"
+  | "unresolved_cod_handoff"
+  | "missing_delivery_proof"
+  | "stock_projection_mismatch"
+  | "stale_idempotency_claim";
+
+export interface RecoveryIssue extends ApiResult {
+  id: string;
+  type: RecoveryIssueType;
+  recordId: EntityId;
+  summary: string;
+  severity: "warning" | "critical";
+  actionable: boolean;
+}
+
+export interface RecoveryScanResponse extends ApiResult {
+  generatedAt: number;
+  issues: RecoveryIssue[];
+  summary: Record<string, number>;
+  scanned: Record<string, number>;
+  truncated: boolean;
+}
+
+export interface RecoveryPreviewResponse extends ApiResult {
+  issueId: string;
+  type: RecoveryIssueType;
+  recordId: EntityId;
+  previewHash: string;
+  changes: string[];
+  dryRun: true;
+}
+
+export interface RecoveryApplyRequest extends JsonObject {
+  issueId: string;
+  reason: string;
+  requestId: string;
+  previewHash: string;
+  confirmation: "APPLY_RECOVERY";
+}
+
+export interface RecoveryApplyResponse extends ApiResult {
+  status: string;
+  recordId: EntityId;
+  idempotent: boolean;
 }
 
 function customerSafeError(message = ""): string {
@@ -134,6 +206,13 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
 
 export const api = {
   status: () => request("/status"),
+  listHistory: <T extends ApiResult = ApiResult>(collection: HistoryCollection, options: { limit?: number; before?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (options.limit) search.set("limit", String(options.limit));
+    if (options.before) search.set("before", options.before);
+    const query = search.size ? `?${search.toString()}` : "";
+    return request<HistoryPage<T>>(`/history/${encodeURIComponent(collection)}${query}`);
+  },
   registerCustomer: (values: RegisterCustomerRequest) =>
     publicRequest("/auth/register", {
       method: "POST",
@@ -187,7 +266,7 @@ export const api = {
       body: JSON.stringify({ sales, inventory }),
     }),
   createPayment: (order: Partial<Order>) =>
-    request("/payments/checkout", {
+    request<PaymentCheckoutResponse>("/payments/checkout", {
       method: "POST",
       body: JSON.stringify(order),
     }),
@@ -280,6 +359,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ olderThanDays }),
     }),
+  scanRecoveryIssues: (limit = 200) => request<RecoveryScanResponse>(`/admin/recovery/scan?limit=${encodeURIComponent(limit)}`),
+  operationalMetrics: () => request("/admin/metrics"),
+  previewRecoveryAction: (issueId: string, reason: string) =>
+    request<RecoveryPreviewResponse>("/admin/recovery/preview", {
+      method: "POST",
+      body: JSON.stringify({ issueId, reason }),
+    }),
+  applyRecoveryAction: (values: RecoveryApplyRequest) =>
+    request<RecoveryApplyResponse>("/admin/recovery/apply", {
+      method: "POST",
+      body: JSON.stringify(values),
+    }),
   sendNotification: (notification: NotificationRequest) =>
     request("/notifications/sms", {
       method: "POST",
@@ -290,14 +381,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify(notification),
     }),
+  pushNotificationStatus: () =>
+    request<PushNotificationStatusResponse>("/notifications/push/status"),
+  registerPushToken: (token: string) =>
+    request("/notifications/push-tokens", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  removePushTokens: (token?: string) =>
+    request("/notifications/push-tokens", {
+      method: "DELETE",
+      body: JSON.stringify(token ? { token } : { all: true }),
+    }),
   markAllNotificationsRead: () =>
     request("/notifications/read-all", { method: "POST", body: "{}" }),
+  markNotificationRead: (notificationId: EntityId) =>
+    request(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: "POST", body: "{}" }),
   cleanupNotifications: () =>
     request("/notifications/cleanup", { method: "POST", body: "{}" }),
   dismissNotification: (notificationId: EntityId) =>
     request(`/notifications/${encodeURIComponent(notificationId)}`, {
       method: "DELETE",
     }),
+  clearReadNotifications: () => request("/notifications/read", { method: "DELETE" }),
   clearNotifications: () => request("/notifications", { method: "DELETE" }),
   assignRole: (uid: EntityId, role: UserRole | string, staffRole: StaffRole | string = "") =>
     request("/admin/roles", {

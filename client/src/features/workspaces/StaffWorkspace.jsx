@@ -17,6 +17,7 @@ const staffDashboardProfiles = {
 
 function StaffWorkspaceContent({ section, user, orders, inventory: staffInventory, reviews, complaints = [], shiftLogs, messages, serviceStatus, notify, onNavigate }) {
   const orderRequestKeyRef = useRef("");
+  const posSearchRef = useRef(null);
   const [posCart, setPosCart] = useState([]);
   const [posCategory, setPosCategory] = useState("all");
   const [posSearch, setPosSearch] = useState("");
@@ -59,6 +60,22 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
     return () => {
       mounted = false;
     };
+  }, [section]);
+  useEffect(() => {
+    if (section !== "staff-pos") return undefined;
+    const focusSearch = (event) => {
+      const target = event.target;
+      const typing = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || target?.isContentEditable;
+      if (event.key === "/" && !typing && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        posSearchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
   }, [section]);
   const activePosCategory = staffPosCategories.find((item) => item.id === posCategory) || staffPosCategories[0];
   const visibleInventory = staffInventory.filter((item) => {
@@ -187,7 +204,16 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       <section className="staff-pos-layout">
         <div className="staff-pos-menu">
           <div className="pos-menu-tools">
-            <label className="staff-pos-search"><Search size={18} aria-hidden="true" /><span className="visually-hidden">Search POS products</span><input type="search" value={posSearch} onChange={(event) => setPosSearch(event.target.value)} placeholder="Search POS products" /></label>
+            <label className="staff-pos-search"><Search size={18} aria-hidden="true" /><span className="visually-hidden">Search POS products</span><input ref={posSearchRef} type="search" value={posSearch} onChange={(event) => setPosSearch(event.target.value)} onKeyDown={(event) => {
+              if (event.key === "Escape" && posSearch) {
+                event.preventDefault();
+                setPosSearch("");
+              }
+              if (event.key === "Enter" && visibleInventory.length === 1 && Number(visibleInventory[0].stock || 0) > 0) {
+                event.preventDefault();
+                add(visibleInventory[0]);
+              }
+            }} placeholder="Search POS products" /></label>
             <div className="pos-category-rail" aria-label="Staff POS menu categories">
               {staffPosCategories.map((category) => (
                 <button key={category.id} className={posCategory === category.id ? "active" : ""} aria-pressed={posCategory === category.id} onClick={() => setPosCategory(category.id)}>

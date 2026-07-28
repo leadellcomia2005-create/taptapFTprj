@@ -76,6 +76,7 @@ const seed = {
   inventory: { meal: { name: "Meal", stock: 10, reorderPoint: 3 } },
   stockHistory: { meal: { movement: { itemId: "meal", delta: -1, createdAt: 1 } } },
   paymentMovements: { "order-own": { payment: { orderId: "order-own", amount: 148, status: "paid" } } },
+  paymongoWebhookEvents: { event: { status: "complete", orderId: "order-own" } },
   reportAggregates: { daily: { "2026-07-12": { date: "2026-07-12", grossSales: 148 } } },
   auditLogs: { audit: { action: "order_created", createdAt: 1 } },
   reviews: {},
@@ -153,6 +154,7 @@ test("owner and staff operational access remains scoped", async () => {
   await assertSucceeds(get(ref(owner, "inventory")));
   await assertSucceeds(get(ref(owner, "auditLogs")));
   await assertSucceeds(get(ref(owner, "paymentMovements")));
+  await assertFails(get(ref(owner, "paymongoWebhookEvents")));
   await assertSucceeds(get(ref(staff, "inventory")));
   await assertSucceeds(get(ref(staff, "reportAggregates")));
   await assertFails(get(ref(staff, "auditLogs")));
@@ -183,9 +185,9 @@ test("only the delivered-order customer can create its pending review", async ()
   await assertFails(set(ref(databaseFor("customer-2", "customer"), "reviews/order-own"), { ...review, customerId: "customer-2" }));
 });
 
-test("notifications require a user-scoped query", async () => {
+test("notifications require a bounded user-scoped query", async () => {
   const database = databaseFor("customer-1", "customer");
-  const ownNotifications = await assertSucceeds(get(query(ref(database, "notifications"), orderByChild("targetUserId"), equalTo("customer-1"))));
+  const ownNotifications = await assertSucceeds(get(query(ref(database, "notifications"), orderByChild("targetUserId"), equalTo("customer-1"), limitToLast(100))));
   assert.equal(ownNotifications.hasChild("own"), true);
   assert.equal(ownNotifications.hasChild("other"), false);
   await assertFails(get(ref(database, "notifications")));
@@ -203,5 +205,6 @@ test("sensitive records reject all direct browser writes", async () => {
   await assertFails(update(ref(owner, "inventory/meal"), { stock: 999 }));
   await assertFails(set(ref(owner, "paymentMovements/fake"), { amount: 1 }));
   await assertFails(set(ref(owner, "idempotency/fake"), { orderId: "fake" }));
+  await assertFails(set(ref(owner, "paymongoWebhookEvents/fake"), { status: "complete" }));
   await assertFails(set(ref(rider, "deliveryProofs/order-own"), { riderId: "rider-1" }));
 });

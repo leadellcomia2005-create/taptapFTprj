@@ -3,5 +3,6 @@ export {
   resendReceiptEmail,
   subscribeOrders,
   trackEvent,
+  trackEventOnce,
   updateOrder
 } from "../firebase.js";

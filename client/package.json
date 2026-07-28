@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test:policy": "node --test test/*.test.mjs",
     "smoke:website": "node scripts/website-smoke.mjs",
     "smoke:preview": "node scripts/run-smoke-preview.mjs",
     "performance:check": "node scripts/check-bundle-budget.mjs"
@@ -27,6 +28,7 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.7",
     "@eslint/js": "^9.36.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

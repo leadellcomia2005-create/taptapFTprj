@@ -1,5 +1,5 @@
 import type { CartItem, UserRole } from "../types/domain";
-import { trackEvent } from "./firebase/orders";
+import { trackEvent, trackEventOnce } from "./firebase/orders";
 
 export type AnalyticsAuthMethod = "demo" | "firebase";
 export type LandingOrderSource =
@@ -54,4 +54,16 @@ export function trackCheckoutStart(cart: readonly AnalyticsCartItem[]): void {
 
 export function trackCheckoutAbandonment(cart: readonly AnalyticsCartItem[], reason: CheckoutAbandonmentReason): void {
   trackEvent("checkout_abandoned", { ...checkoutPayload(cart), reason });
+}
+
+export function trackOrderCompleted(
+  orderId: string,
+  total: number,
+  items: readonly AnalyticsCartItem[]
+): void {
+  trackEventOnce(`purchase:${orderId}`, "purchase", {
+    transaction_id: orderId,
+    ...checkoutPayload(items),
+    value: Number(total || 0)
+  });
 }

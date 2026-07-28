@@ -27,7 +27,7 @@ function logSocketFailure(logger, event, socket, error) {
   else logger.warn("socket_event_rejected", details);
 }
 
-export function createSocketServer(server, { config, firebase, authentication, realtime, logger }) {
+export function createSocketServer(server, { config, firebase, authentication, realtime, logger, metrics }) {
   const io = new SocketServer(server, {
     cors: { origin: config.allowedOrigins, credentials: true },
     maxHttpBufferSize: 100_000
@@ -42,6 +42,7 @@ export function createSocketServer(server, { config, firebase, authentication, r
       if (socket.user.mfaSession !== true) throw new Error("Account security required.");
       return next();
     } catch {
+      metrics?.increment("authorizationFailures");
       logger.warn("socket_authentication_rejected", { socketId: socket.id || null });
       return next(new Error("Unauthorized"));
     }
@@ -90,6 +91,7 @@ export function createSocketServer(server, { config, firebase, authentication, r
     });
 
     socket.on("disconnect", (reason) => {
+      metrics?.increment("socketDisconnections");
       logger.info("socket_disconnected", { socketId: socket.id, userId: socket.user.uid, reason });
     });
   });

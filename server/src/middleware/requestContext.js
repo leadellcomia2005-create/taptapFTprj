@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 const requestIdPattern = /^[A-Za-z0-9._-]{8,128}$/;
 
-export function requestContext(logger) {
+export function requestContext(logger, metrics) {
   return (req, res, next) => {
     const supplied = String(req.headers["x-request-id"] || "").trim();
     const requestId = requestIdPattern.test(supplied) ? supplied : randomUUID();
@@ -19,6 +19,7 @@ export function requestContext(logger) {
         userId: req.user?.uid || null,
         role: req.user?.role || null
       };
+      metrics?.observeRequest(details);
       if (res.statusCode >= 500) logger.error("http_request_completed", details);
       else if (res.statusCode >= 400) logger.warn("http_request_completed", details);
       else logger.info("http_request_completed", details);

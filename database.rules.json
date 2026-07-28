@@ -13,7 +13,8 @@
       },
       "reviews": {
         ".read": true,
-        ".write": false
+        ".write": false,
+        ".indexOn": ["createdAt"]
       }
     },
     "users": {
@@ -55,6 +56,14 @@
       ".read": false,
       ".write": false
     },
+    "paymongoWebhookEvents": {
+      ".read": false,
+      ".write": false
+    },
+    "recoveryRequests": {
+      ".read": false,
+      ".write": false
+    },
     "riderLocations": {
       "$riderId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $riderId || auth.token.role == 'owner' || auth.token.role == 'staff')",
@@ -70,7 +79,7 @@
     "messages": {
       "support": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid))",
-        ".indexOn": ["customerId"],
+        ".indexOn": ["customerId", "createdAt"],
         "$messageId": {
           ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
           ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && !data.exists() && newData.child('senderId').val() == auth.uid && ((newData.child('senderRole').val() == 'customer' && newData.child('customerId').val() == auth.uid && (auth.token.role == 'customer' || auth.token.role == null)) || (newData.child('senderRole').val() == 'staff' && auth.token.role == 'staff'))",
@@ -100,7 +109,7 @@
     },
     "reviews": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid))",
-      ".indexOn": ["customerId"],
+      ".indexOn": ["customerId", "createdAt"],
       "$orderId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
         ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && !data.exists() && newData.child('customerId').val() == auth.uid && newData.child('orderId').val() == $orderId && root.child('orders').child($orderId).child('customerId').val() == auth.uid && root.child('orders').child($orderId).child('status').val() == 'delivered'",
@@ -109,11 +118,19 @@
     },
     "notifications": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && query.orderByChild == 'targetUserId' && query.equalTo == auth.uid",
-      ".indexOn": ["targetUserId"],
+      ".indexOn": ["targetUserId", "createdAt"],
       "$notificationId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && data.child('targetUserId').val() == auth.uid",
         ".write": false
       }
+    },
+    "pushTokens": {
+      ".read": false,
+      ".write": false
+    },
+    "pushDeliveries": {
+      ".read": false,
+      ".write": false
     },
     "twoFactor": {
       ".read": false,

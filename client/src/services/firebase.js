@@ -17,6 +17,7 @@ import {
   equalTo,
   get,
   getDatabase,
+  limitToLast,
   onValue,
   orderByChild,
   push,
@@ -37,6 +38,11 @@ import {
   isShiftLog
 } from "../contracts/runtime";
 import { api } from "./api";
+import {
+  buildAnalyticsPayload,
+  hasRecordedAnalyticsEvent,
+  rememberAnalyticsEvent
+} from "./analyticsPolicy";
 import { configureAuthTokenProvider } from "./authSession";
 
 const config = {
@@ -46,13 +52,28 @@ const config = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 export const firebaseEnabled = import.meta.env.VITE_DISABLE_FIREBASE !== "true" && Boolean(config.apiKey && config.projectId && config.databaseURL);
 export const demoModeEnabled = import.meta.env.VITE_ENABLE_DEMO_MODE === "true";
 const firebaseStorageEnabled = import.meta.env.VITE_ENABLE_FIREBASE_STORAGE === "true";
+const analyticsConfigured = firebaseEnabled
+  && import.meta.env.PROD
+  && import.meta.env.VITE_ENABLE_ANALYTICS === "true"
+  && Boolean(config.measurementId);
+const historyLimits = Object.freeze({
+  notifications: 100,
+  reviews: 200,
+  orders: 100,
+  auditLogs: 250,
+  shiftLogs: 250,
+  supportMessages: 200,
+  complaints: 200
+});
 
+/** @type {import("firebase/app").FirebaseApp | undefined} */
 let app;
 let auth;
 let db;
@@ -74,6 +95,8 @@ function sendAnalyticsEvent(name, parameters) {
   return true;
 }
 
+const analyticsStorage = () => typeof localStorage === "undefined" ? null : localStorage;
+
 function flushAnalyticsEvents() {
   if (!analytics || !analyticsLogEvent) return;
   pendingAnalyticsEvents.splice(0).forEach(({ name, parameters }) => {
@@ -82,7 +105,7 @@ function flushAnalyticsEvents() {
 }
 
 function loadAnalyticsModule() {
-  if (!firebaseEnabled || !app) return Promise.resolve(null);
+  if (!analyticsConfigured || !app) return Promise.resolve(null);
   if (!analyticsModulePromise) {
     analyticsModulePromise = import("firebase/analytics")
       .then(async (analyticsModule) => {
@@ -104,7 +127,7 @@ function loadAnalyticsModule() {
 }
 
 function scheduleAnalyticsLoad() {
-  if (typeof window === "undefined") return;
+  if (!analyticsConfigured || typeof window === "undefined") return;
   const load = () => void loadAnalyticsModule();
   if (typeof window.requestIdleCallback === "function") {
     window.requestIdleCallback(load, { timeout: 5000 });
@@ -407,7 +430,7 @@ export function subscribeNotifications(user, callback) {
   if (firebaseEnabled) {
     api.cleanupNotifications().catch(() => {});
     return onValue(
-      query(ref(db, "notifications"), orderByChild("targetUserId"), equalTo(user.uid)),
+      query(ref(db, "notifications"), orderByChild("targetUserId"), equalTo(user.uid), limitToLast(historyLimits.notifications)),
       (snapshot) => callback(normalize(snapshot.val() || {}))
     );
   }
@@ -430,12 +453,50 @@ export async function createNotification(notification) {
 }
 
 export async function markNotificationRead(notificationId, userId) {
-  if (firebaseEnabled) return api.markAllNotificationsRead();
+  if (firebaseEnabled) return api.markNotificationRead(notificationId);
   const data = readDemoData();
   if (data.notifications[notificationId]) {
     if (data.notifications[notificationId].targetUserId === userId) data.notifications[notificationId].readAt = Date.now();
     writeDemoData(data);
   }
+}
+
+export async function markAllNotificationsRead(userId) {
+  if (firebaseEnabled) return api.markAllNotificationsRead();
+  const data = readDemoData();
+  const now = Date.now();
+  for (const [notificationId, notification] of Object.entries(data.notifications)) {
+    if (notification.targetUserId !== userId) continue;
+    if (Number(notification.expiresAt || Infinity) <= now) delete data.notifications[notificationId];
+    else if (!notification.readAt) notification.readAt = now;
+  }
+  writeDemoData(data);
+}
+
+export async function clearReadNotifications(userId) {
+  if (firebaseEnabled) return api.clearReadNotifications();
+  const data = readDemoData();
+  const now = Date.now();
+  let cleared = 0;
+  for (const [notificationId, notification] of Object.entries(data.notifications)) {
+    if (notification.targetUserId !== userId) continue;
+    if (notification.readAt || Number(notification.expiresAt || Infinity) <= now) {
+      delete data.notifications[notificationId];
+      cleared += 1;
+    }
+  }
+  writeDemoData(data);
+  return { cleared };
+}
+
+export async function dismissNotification(notificationId, userId) {
+  if (firebaseEnabled) return api.dismissNotification(notificationId);
+  const data = readDemoData();
+  if (data.notifications[notificationId]?.targetUserId === userId) {
+    delete data.notifications[notificationId];
+    writeDemoData(data);
+  }
+  return { dismissed: true };
 }
 
 export function subscribeReviews(user, callback) {
@@ -450,8 +511,8 @@ export function subscribeReviews(user, callback) {
   );
   if (firebaseEnabled) {
     const reviewsRef = user.role === "customer"
-      ? query(ref(db, "reviews"), orderByChild("customerId"), equalTo(user.uid))
-      : ref(db, "reviews");
+      ? query(ref(db, "reviews"), orderByChild("customerId"), equalTo(user.uid), limitToLast(historyLimits.reviews))
+      : query(ref(db, "reviews"), orderByChild("createdAt"), limitToLast(historyLimits.reviews));
     return onValue(reviewsRef, (snapshot) => normalize(snapshot.val()));
   }
   const emit = () => normalize(readDemoData().reviews);
@@ -487,7 +548,7 @@ export function subscribePublicReviews(callback) {
   );
   if (firebaseEnabled) {
     return onValue(
-      ref(db, "public/reviews"),
+      query(ref(db, "public/reviews"), orderByChild("createdAt"), limitToLast(5)),
       (snapshot) => normalizePublicReviews(snapshot.val() || {}),
       () => callback([])
     );
@@ -561,8 +622,8 @@ export function subscribeComplaints(user, callback) {
   );
   if (firebaseEnabled) {
     let active = true;
-    const load = () => api.listComplaints().then((result) => {
-      if (active) callback(Array.isArray(result.complaints) ? result.complaints.filter(isComplaint) : []);
+    const load = () => api.listHistory("complaints", { limit: historyLimits.complaints }).then((result) => {
+      if (active) callback(Array.isArray(result.records) ? result.records.filter(isComplaint) : []);
     }).catch(() => active && callback([]));
     load();
     const timer = window.setInterval(load, 15000);
@@ -603,8 +664,8 @@ export async function submitComplaint(order, user, values) {
     createdAt: Date.now()
   };
   writeDemoData(data);
-  await createNotification({ targetUserId: "demo-staff", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id });
-  await createNotification({ targetUserId: "demo-owner", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id });
+  await createNotification({ targetUserId: "demo-staff", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id, entityType: "complaint", entityId: id });
+  await createNotification({ targetUserId: "demo-owner", title: "New order complaint", message: `${user.name} reported ${order.id}.`, type: "complaint", orderId: order.id, entityType: "complaint", entityId: id });
   return { id, complaint: data.complaints[id] };
 }
 
@@ -852,15 +913,15 @@ export function subscribeOrders(user, callback) {
       return onValue(activeOrders, (snapshot) => callback(normalize(snapshot)));
     }
     if (user.role === "customer") {
-      const customerOrders = query(ref(db, "orders"), orderByChild("customerId"), equalTo(user.uid));
+      const customerOrders = query(ref(db, "orders"), orderByChild("customerId"), equalTo(user.uid), limitToLast(historyLimits.orders));
       return onValue(customerOrders, (snapshot) => callback(normalize(snapshot)));
     }
     if (user.role === "rider") {
       let assigned = [];
       let available = [];
       const emit = () => callback([...new Map([...assigned, ...available].map((order) => [order.id, order])).values()]);
-      const assignedOrders = query(ref(db, "orders"), orderByChild("riderId"), equalTo(user.uid));
-      const readyOrders = ref(db, "availableDeliveries");
+      const assignedOrders = query(ref(db, "orders"), orderByChild("riderId"), equalTo(user.uid), limitToLast(historyLimits.orders));
+      const readyOrders = query(ref(db, "availableDeliveries"), limitToLast(historyLimits.orders));
       const stopAssigned = onValue(assignedOrders, (snapshot) => {
         assigned = normalize(snapshot);
         emit();
@@ -905,7 +966,19 @@ export async function createOrder(order) {
       paymentMethod: order.paymentMethod,
       items: order.items.map(({ id, qty }) => ({ id, qty }))
     });
-    trackEvent("purchase", { transaction_id: result.id, value: result.order.total, currency: "PHP" });
+    if (!result.idempotent && result.order?.status !== "pending-payment") {
+      trackEventOnce(`purchase:${result.id}`, "purchase", {
+        transaction_id: result.id,
+        currency: "PHP",
+        value: result.order.total,
+        items: (result.order.items || []).map((item) => ({
+          item_id: item.id,
+          item_name: item.name,
+          price: item.price,
+          quantity: item.qty
+        }))
+      });
+    }
     return result.id;
   }
   const data = readDemoData();
@@ -959,8 +1032,8 @@ export async function createOrder(order) {
   ];
   if (!onlinePayment) {
     notifications.push(
-      createNotification({ targetUserId: "demo-staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id }),
-      createNotification({ targetUserId: "demo-owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id })
+      createNotification({ targetUserId: "demo-staff", title: "New order received", message: `${id} from ${order.customerName} is waiting in the queue.`, type: "order", orderId: id, entityType: "order", entityId: id, actionView: "staff-orders" }),
+      createNotification({ targetUserId: "demo-owner", title: "New sale recorded", message: `${id} added ${order.total} PHP to the live sales ledger.`, type: "sale", orderId: id, entityType: "payment", entityId: id, amount: order.total, actionView: "owner-sales" })
     );
   }
   await Promise.all(notifications);
@@ -968,10 +1041,22 @@ export async function createOrder(order) {
 }
 
 export function trackEvent(name, parameters = {}) {
-  if (!firebaseEnabled || sendAnalyticsEvent(name, parameters)) return;
+  if (!analyticsConfigured) return false;
+  const payload = buildAnalyticsPayload(name, parameters);
+  if (!payload) return false;
+  if (sendAnalyticsEvent(name, payload)) return true;
   if (pendingAnalyticsEvents.length >= 50) pendingAnalyticsEvents.shift();
-  pendingAnalyticsEvents.push({ name, parameters });
+  pendingAnalyticsEvents.push({ name, parameters: payload });
   void loadAnalyticsModule();
+  return true;
+}
+
+export function trackEventOnce(key, name, parameters = {}) {
+  const cleanKey = String(key || "").slice(0, 180);
+  if (!cleanKey || hasRecordedAnalyticsEvent(analyticsStorage(), cleanKey)) return false;
+  if (!trackEvent(name, parameters)) return false;
+  rememberAnalyticsEvent(analyticsStorage(), cleanKey);
+  return true;
 }
 
 export async function updateOrder(orderId, values) {
@@ -1066,7 +1151,10 @@ export function subscribeAuditLogs(callback) {
     firebaseRecordList(value, isAuditLog)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
-  if (firebaseEnabled) return onValue(ref(db, "auditLogs"), (snapshot) => normalize(snapshot.val()));
+  if (firebaseEnabled) return onValue(
+    query(ref(db, "auditLogs"), orderByChild("createdAt"), limitToLast(historyLimits.auditLogs)),
+    (snapshot) => normalize(snapshot.val())
+  );
   const emit = () => normalize(readDemoData().auditLogs);
   emit();
   window.addEventListener("taptap-demo-data", emit);
@@ -1083,8 +1171,8 @@ export function subscribeSupportMessages(callback, customerId = null) {
   };
   if (firebaseEnabled) {
     const messagesRef = customerId
-      ? query(ref(db, "messages/support"), orderByChild("customerId"), equalTo(customerId))
-      : ref(db, "messages/support");
+      ? query(ref(db, "messages/support"), orderByChild("customerId"), equalTo(customerId), limitToLast(historyLimits.supportMessages))
+      : query(ref(db, "messages/support"), orderByChild("createdAt"), limitToLast(historyLimits.supportMessages));
     return onValue(messagesRef, (snapshot) => normalize(snapshot.val()));
   }
   const emit = () => normalize(readDemoData().messages.support);
@@ -1127,7 +1215,10 @@ export function subscribeShiftLogs(callback) {
     firebaseRecordList(value, isShiftLog)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   );
-  if (firebaseEnabled) return onValue(ref(db, "shiftLogs"), (snapshot) => normalize(snapshot.val()));
+  if (firebaseEnabled) return onValue(
+    query(ref(db, "shiftLogs"), orderByChild("createdAt"), limitToLast(historyLimits.shiftLogs)),
+    (snapshot) => normalize(snapshot.val())
+  );
   const emit = () => normalize(readDemoData().shiftLogs);
   emit();
   window.addEventListener("taptap-demo-data", emit);
@@ -1421,4 +1512,4 @@ export async function getDeliveryProof(order = {}) {
   return { ...proof, dataUrl: imageUrl, imageUrl, handoff: proof.handoff || fallbackMeta, orderId: order.id };
 }
 
-export { auth, db, storage, ref, set, push, update };
+export { app as firebaseApp, auth, db, storage, ref, set, push, update };

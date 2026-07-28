@@ -3,6 +3,8 @@ import {
   complaintStatusSchema,
   complaintTypeSchema,
   deliveryTypeSchema,
+  notificationActionViewSchema,
+  notificationEntityTypeSchema,
   notificationTypeSchema,
   orderStatusSchema,
   paymentMethodSchema,
@@ -171,8 +173,24 @@ export const notificationCreateSchema = z.object({
   title: z.string().trim().min(1).max(120),
   message: z.string().trim().min(1).max(1000),
   type: notificationTypeSchema.optional(),
-  orderId: recordIdSchema.optional()
+  orderId: recordIdSchema.optional(),
+  entityType: notificationEntityTypeSchema.optional(),
+  entityId: recordIdSchema.optional(),
+  displayReference: z.string().trim().min(1).max(80).optional(),
+  amount: z.coerce.number().finite().min(0).max(1_000_000_000).optional(),
+  actionView: notificationActionViewSchema.optional()
 }).passthrough();
+
+export const pushTokenSchema = z.object({
+  token: z.string().trim().min(20).max(4096)
+}).passthrough();
+
+export const pushTokenRemovalSchema = z.object({
+  token: z.string().trim().min(20).max(4096).optional(),
+  all: z.boolean().optional()
+}).passthrough().refine((input) => input.all === true || Boolean(input.token), {
+  message: "A token or all=true is required."
+});
 
 export const orderIdBodySchema = z.object({ orderId: recordIdSchema }).passthrough();
 
@@ -228,6 +246,15 @@ export const orderListQuerySchema = z.object({
   before: recordIdSchema.optional()
 }).passthrough();
 
+export const historyCollectionParamsSchema = z.object({
+  collection: z.enum(["audit-logs", "reports", "complaints", "reviews", "notifications", "shift-logs"])
+}).passthrough();
+
+export const historyListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  before: z.string().trim().regex(/^[A-Za-z0-9_-]{1,512}$/, "Invalid history cursor.").optional()
+}).passthrough();
+
 export const adminMessageSchema = z.object({
   title: optionalText(120),
   message: z.string().trim().min(1).max(1000)
@@ -236,6 +263,21 @@ export const adminMessageSchema = z.object({
 export const accountSuspensionSchema = z.object({
   suspended: z.boolean(),
   reason: optionalText(240)
+}).passthrough();
+
+export const recoveryScanQuerySchema = z.object({
+  limit: z.coerce.number().int().min(20).max(500).optional()
+}).passthrough();
+
+export const recoveryPreviewSchema = z.object({
+  issueId: z.string().trim().regex(/^[A-Za-z0-9_-]{8,1024}$/, "Invalid recovery issue ID."),
+  reason: z.string().trim().min(8).max(240)
+}).passthrough();
+
+export const recoveryApplySchema = recoveryPreviewSchema.extend({
+  requestId: z.string().trim().regex(/^[A-Za-z0-9_-]{12,128}$/, "Invalid recovery request ID."),
+  previewHash: z.string().regex(/^[a-f0-9]{64}$/, "Invalid recovery preview."),
+  confirmation: z.literal("APPLY_RECOVERY")
 }).passthrough();
 
 export const assistantRequestSchema = z.object({

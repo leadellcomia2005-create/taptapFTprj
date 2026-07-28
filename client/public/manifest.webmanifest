@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "TapTap Foodtrip",
+  "short_name": "TapTap",
+  "description": "Order TapTap Foodtrip Pinoy rice meals for delivery or pickup.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff8ef",
+  "theme_color": "#c9362a",
+  "categories": ["food", "shopping"],
+  "icons": [
+    {
+      "src": "/assets/taptap-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/taptap-logo.webp",
+      "sizes": "any",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}

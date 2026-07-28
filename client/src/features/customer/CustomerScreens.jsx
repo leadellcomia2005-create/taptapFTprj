@@ -3,6 +3,7 @@ import { Clock3, MapPin, PackageCheck, Phone, ReceiptText, RotateCcw, Star, Wall
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { api } from "../../services/api";
+import { runPerformanceTrace } from "../../services/performance";
 import { submitComplaint, submitReview } from "../../services/firebase/feedback";
 import { createOrder, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
 import { saveUserProfile } from "../../services/firebase/users";
@@ -223,7 +224,11 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
         total,
         items: cart.map(({ id, name, price, qty, stock }) => ({ id, name, price, qty, stock }))
       };
-      const orderId = await createOrder(orderPayload);
+      const orderId = await runPerformanceTrace(
+        "checkout_submission",
+        () => createOrder(orderPayload),
+        { role: "customer" }
+      );
       orderRequestKeyRef.current = "";
       checkoutCompletedRef.current = true;
       removeCheckoutDraft(user.uid);
@@ -398,7 +403,7 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
   );
 }
 
-export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse }) {
+export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse, onPay }) {
   const revenueCheck = isRevenueOrder || (() => false);
   const activeOrders = orders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
   const pastOrders = orders.filter((order) => ["delivered", "completed", "cancelled"].includes(order.status));
@@ -447,7 +452,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
             <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
             <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}{complaintByOrder.has(order.id) && <small className="d-block text-danger">Complaint: {complaintByOrder.get(order.id).status}</small>}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button><button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}>Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}>Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
+            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && <button className="btn btn-sm btn-danger" onClick={() => onPay(order)}>Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}>Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}>Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
           </article>
         ))}
       </div>

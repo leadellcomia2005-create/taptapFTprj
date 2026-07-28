@@ -7,6 +7,7 @@ const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "pwa.spec.js",
   outputDir: "./test-results",
   timeout: 60_000,
   expect: { timeout: 8_000 },
@@ -34,10 +35,15 @@ export default defineConfig({
         CLIENT_ORIGIN: clientOrigin,
         FIREBASE_DATABASE_URL: "",
         FIREBASE_STORAGE_BUCKET: "",
+        ENABLE_OPENAI: "false",
+        ENABLE_TWILIO: "false",
+        ENABLE_PAYMONGO: "false",
         OPENAI_API_KEY: "",
         PAYMONGO_SECRET_KEY: "",
+        PAYMONGO_WEBHOOK_SECRET: "",
         TWILIO_ACCOUNT_SID: "",
-        TWILIO_AUTH_TOKEN: ""
+        TWILIO_AUTH_TOKEN: "",
+        TURNSTILE_SECRET_KEY: ""
       }
     },
     {

@@ -4,6 +4,7 @@ import express from "express";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getDatabase } from "firebase-admin/database";
+import { getMessaging } from "firebase-admin/messaging";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import OpenAI from "openai";
@@ -26,10 +27,12 @@ import {
 } from "./operations.js";
 import {
   cleanupExpiredNotifications,
+  clearReadNotifications,
   clearNotifications,
   createNotification,
   dismissNotification,
-  markAllNotificationsRead
+  markAllNotificationsRead,
+  markNotificationRead
 } from "./notifications.js";
 import {
   beginTotpSetup,
@@ -48,12 +51,36 @@ import {
   verifyPasskeyRegistration
 } from "./passkeys.js";
 import { createCustomerRegistration, verifyTurnstileToken } from "./registration.js";
+import {
+  confirmPayMongoPayment,
+  recordPayMongoCheckoutSession
+} from "../server/src/application/payments.js";
+import {
+  assertPayMongoConfiguration,
+  checkoutPaymentFromEvent,
+  createPayMongoCheckoutSession,
+  retrievePayMongoCheckoutSession,
+  verifyPayMongoWebhook
+} from "../server/src/integrations/paymongo.js";
+import {
+  dispatchOrderPush,
+  pushStatus,
+  registerPushToken,
+  removePushTokens
+} from "../server/src/pushNotifications.js";
 
 initializeApp();
 const database = () => getDatabase();
+const firebaseServices = { messaging: () => getMessaging() };
+const pushLogger = {
+  warn(event, details) {
+    console.warn(event, details);
+  }
+};
 
 const openaiKey = defineSecret("OPENAI_API_KEY");
 const paymongoKey = defineSecret("PAYMONGO_SECRET_KEY");
+const paymongoWebhookSecret = defineSecret("PAYMONGO_WEBHOOK_SECRET");
 const twilioSid = defineSecret("TWILIO_ACCOUNT_SID");
 const twilioToken = defineSecret("TWILIO_AUTH_TOKEN");
 const twoFactorKey = defineSecret("TWO_FACTOR_ENCRYPTION_KEY");
@@ -75,7 +102,14 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({
+  limit: "1mb",
+  verify(req, _res, buffer) {
+    if (!req.rawBody && req.originalUrl.split("?")[0].endsWith("/payments/paymongo/webhook")) {
+      req.rawBody = Buffer.from(buffer);
+    }
+  }
+}));
 
 const route = (path) => [path, `/api${path}`];
 const secretValue = (secret) => {
@@ -85,6 +119,24 @@ const secretValue = (secret) => {
     return "";
   }
 };
+
+function paymongoConfiguration() {
+  return assertPayMongoConfiguration({
+    ENABLE_PAYMONGO: process.env.ENABLE_PAYMONGO,
+    PAYMONGO_MODE: process.env.PAYMONGO_MODE,
+    PAYMONGO_SECRET_KEY: secretValue(paymongoKey),
+    PAYMONGO_WEBHOOK_SECRET: secretValue(paymongoWebhookSecret)
+  });
+}
+
+function paymongoEnabled() {
+  try {
+    paymongoConfiguration();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function checkoutReturnUrls(orderId) {
   let base = "http://localhost:5173";
@@ -170,7 +222,7 @@ app.get(route("/status"), (_req, res) => {
       socket: false,
       openai: Boolean(secretValue(openaiKey)),
       dialogflow: Boolean(process.env.DIALOGFLOW_PROJECT_ID || process.env.GCLOUD_PROJECT),
-      paymongo: Boolean(secretValue(paymongoKey)),
+      paymongo: paymongoEnabled(),
       twilio: Boolean(secretValue(twilioSid) && secretValue(twilioToken) && process.env.TWILIO_FROM_NUMBER),
       emailOtp: Boolean(secretValue(gmailUser) && secretValue(gmailAppPassword)),
       turnstile: Boolean(secretValue(turnstileSecret)),
@@ -188,7 +240,13 @@ app.post(route("/auth/register"), asyncRoute(async (req, res) => {
     sendVerificationEmail: secretValue(gmailUser) && secretValue(gmailAppPassword) ? sendCustomerVerificationEmail : null,
     appBaseUrl: allowedOrigins()[0] || "http://localhost:5173",
     verifyHuman: secretValue(turnstileSecret)
-      ? (token, request) => verifyTurnstileToken({ secret: secretValue(turnstileSecret), token, req: request })
+      ? (token, request) => verifyTurnstileToken({
+        secret: secretValue(turnstileSecret),
+        token,
+        req: request,
+        expectedAction: "customer_registration",
+        allowedHostnames: allowedOrigins().map((origin) => new URL(origin).hostname)
+      })
       : null
   });
   res.status(201).json(result);
@@ -418,47 +476,62 @@ app.post(route("/insights"), authenticate, async (req, res) => {
   }
 });
 
+app.post(route("/payments/paymongo/webhook"), asyncRoute(async (req, res) => {
+  const configuration = paymongoConfiguration();
+  const event = verifyPayMongoWebhook({
+    rawBody: req.rawBody,
+    signatureHeader: req.get("Paymongo-Signature"),
+    webhookSecret: configuration.webhookSecret,
+    mode: configuration.mode
+  });
+  const payment = checkoutPaymentFromEvent(event);
+  if (payment.ignored) return res.json({ received: true, ignored: true });
+  const result = await confirmPayMongoPayment(database(), payment);
+  if (!result.duplicate && !result.cancelled) {
+    const order = (await database().ref(`orders/${payment.orderId}`).once("value")).val();
+    await dispatchOrderPush({
+      firebase: firebaseServices,
+      db: database(),
+      orderId: payment.orderId,
+      order,
+      changes: { status: "received" },
+      appBaseUrl: allowedOrigins()[0] || "",
+      logger: pushLogger
+    });
+  }
+  return res.json({ received: true, duplicate: result.duplicate });
+}));
+
 app.post(route("/payments/checkout"), authenticate, asyncRoute(async (req, res) => {
-  const key = secretValue(paymongoKey);
-  if (!key) return res.status(503).json({ error: "Online payment is not ready yet." });
+  const configuration = paymongoConfiguration();
   if (!validRecordId(req.body.orderId)) throw new HttpError(400, "Invalid order ID.");
   const order = (await database().ref(`orders/${req.body.orderId}`).once("value")).val();
+  if (!order) throw new HttpError(404, "Order not found.");
   if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
   if (order.paymentMethod !== "gcash") throw new HttpError(409, "Only GCash orders use online checkout.");
   if (order.paymentStatus === "paid") throw new HttpError(409, "This order is already paid.");
+  if (order.status === "cancelled") throw new HttpError(409, "A cancelled order cannot start payment.");
+  if (order.providerSessionId) {
+    const existing = await retrievePayMongoCheckoutSession(order.providerSessionId, { configuration });
+    if (existing.referenceNumber !== req.body.orderId) {
+      throw new HttpError(409, "The stored PayMongo checkout does not match this order.");
+    }
+    if (existing.payments.some((payment) => payment?.attributes?.status === "paid")) {
+      throw new HttpError(409, "Payment was received and is waiting for webhook confirmation.");
+    }
+    if (existing.status === "active" && existing.checkoutUrl) {
+      return res.json({ id: existing.id, checkoutUrl: existing.checkoutUrl, reused: true });
+    }
+    throw new HttpError(409, "The PayMongo checkout is no longer active. Cancel this order and place it again.");
+  }
   const returnUrls = checkoutReturnUrls(req.body.orderId);
-  const authorization = Buffer.from(`${key}:`).toString("base64");
-  const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-    method: "POST",
-    headers: { Authorization: `Basic ${authorization}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      data: {
-        attributes: {
-          billing: { email: order.customerEmail, name: order.customerName, phone: order.phone },
-          description: `Taptap Foodtrip ${req.body.orderId}`,
-          line_items: [
-            ...order.items.map((item) => ({ currency: "PHP", amount: Math.round(item.price * 100), name: item.name, quantity: item.qty })),
-            ...(Number(order.deliveryFee || 0) > 0 ? [{ currency: "PHP", amount: Math.round(Number(order.deliveryFee) * 100), name: "Delivery fee", quantity: 1 }] : [])
-          ],
-          payment_method_types: ["gcash"],
-          success_url: returnUrls.successUrl,
-          cancel_url: returnUrls.cancelUrl,
-          reference_number: req.body.orderId,
-          send_email_receipt: true,
-          show_description: true,
-          show_line_items: true
-        }
-      }
-    })
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new HttpError(502, payload.errors?.[0]?.detail || "Online payment request failed.");
-  await database().ref(`orders/${req.body.orderId}`).update({
-    paymentProvider: "paymongo",
-    providerSessionId: payload.data.id,
-    checkoutCreatedAt: Date.now()
-  });
-  res.json({ id: payload.data.id, checkoutUrl: payload.data.attributes.checkout_url });
+  const result = await createPayMongoCheckoutSession(
+    { ...order, orderId: req.body.orderId },
+    returnUrls,
+    { configuration }
+  );
+  await recordPayMongoCheckoutSession(database(), req.body.orderId, result, configuration.mode);
+  res.json({ id: result.id, checkoutUrl: result.checkoutUrl, reused: false });
 }));
 
 app.post(route("/notifications/sms"), authenticate, requireRoles("owner", "staff"), async (req, res) => {
@@ -484,9 +557,25 @@ app.post(route("/notifications/sms"), authenticate, requireRoles("owner", "staff
 app.post(route("/notifications"), authenticate, asyncRoute(async (req, res) => {
   res.status(201).json(await createNotification(database(), req.user, req.body));
 }));
+app.get(route("/notifications/push/status"), authenticate, asyncRoute(async (req, res) => {
+  res.json(await pushStatus(database(), firebaseServices, req.user.uid));
+}));
+app.post(route("/notifications/push-tokens"), authenticate, asyncRoute(async (req, res) => {
+  res.status(201).json(await registerPushToken(database(), firebaseServices, req.user, req.body?.token));
+}));
+app.delete(route("/notifications/push-tokens"), authenticate, asyncRoute(async (req, res) => {
+  res.json(await removePushTokens(database(), req.user, {
+    token: req.body?.token,
+    all: req.body?.all === true
+  }));
+}));
 app.post(route("/notifications/read-all"), authenticate, asyncRoute(async (req, res) => {
   await markAllNotificationsRead(database(), req.user.uid);
   res.json({ updated: true });
+}));
+app.post(route("/notifications/:notificationId/read"), authenticate, asyncRoute(async (req, res) => {
+  const updated = await markNotificationRead(database(), req.user.uid, req.params.notificationId);
+  res.json({ updated });
 }));
 app.post(route("/notifications/cleanup"), authenticate, asyncRoute(async (req, res) => {
   res.json({ deleted: await cleanupExpiredNotifications(database(), req.user.uid) });
@@ -494,6 +583,9 @@ app.post(route("/notifications/cleanup"), authenticate, asyncRoute(async (req, r
 app.delete(route("/notifications"), authenticate, asyncRoute(async (req, res) => {
   await clearNotifications(database(), req.user.uid);
   res.json({ cleared: true });
+}));
+app.delete(route("/notifications/read"), authenticate, asyncRoute(async (req, res) => {
+  res.json({ cleared: await clearReadNotifications(database(), req.user.uid) });
 }));
 app.delete(route("/notifications/:notificationId"), authenticate, asyncRoute(async (req, res) => {
   await dismissNotification(database(), req.user.uid, req.params.notificationId);
@@ -510,11 +602,31 @@ app.post(route("/orders"), authenticate, asyncRoute(async (req, res) => {
     console.warn("Receipt email failed:", error.message);
     return { sent: false };
   });
+  if (!result.idempotent) {
+    await dispatchOrderPush({
+      firebase: firebaseServices,
+      db: database(),
+      orderId: result.id,
+      order: result.order,
+      created: true,
+      appBaseUrl: allowedOrigins()[0] || "",
+      logger: pushLogger
+    });
+  }
   res.status(201).json({ ...result, receiptEmail });
 }));
 
 app.patch(route("/orders/:orderId"), authenticate, asyncRoute(async (req, res) => {
   const result = await updateOrderRecord(database(), req.user, req.params.orderId, req.body);
+  await dispatchOrderPush({
+    firebase: firebaseServices,
+    db: database(),
+    orderId: req.params.orderId,
+    order: result.order,
+    changes: result.changes,
+    appBaseUrl: allowedOrigins()[0] || "",
+    logger: pushLogger
+  });
   res.json({ id: req.params.orderId, ...result });
 }));
 
@@ -642,5 +754,5 @@ export const api = onRequest({
   region: "asia-southeast1",
   timeoutSeconds: 60,
   memory: "512MiB",
-  secrets: [openaiKey, paymongoKey, twilioSid, twilioToken, twoFactorKey, gmailUser, gmailAppPassword, turnstileSecret]
+  secrets: [openaiKey, paymongoKey, paymongoWebhookSecret, twilioSid, twilioToken, twoFactorKey, gmailUser, gmailAppPassword, turnstileSecret]
 }, app);

@@ -1,4 +1,5 @@
-import type { AppUser, ComplaintType, DeliveryLocation, PaymentMethod } from "../../types/domain";
+import type { AppUser, CartItem, ComplaintType, DeliveryLocation, MenuItem, Order, PaymentMethod } from "../../types/domain";
+import { menuAvailability } from "../../utils/operations";
 
 export const defaultStorePin: DeliveryLocation = {
   lat: Number(import.meta.env.VITE_STORE_LATITUDE || 14.4509229),
@@ -20,6 +21,42 @@ export const complaintTypes = [
   ["late-order", "Late order"],
   ["bad-food", "Bad food"]
 ] as const satisfies readonly (readonly [ComplaintType, string])[];
+
+export interface ReorderPlan {
+  items: CartItem[];
+  addedQuantity: number;
+  adjustedLines: number;
+  skippedLines: number;
+}
+
+export function buildReorderPlan(order: Pick<Order, "items">, menu: readonly MenuItem[]): ReorderPlan {
+  const products = new Map(menu.map((product) => [product.id, product]));
+  let adjustedLines = 0;
+  let skippedLines = 0;
+  const items = (order.items || []).map((previousItem) => {
+    const product = products.get(previousItem.id);
+    if (!product || product.walkInOnly || !menuAvailability(product).available) {
+      skippedLines += 1;
+      return null;
+    }
+    const requestedQuantity = Math.max(1, Math.floor(Number(previousItem.qty || 1)));
+    const stock = Math.max(0, Math.floor(Number(product.stock ?? previousItem.stock ?? 0)));
+    const qty = Math.min(requestedQuantity, stock);
+    if (qty <= 0) {
+      skippedLines += 1;
+      return null;
+    }
+    if (qty < requestedQuantity) adjustedLines += 1;
+    return { ...product, stock, qty } as CartItem;
+  }).filter((item): item is CartItem => Boolean(item));
+
+  return {
+    items,
+    addedQuantity: items.reduce((sum, item) => sum + item.qty, 0),
+    adjustedLines,
+    skippedLines
+  };
+}
 
 export interface CheckoutDraft {
   deliveryType: "delivery" | "pickup";

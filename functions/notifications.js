@@ -1,9 +1,46 @@
 import { HttpError, validRecordId } from "./operations.js";
 
 const notificationTtlMs = 30 * 24 * 60 * 60 * 1000;
+const notificationEntityTypes = new Set([
+  "order",
+  "complaint",
+  "delivery",
+  "payment",
+  "inventory",
+  "review",
+  "shift",
+  "chat",
+  "system"
+]);
+const notificationActionViews = new Set([
+  "orders",
+  "receipts",
+  "feedback",
+  "owner-sales",
+  "owner-inventory",
+  "owner-reports",
+  "owner-reviews",
+  "staff-pos",
+  "staff-kitchen",
+  "staff-orders",
+  "staff-inventory",
+  "staff-shifts",
+  "staff-chat",
+  "staff-reviews",
+  "rider-orders",
+  "rider-cod"
+]);
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+export function notificationDisplayReference(recordId, prefix = "TAP") {
+  const value = cleanText(recordId, 128);
+  if (!value) return "";
+  if (/^TAP-[A-Z0-9-]{3,}$/i.test(value)) return value.toUpperCase();
+  const suffix = value.replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
+  return suffix ? `${cleanText(prefix, 12).toUpperCase() || "TAP"}-${suffix}` : "";
 }
 
 export function notificationRecord(targetUserId, input = {}) {
@@ -13,6 +50,16 @@ export function notificationRecord(targetUserId, input = {}) {
   const type = cleanText(input.type || "system", 40);
   if (!title || !message) throw new HttpError(400, "Notification title and message are required.");
   const createdAt = Date.now();
+  const orderId = validRecordId(input.orderId) ? input.orderId : "";
+  const entityType = notificationEntityTypes.has(input.entityType)
+    ? input.entityType
+    : orderId
+      ? type === "sale" ? "payment" : type === "complaint" ? "complaint" : type === "delivery" ? "delivery" : "order"
+      : "";
+  const entityId = validRecordId(input.entityId) ? input.entityId : orderId;
+  const displayReference = cleanText(input.displayReference, 80) || (orderId ? notificationDisplayReference(orderId) : "");
+  const amount = Number(input.amount);
+  const actionView = notificationActionViews.has(input.actionView) ? input.actionView : "";
   return {
     targetUserId,
     title,
@@ -21,7 +68,12 @@ export function notificationRecord(targetUserId, input = {}) {
     createdAt,
     expiresAt: createdAt + notificationTtlMs,
     readAt: null,
-    ...(validRecordId(input.orderId) ? { orderId: input.orderId } : {})
+    ...(orderId ? { orderId } : {}),
+    ...(entityType ? { entityType } : {}),
+    ...(entityId ? { entityId } : {}),
+    ...(displayReference ? { displayReference } : {}),
+    ...(Number.isFinite(amount) && amount >= 0 && amount <= 1_000_000_000 ? { amount } : {}),
+    ...(actionView ? { actionView } : {})
   };
 }
 
@@ -64,6 +116,22 @@ export async function markAllNotificationsRead(db, userId) {
   if (Object.keys(updates).length) await db.ref().update(updates);
 }
 
+export async function markNotificationRead(db, userId, notificationId) {
+  if (!validRecordId(notificationId)) throw new HttpError(400, "Invalid notification ID.");
+  const ref = db.ref(`notifications/${notificationId}`);
+  const entry = (await ref.once("value")).val();
+  if (!entry) return false;
+  if (entry.targetUserId !== userId) throw new HttpError(403, "You cannot update another user's notification.");
+  const now = Date.now();
+  if (Number(entry.expiresAt || Infinity) <= now) {
+    await ref.remove();
+    return false;
+  }
+  if (entry.readAt) return false;
+  await ref.update({ readAt: now });
+  return true;
+}
+
 export async function dismissNotification(db, userId, notificationId) {
   if (!validRecordId(notificationId)) throw new HttpError(400, "Invalid notification ID.");
   const ref = db.ref(`notifications/${notificationId}`);
@@ -77,6 +145,17 @@ export async function clearNotifications(db, userId) {
   const notifications = await ownedNotifications(db, userId);
   const updates = Object.fromEntries(Object.keys(notifications).map((id) => [`notifications/${id}`, null]));
   if (Object.keys(updates).length) await db.ref().update(updates);
+}
+
+export async function clearReadNotifications(db, userId) {
+  const notifications = await ownedNotifications(db, userId);
+  const now = Date.now();
+  const updates = {};
+  for (const [id, entry] of Object.entries(notifications)) {
+    if (entry.readAt || Number(entry.expiresAt || Infinity) <= now) updates[`notifications/${id}`] = null;
+  }
+  if (Object.keys(updates).length) await db.ref().update(updates);
+  return Object.keys(updates).length;
 }
 
 export async function createNotification(db, actor, input = {}) {

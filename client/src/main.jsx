@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "bootstrap/dist/css/bootstrap.min.css";
 import App from "./App";
+import { initializePerformanceMonitoring } from "./services/performance";
+import { registerWebsiteServiceWorker } from "./services/pwa";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -9,3 +11,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+initializePerformanceMonitoring();
+registerWebsiteServiceWorker();

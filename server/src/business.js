@@ -3,13 +3,10 @@ import {
   canAccessOrder,
   HttpError,
   validRecordId,
-  validateDeliveryProof,
-  validateLocation,
   validateOrderItems
 } from "./security.js";
 import { randomUUID } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
-import { getStorage } from "firebase-admin/storage";
 import { notificationUpdates, userIdsForRoles } from "./notifications.js";
 import {
   availableDeliveryProjection,
@@ -70,49 +67,6 @@ function parseAvailability(input = {}) {
 
 function deliveryOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function parseProofHandoff(input = {}, order = {}) {
-  const handoff = input || {};
-  const otp = cleanText(handoff.otp, 12).replace(/\D/g, "").slice(0, 6);
-  if (otp && order.handoffOtp && otp !== order.handoffOtp) throw new HttpError(409, "Delivery OTP does not match this order.");
-  const proof = {
-    customerName: cleanText(handoff.customerName, 80),
-    signature: cleanText(handoff.signature, 80),
-    otpVerified: Boolean(otp && order.handoffOtp && otp === order.handoffOtp),
-    photoQualityWarning: cleanText(handoff.photoQualityWarning, 160),
-    capturedAt: Date.now()
-  };
-  if (!proof.customerName && !proof.signature) {
-    throw new HttpError(400, "Add the receiver name or typed signature before delivery proof.");
-  }
-  return proof;
-}
-
-async function persistProofImage(orderId, dataUrl, logger) {
-  const encoded = dataUrl.slice("data:image/jpeg;base64,".length);
-  const imageBuffer = Buffer.from(encoded, "base64");
-  const configuredBucket = String(process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, "");
-  if (!configuredBucket) {
-    return { dataUrl, sizeBytes: imageBuffer.length, storageMode: "database" };
-  }
-  try {
-    const bucket = getStorage().bucket(configuredBucket);
-    const storagePath = `proof-of-delivery/${orderId}/${Date.now()}.jpg`;
-    const token = randomUUID();
-    await bucket.file(storagePath).save(imageBuffer, {
-      resumable: false,
-      metadata: {
-        contentType: "image/jpeg",
-        metadata: { firebaseStorageDownloadTokens: token }
-      }
-    });
-    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
-    return { downloadUrl, storagePath, storageBucket: bucket.name, sizeBytes: imageBuffer.length, storageMode: "storage" };
-  } catch {
-    logger?.warn("delivery_proof_storage_fallback", { orderId, storageMode: "database" });
-    return { dataUrl, sizeBytes: imageBuffer.length, storageMode: "database" };
-  }
 }
 
 function slugifyId(value) {
@@ -353,7 +307,10 @@ async function finalizeCancelledOrder(db, user, orderId, previous, order, change
         title: "Order cancelled",
         message: `${orderId} was cancelled: ${changes.cancelReason || claimedOrder.cancelReason}.`,
         type: "order",
-        orderId
+        orderId,
+        entityType: "order",
+        entityId: orderId,
+        actionView: "orders"
       }));
     }
     await db.ref().update(updates);
@@ -554,19 +511,29 @@ export async function createOrderRecord(db, user, input) {
       title: onlinePayment ? "Payment pending" : "Order confirmed",
       message: onlinePayment ? `Order ${orderId} is waiting for GCash payment confirmation.` : `Order ${orderId} was received.`,
       type: "order",
-      orderId
+      orderId,
+      entityType: "order",
+      entityId: orderId,
+      actionView: "orders"
     }),
     ...notificationUpdates(db, onlinePayment ? [] : staffUserIds, {
       title: "New order received",
       message: `${orderId} from ${customerName} is waiting in the queue.`,
       type: "order",
-      orderId
+      orderId,
+      entityType: "order",
+      entityId: orderId,
+      actionView: "staff-orders"
     }),
     ...notificationUpdates(db, onlinePayment ? [] : ownerUserIds, {
       title: "New sale recorded",
       message: `${orderId} added ${total} PHP to the live sales ledger.`,
       type: "sale",
-      orderId
+      orderId,
+      entityType: "payment",
+      entityId: orderId,
+      amount: total,
+      actionView: "owner-sales"
     }),
     ...orderCreationAggregateUpdates(order, createdAt)
   };
@@ -765,7 +732,10 @@ export async function updateOrderRecord(db, user, orderId, input) {
       title: "Order status updated",
       message: `${orderId} is now ${changes.status.replaceAll("-", " ")}.`,
       type: "order",
-      orderId
+      orderId,
+      entityType: "order",
+      entityId: orderId,
+      actionView: "orders"
     }));
   }
   if (changes.riderId && changes.riderId !== previous.riderId) {
@@ -773,7 +743,10 @@ export async function updateOrderRecord(db, user, orderId, input) {
       title: "Delivery assigned",
       message: `${orderId} has been assigned to you.`,
       type: "delivery",
-      orderId
+      orderId,
+      entityType: "delivery",
+      entityId: orderId,
+      actionView: "rider-orders"
     }));
   }
   if (changes.deliveryIssue) {
@@ -782,7 +755,9 @@ export async function updateOrderRecord(db, user, orderId, input) {
       title: "Delivery issue reported",
       message: `${orderId}: ${changes.deliveryIssue}`,
       type: "delivery",
-      orderId
+      orderId,
+      entityType: "delivery",
+      entityId: orderId
     }));
   }
   if (changes.codRemittedAt) {
@@ -791,7 +766,11 @@ export async function updateOrderRecord(db, user, orderId, input) {
       title: "COD remitted",
       message: `${orderId} COD cash was marked as remitted.`,
       type: "sale",
-      orderId
+      orderId,
+      entityType: "payment",
+      entityId: orderId,
+      amount: Number(order.total || 0),
+      actionView: "owner-sales"
     }));
   }
   await db.ref().update(updates);
@@ -1082,7 +1061,9 @@ export async function createComplaintRecord(db, user, input = {}) {
       title: "New order complaint",
       message: `${complaint.customerName} reported ${orderId}.`,
       type: "complaint",
-      orderId
+      orderId,
+      entityType: "complaint",
+      entityId: id
     })
   });
   return { id, complaint };
@@ -1116,7 +1097,10 @@ export async function updateComplaintRecord(db, user, complaintId, input = {}) {
       title: "Complaint updated",
       message: `${complaint.orderId} is now ${status}.`,
       type: "complaint",
-      orderId: complaint.orderId
+      orderId: complaint.orderId,
+      entityType: "complaint",
+      entityId: complaintId,
+      actionView: "orders"
     })
   };
   if (status === "reviewed") updates[`complaints/${complaintId}/reviewedAt`] = now;
@@ -1184,48 +1168,14 @@ export async function adjustInventoryRecord(db, user, itemId, input) {
     Object.assign(updates, notificationUpdates(db, [...ownerIds, user.uid], {
       title: "Low stock alert",
       message: `${item.name} has ${item.stock || 0} item(s) remaining.`,
-      type: "inventory"
+      type: "inventory",
+      entityType: "inventory",
+      entityId: itemId,
+      displayReference: item.name
     }));
   }
   await db.ref().update(updates);
   return { item: { id: itemId, ...item } };
-}
-
-export async function saveRiderLocationRecord(db, user, orderId, input) {
-  if (user.role !== "rider") throw new HttpError(403, "Rider access required.");
-  if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
-  const order = (await db.ref(`orders/${orderId}`).once("value")).val();
-  if (!order) throw new HttpError(404, "Order not found.");
-  if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
-  if (order.status === "delivered") throw new HttpError(409, "Delivered orders no longer accept GPS updates.");
-  const location = { ...validateLocation(input), updatedAt: Date.now() };
-  await db.ref().update({
-    [`riderLocations/${user.uid}`]: { ...location, orderId },
-    [`orders/${orderId}/riderLocation`]: location
-  });
-  return { location, order };
-}
-
-export async function saveDeliveryProofRecord(db, user, orderId, input, { logger } = {}) {
-  if (user.role !== "rider") throw new HttpError(403, "Rider access required.");
-  if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
-  const order = (await db.ref(`orders/${orderId}`).once("value")).val();
-  if (!order) throw new HttpError(404, "Order not found.");
-  if (order.riderId !== user.uid) throw new HttpError(403, "This delivery is not assigned to you.");
-  if (order.status !== "arrived") throw new HttpError(409, "Proof can be captured only after arrival.");
-  const handoff = parseProofHandoff(input.handoff, order);
-  const image = await persistProofImage(orderId, validateDeliveryProof(input.dataUrl), logger);
-  const proofOfDeliveryRef = `deliveryProofs/${orderId}`;
-  const createdAt = Date.now();
-  await db.ref(proofOfDeliveryRef).set({
-    ...image,
-    handoff,
-    riderId: user.uid,
-    riderName: user.name || user.email || "Rider",
-    createdAt,
-    expiresAt: retentionTimestamp(createdAt, 30)
-  });
-  return { proofOfDeliveryRef, proofOfDeliveryMeta: handoff };
 }
 
 export async function saveShiftLogRecord(db, user, input) {
@@ -1261,7 +1211,9 @@ export async function saveShiftLogRecord(db, user, input) {
     ...notificationUpdates(db, [user.uid], {
       title: "Shift summary ready",
       message: `Your shift summary is ready with ${entry.orderCount} order(s) and a variance of ${entry.variance} PHP.`,
-      type: "shift"
+      type: "shift",
+      entityType: "shift",
+      actionView: "staff-shifts"
     })
   });
   return { id: shiftId };
@@ -1360,7 +1312,9 @@ export async function closeActiveShiftRecord(db, user, input = {}) {
     ...notificationUpdates(db, [user.uid], {
       title: "Shift summary ready",
       message: `Your shift summary is ready with ${orders.length} order(s) and a variance of ${variance} PHP.`,
-      type: "shift"
+      type: "shift",
+      entityType: "shift",
+      actionView: "staff-shifts"
     })
   });
   return { id: shiftId, log };

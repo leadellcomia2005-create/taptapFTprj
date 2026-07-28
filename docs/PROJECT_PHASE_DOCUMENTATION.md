@@ -323,7 +323,7 @@ Give riders a mobile-friendly delivery dashboard for order claiming, GPS trackin
 
 - `client/src/App.jsx`
 - `client/src/components/DeliveryMap.jsx`
-- `client/src/components/CameraProof.jsx`
+- `client/src/components/CameraProof.tsx`
 - `client/src/services/socket.js`
 - `client/src/services/firebase.js`
 - `server/src/business.js`
@@ -365,7 +365,7 @@ received -> preparing -> ready -> out-for-delivery -> arrived -> delivered
 
 ### Camera Proof
 
-Camera proof uses `MediaDevices API` through `client/src/components/CameraProof.jsx`. Proof is saved through backend logic instead of direct database write.
+Camera proof uses `MediaDevices API` through `client/src/components/CameraProof.tsx`. Proof is saved through backend logic instead of direct database write.
 
 ### GPS Tracking
 
@@ -522,6 +522,7 @@ Core API groups:
 | `/api/assistant` | Customer assistant and fallback AI support. |
 | `/api/insights` | Owner AI sales/inventory insights. |
 | `/api/payments/checkout` | Online checkout session creation. |
+| `/api/payments/paymongo/webhook` | Signed PayMongo checkout payment confirmation. |
 | `/api/notifications/*` | Send, read, clear, dismiss, and cleanup notifications. |
 | `/api/orders` | List and create orders. |
 | `/api/orders/:orderId` | Update order status and assignment. |

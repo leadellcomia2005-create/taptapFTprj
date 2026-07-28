@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { applicationDefault, cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getDatabase } from "firebase-admin/database";
+import { getMessaging } from "firebase-admin/messaging";
 
 const publicUnavailableMessage = "Account service is unavailable.";
 
@@ -11,7 +12,8 @@ export async function initializeFirebaseAdmin(config, logger) {
       enabled: false,
       publicError: publicUnavailableMessage,
       db: () => null,
-      auth: () => null
+      auth: () => null,
+      messaging: () => null
     };
   }
 
@@ -29,7 +31,8 @@ export async function initializeFirebaseAdmin(config, logger) {
       enabled: true,
       publicError: null,
       db: () => getDatabase(app),
-      auth: () => getAuth(app)
+      auth: () => getAuth(app),
+      messaging: () => getMessaging(app)
     };
   } catch (error) {
     logger.error("firebase_admin_initialization_failed", error);
@@ -37,7 +40,8 @@ export async function initializeFirebaseAdmin(config, logger) {
       enabled: false,
       publicError: publicUnavailableMessage,
       db: () => null,
-      auth: () => null
+      auth: () => null,
+      messaging: () => null
     };
   }
 }

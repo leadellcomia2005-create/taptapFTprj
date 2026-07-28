@@ -1,9 +1,10 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, CheckCheck, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
+import { Bell, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
+import NotificationCenter from "./components/NotificationCenter";
 import { defaultViewForRole, navigationForUser, staffCanAccess, staffRoleLabels } from "./config/appConfig";
 import { fallbackMenu } from "./data/menu";
 import { api } from "./services/api";
@@ -16,11 +17,13 @@ import { subscribeInventory } from "./services/firebase/inventory";
 import { subscribeMenu } from "./services/firebase/menu";
 import { sendSupportMessage, subscribeAuditLogs, subscribeShiftLogs, subscribeSupportMessages } from "./services/firebase/operations";
 import { subscribeOrders } from "./services/firebase/orders";
+import { listenForForegroundPush, syncGrantedPushToken } from "./services/pushNotifications";
+import { startPerformanceTrace } from "./services/performance";
 import { disconnectSocket, getSocket, subscribeSocketRiderLocation } from "./services/socket";
 import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
 import { useAuthSession, useCartState, useNotificationCenter, useRoleNavigation } from "./hooks/useAppState";
 import { menuAvailability } from "./utils/operations";
-import { assistantSourceLabel, currency, relativeTime, statusLabel } from "./utils/display";
+import { assistantSourceLabel, currency, statusLabel } from "./utils/display";
 
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
 const Checkout = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.Checkout })));
@@ -395,7 +398,7 @@ const storefrontCategoryLabels = {
   Drinks: "Drinks"
 };
 
-function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications, onHelp, helpOpen, onLogout }) {
+function AppHeader({ user, activeView, unreadCount, notificationsOpen, onNavigate, onNotifications, onHelp, helpOpen, onLogout }) {
   const navigation = navigationForUser(user);
   const homeView = defaultViewForRole(user.role);
   const customerNavigation = user.role === "customer";
@@ -465,7 +468,7 @@ function AppHeader({ user, activeView, unreadCount, onNavigate, onNotifications,
       <div className="header-actions">
         {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}
         {customerNavigation && <button className={`header-help-button ${helpOpen ? "active" : ""}`} onClick={onHelp} aria-label={helpOpen ? "Close customer support" : "Open customer support"} aria-expanded={helpOpen} aria-controls="assistant-panel"><MessageCircle size={18} strokeWidth={2.4} aria-hidden="true" /></button>}
-        <button className="notification-button" onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
+        <button className="notification-button" aria-controls="notification-center" aria-expanded={notificationsOpen} onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
         <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div></div>
         {/* erick: ginawang solid red button (dati plain text link). */}
         <button className="btn btn-danger btn-sm logout-button" aria-label="Log out" onClick={onLogout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
@@ -497,42 +500,6 @@ function CustomerBottomNav({ activeView, onNavigate }) {
         </button>
       ))}
     </nav>
-  );
-}
-
-function NotificationCenter({ notifications, onClose }) {
-  const [markingRead, setMarkingRead] = useState(false);
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
-  const markAllRead = async () => {
-    if (!unreadCount || markingRead) return;
-    setMarkingRead(true);
-    try {
-      await api.markAllNotificationsRead();
-    } finally {
-      setMarkingRead(false);
-    }
-  };
-  const clearAll = async () => {
-    if (!window.confirm("Clear all notifications? This cannot be undone.")) return;
-    await api.clearNotifications();
-  };
-  const dismiss = async (notificationId) => {
-    await api.dismissNotification(notificationId);
-  };
-  return (
-    <>
-      <button className="notification-backdrop" aria-label="Close notifications" onClick={onClose} />
-      <aside className="notification-center">
-        <header><div><p className="eyebrow text-danger">Your updates</p><h3>Notifications</h3></div><div className="notification-tools"><button className="mark-notifications-read" disabled={!unreadCount || markingRead} onClick={markAllRead}><CheckCheck size={15} aria-hidden="true" />{markingRead ? "Marking..." : "Mark all read"}</button><button className="clear-notifications" disabled={!notifications.length} onClick={clearAll}>Clear all</button><button aria-label="Close notifications" onClick={onClose}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></div></header>
-        <div className="notification-list">
-          {notifications.length === 0 && <div className="empty-chat">No notifications yet.</div>}
-          {notifications.map((notification) => {
-            const unread = !notification.readAt;
-            return <article className={unread ? "unread" : ""} key={notification.id}><span className={`notification-icon ${notification.type || "system"}`}><Bell size={15} aria-hidden="true" /></span><div><strong>{notification.title}</strong><p>{notification.message}</p><time title={new Date(notification.createdAt).toLocaleString("en-PH")}>{relativeTime(notification.createdAt)}</time></div>{unread && <i />}<button className="notification-dismiss" aria-label={`Dismiss ${notification.title}`} onClick={() => dismiss(notification.id)}><X size={15} aria-hidden="true" /></button></article>;
-          })}
-        </div>
-      </aside>
-    </>
   );
 }
 
@@ -867,12 +834,17 @@ export default function App() {
   const [trackingOrder, setTrackingOrder] = useState(null);
   const [notice, setNotice] = useState("");
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const { notifications, notificationsOpen, setNotificationsOpen, unreadCount } = useNotificationCenter(activeUser);
+  const { notifications, notificationsLoading, notificationsOpen, setNotificationsOpen, unreadCount } = useNotificationCenter(activeUser);
+  const [pendingNotificationOrderId, setPendingNotificationOrderId] = useState(null);
   const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
   const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
   const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
+  const paymentReturnHandledRef = useRef(false);
+  const payingOrderRef = useRef("");
+  const activeUserId = activeUser?.uid;
+  const activeUserRole = activeUser?.role;
 
   useEffect(() => {
     const updateOnlineState = () => setOnline(navigator.onLine);
@@ -888,8 +860,29 @@ export default function App() {
       setMenu(fallbackMenu);
       return undefined;
     }
-    return subscribeMenu(fallbackMenu, setMenu);
+    const trace = startPerformanceTrace("menu_loading", { role: activeUser.role });
+    const unsubscribe = subscribeMenu(fallbackMenu, (nextMenu) => {
+      trace.stop("success");
+      setMenu(nextMenu);
+    });
+    return () => {
+      trace.stop("cancelled");
+      unsubscribe();
+    };
   }, [activeUser]);
+  useEffect(() => {
+    if (!activeUserId || !activeUserRole) return undefined;
+    const trace = startPerformanceTrace("dashboard_initial_loading", { role: activeUserRole });
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => trace.stop("success"));
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+      trace.stop("cancelled");
+    };
+  }, [activeUserId, activeUserRole]);
   useEffect(() => {
     const staffInventoryView = activeUser?.role === "staff" && ["staff-overview", "staff-pos", "staff-inventory"].includes(view);
     const shouldLoadInventory = activeUser?.role === "owner" || staffInventoryView;
@@ -902,7 +895,7 @@ export default function App() {
   useEffect(() => {
     const shouldLoadOrders = Boolean(activeUser) && (
       activeUser.role === "rider" ||
-      (activeUser.role === "customer" && (["orders", "receipts", "feedback"].includes(view) || checkoutOpen || trackingOrder)) ||
+      (activeUser.role === "customer" && (["orders", "receipts", "feedback"].includes(view) || checkoutOpen || trackingOrder || pendingNotificationOrderId)) ||
       (activeUser.role === "owner" && ["owner-overview", "owner-sales", "owner-reports", "owner-settings"].includes(view)) ||
       (activeUser.role === "staff" && ["staff-overview", "staff-pos", "staff-orders", "staff-kitchen", "staff-shifts"].includes(view))
     );
@@ -916,7 +909,18 @@ export default function App() {
     previousOrderCount.current = nextOrders.length;
     setOrders(nextOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     });
-  }, [activeUser, checkoutOpen, trackingOrder, view]);
+  }, [activeUser, checkoutOpen, pendingNotificationOrderId, trackingOrder, view]);
+  useEffect(() => {
+    if (!pendingNotificationOrderId) return undefined;
+    const order = orders.find((entry) => entry.id === pendingNotificationOrderId);
+    if (order) {
+      setTrackingOrder(order);
+      setPendingNotificationOrderId(null);
+      return undefined;
+    }
+    const timeout = setTimeout(() => setPendingNotificationOrderId(null), 10_000);
+    return () => clearTimeout(timeout);
+  }, [orders, pendingNotificationOrderId]);
   useEffect(() => {
     const shouldLoadComplaints = Boolean(activeUser) && (
       activeUser.role === "owner" ||
@@ -974,6 +978,61 @@ export default function App() {
     return undefined;
   }, [activeUser]);
   useEffect(() => {
+    if (!activeUser) return undefined;
+    let active = true;
+    let stopForegroundListener = () => {};
+    void syncGrantedPushToken();
+    void listenForForegroundPush((message) => {
+      if (!active) return;
+      setNotice(`${message.title}: ${message.body}`);
+    }).then((unsubscribe) => {
+      if (active) stopForegroundListener = unsubscribe;
+      else unsubscribe();
+    });
+
+    const openPushDestination = (destination, orderId) => {
+      if (activeUser.role !== "customer" || destination !== "orders") return;
+      navigate("orders");
+      if (orderId) setPendingNotificationOrderId(orderId);
+    };
+    const handleServiceWorkerMessage = (event) => {
+      if (event.data?.type === "TAPTAP_PUSH_OPEN") {
+        openPushDestination(event.data.destination, event.data.orderId);
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", handleServiceWorkerMessage);
+
+    const url = new URL(window.location.href);
+    const destination = url.searchParams.get("push");
+    const orderId = url.searchParams.get("orderId");
+    if (destination) {
+      openPushDestination(destination, orderId);
+      url.searchParams.delete("push");
+      url.searchParams.delete("orderId");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+
+    return () => {
+      active = false;
+      stopForegroundListener();
+      navigator.serviceWorker?.removeEventListener("message", handleServiceWorkerMessage);
+    };
+  }, [activeUser, navigate]);
+  useEffect(() => {
+    if (paymentReturnHandledRef.current || activeUser?.role !== "customer") return;
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("payment");
+    if (!["success", "cancelled"].includes(result)) return;
+    paymentReturnHandledRef.current = true;
+    navigate("orders");
+    setNotice(result === "success"
+      ? "Payment submitted. PayMongo confirmation may take a moment; check your order status."
+      : "Online payment was cancelled. Your order is still pending and can be paid or cancelled from Orders.");
+    url.searchParams.delete("payment");
+    url.searchParams.delete("orderId");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [activeUser?.role, navigate]);
+  useEffect(() => {
     if (!trackingOrder) {
       disconnectSocket();
       setServiceStatus((current) => ({ ...current, socket: false }));
@@ -1017,6 +1076,18 @@ export default function App() {
     trackCheckoutAbandonment(cart, "customer_closed");
     setCheckoutOpen(false);
   };
+  const retryOnlinePayment = async (order) => {
+    if (payingOrderRef.current) return;
+    payingOrderRef.current = order.id;
+    try {
+      const result = await api.createPayment({ orderId: order.id });
+      if (!result.checkoutUrl) throw new Error("Online checkout is not available for this order.");
+      window.location.assign(result.checkoutUrl);
+    } catch (error) {
+      setNotice(error.message || "Online checkout could not be opened.");
+      payingOrderRef.current = "";
+    }
+  };
 
   const workspaceHelpers = {
     buildDailyReport,
@@ -1047,13 +1118,13 @@ export default function App() {
 
   return (
     <div className={`app-shell role-${user.role}-shell ${user.role === "customer" ? "customer-app-shell" : "workspace-app-shell"}`}>
-      <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} onHelp={() => setAssistantOpen((current) => !current)} helpOpen={assistantOpen} onLogout={() => { setAssistantOpen(false); logout(); }} />
+      <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} notificationsOpen={notificationsOpen} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} onHelp={() => setAssistantOpen((current) => !current)} helpOpen={assistantOpen} onLogout={() => { setAssistantOpen(false); logout(); }} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
       {serviceStatus.api === false && <div className="offline-banner" role="status">The app could not be reached. Restart the app, then refresh this page.</div>}
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={openCheckout} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
-          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} />
+          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} onPay={serviceStatus.paymongo ? retryOnlinePayment : null} />
         </Suspense>
       )}
       {user.role === "customer" && view === "receipts" && (
@@ -1084,7 +1155,7 @@ export default function App() {
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} open={assistantOpen} onOpenChange={setAssistantOpen} />}
       {user.role === "customer" && <CustomerBottomNav activeView={view} onNavigate={navigate} />}
-      {notificationsOpen && <NotificationCenter notifications={notifications} onClose={() => setNotificationsOpen(false)} />}
+      {notificationsOpen && <NotificationCenter notifications={notifications} loading={notificationsLoading} user={currentUser} onClose={() => setNotificationsOpen(false)} onNavigate={navigate} onOpenOrder={setPendingNotificationOrderId} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}
     </div>
   );

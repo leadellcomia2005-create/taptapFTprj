@@ -5,6 +5,7 @@ import { loadServerConfig } from "./config/environment.js";
 import { initializeFirebaseAdmin } from "./integrations/firebaseAdmin.js";
 import { createAuthentication } from "./middleware/authentication.js";
 import { createLogger } from "./observability/logger.js";
+import { createOperationalMetrics } from "./observability/metrics.js";
 import { createRealtimeHub } from "./realtime/hub.js";
 import { createSocketServer } from "./sockets/index.js";
 
@@ -13,12 +14,13 @@ dotenv.config({ override: false });
 const logger = createLogger();
 const config = loadServerConfig();
 const serverStartedAt = Date.now();
+const metrics = createOperationalMetrics({ startedAt: serverStartedAt });
 const firebase = await initializeFirebaseAdmin(config.firebase, logger);
-const authentication = createAuthentication(firebase);
+const authentication = createAuthentication(firebase, { logger, metrics });
 const realtime = createRealtimeHub();
-const app = createApp({ config, firebase, authentication, realtime, logger, serverStartedAt });
+const app = createApp({ config, firebase, authentication, realtime, logger, metrics, serverStartedAt });
 const server = createServer(app);
-const io = createSocketServer(server, { config, firebase, authentication, realtime, logger });
+const io = createSocketServer(server, { config, firebase, authentication, realtime, logger, metrics });
 
 let shuttingDown = false;
 async function shutdown(signal, exitCode = 0) {

@@ -106,7 +106,14 @@ export const isNotification: RuntimeGuard<Notification> = (value): value is Noti
   isText(value.id) &&
   isText(value.title) &&
   isText(value.message) &&
-  isFiniteNumber(value.createdAt);
+  isFiniteNumber(value.createdAt) &&
+  (value.orderId === undefined || isText(value.orderId)) &&
+  (value.entityId === undefined || isText(value.entityId)) &&
+  (value.displayReference === undefined || isText(value.displayReference)) &&
+  (value.amount === undefined || (isFiniteNumber(value.amount) && value.amount >= 0)) &&
+  (value.actionView === undefined || isText(value.actionView)) &&
+  (value.readAt === undefined || value.readAt === null || isFiniteNumber(value.readAt)) &&
+  (value.expiresAt === undefined || isFiniteNumber(value.expiresAt));
 
 export const isAuditLog: RuntimeGuard<AuditLog> = (value): value is AuditLog =>
   isRecord(value) && isText(value.id) && isText(value.action) && isFiniteNumber(value.createdAt);

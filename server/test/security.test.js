@@ -104,19 +104,20 @@ test("audits rate-limited customer registrations with safe identifiers", async (
   assert.equal(auditEntry.reason, "Too many registration attempts");
 });
 
-test("verifies Turnstile registration tokens when configured", async (t) => {
-  const originalFetch = global.fetch;
-  t.after(() => {
-    global.fetch = originalFetch;
-  });
-
-  global.fetch = async (url, options) => {
+test("verifies current Turnstile registration tokens for the expected action and hostname", async () => {
+  const now = Date.parse("2026-07-28T10:00:00.000Z");
+  const fetchImpl = async (url, options) => {
     assert.equal(url, "https://challenges.cloudflare.com/turnstile/v0/siteverify");
     assert.equal(options.method, "POST");
     assert.equal(options.body.get("secret"), "turnstile-secret");
     assert.equal(options.body.get("response"), "turnstile-token");
     assert.equal(options.body.get("remoteip"), "127.0.0.1");
-    return new Response(JSON.stringify({ success: true, hostname: "localhost" }), {
+    return new Response(JSON.stringify({
+      success: true,
+      hostname: "localhost",
+      action: "customer_registration",
+      challenge_ts: "2026-07-28T09:58:00.000Z"
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
@@ -125,31 +126,91 @@ test("verifies Turnstile registration tokens when configured", async (t) => {
   const result = await verifyTurnstileToken({
     secret: "turnstile-secret",
     token: "turnstile-token",
-    req: { headers: {}, ip: "127.0.0.1" }
+    req: { headers: {}, ip: "127.0.0.1" },
+    allowedHostnames: ["localhost"],
+    fetchImpl,
+    now
   });
   assert.equal(result.configured, true);
   assert.equal(result.hostname, "localhost");
+  assert.equal(result.action, "customer_registration");
 });
 
-test("rejects missing or failed Turnstile registration tokens", async (t) => {
-  const originalFetch = global.fetch;
-  t.after(() => {
-    global.fetch = originalFetch;
-  });
-
+test("rejects missing Turnstile registration tokens", async () => {
   await assert.rejects(
     () => verifyTurnstileToken({ secret: "turnstile-secret", token: "", req: {} }),
     /security check/i
   );
+});
 
-  global.fetch = async () => new Response(JSON.stringify({ success: false }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  });
-
+test("rejects invalid Turnstile registration tokens", async () => {
   await assert.rejects(
-    () => verifyTurnstileToken({ secret: "turnstile-secret", token: "bad-token", req: {} }),
+    () => verifyTurnstileToken({
+      secret: "turnstile-secret",
+      token: "bad-token",
+      req: {},
+      fetchImpl: async () => new Response(JSON.stringify({
+        success: false,
+        "error-codes": ["invalid-input-response"]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    }),
     /security check/i
+  );
+});
+
+test("rejects expired Turnstile registration tokens", async () => {
+  await assert.rejects(
+    () => verifyTurnstileToken({
+      secret: "turnstile-secret",
+      token: "expired-token",
+      req: {},
+      now: Date.parse("2026-07-28T10:00:00.000Z"),
+      fetchImpl: async () => new Response(JSON.stringify({
+        success: true,
+        hostname: "localhost",
+        action: "customer_registration",
+        challenge_ts: "2026-07-28T09:54:59.000Z"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    }),
+    /security check/i
+  );
+});
+
+test("rejects duplicated Turnstile registration tokens", async () => {
+  await assert.rejects(
+    () => verifyTurnstileToken({
+      secret: "turnstile-secret",
+      token: "used-token",
+      req: {},
+      fetchImpl: async () => new Response(JSON.stringify({
+        success: false,
+        "error-codes": ["timeout-or-duplicate"]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    }),
+    /security check/i
+  );
+});
+
+test("fails closed when Turnstile verification is unavailable", async () => {
+  await assert.rejects(
+    () => verifyTurnstileToken({
+      secret: "turnstile-secret",
+      token: "turnstile-token",
+      req: {},
+      fetchImpl: async () => {
+        throw new Error("network unavailable");
+      }
+    }),
+    (error) => error instanceof HttpError && error.status === 503
   );
 });
 

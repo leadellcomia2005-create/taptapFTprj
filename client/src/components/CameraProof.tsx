@@ -1,6 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import type { DeliveryProofHandoff } from "../types/domain";
+import "./CameraProof.css";
 
-function analyzePhotoQuality(canvas) {
+interface PhotoQuality {
+  average?: number;
+  contrast?: number;
+  warning: string;
+}
+
+interface CapturedPhoto {
+  blob: Blob;
+  url: string;
+  width: number;
+  height: number;
+  quality: PhotoQuality;
+}
+
+interface CameraProofProps {
+  onCapture: (blob: Blob, handoff: DeliveryProofHandoff) => void | Promise<void>;
+  onClose: () => void;
+}
+
+function analyzePhotoQuality(canvas: HTMLCanvasElement): PhotoQuality {
   const context = canvas.getContext("2d");
   if (!context) return { warning: "" };
   const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
@@ -33,23 +54,40 @@ function analyzePhotoQuality(canvas) {
   return { average, contrast, warning };
 }
 
-export default function CameraProof({ onCapture, onClose }) {
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "The camera could not be opened. Check browser permission and try again.";
+}
+
+export default function CameraProof({ onCapture, onClose }: CameraProofProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState("");
-  const [handoff, setHandoff] = useState({ customerName: "", signature: "", otp: "" });
-  const [captured, setCaptured] = useState(null);
+  const [handoff, setHandoff] = useState<DeliveryProofHandoff>({ customerName: "", signature: "", otp: "" });
+  const [captured, setCaptured] = useState<CapturedPhoto | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     navigator.mediaDevices?.getUserMedia({
       video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false
     }).then((stream) => {
+      if (cancelled || !videoRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       videoRef.current.srcObject = stream;
-    }).catch((cameraError) => setError(cameraError.message));
-    return () => streamRef.current?.getTracks().forEach((track) => track.stop());
+    }).catch((cameraError: unknown) => {
+      if (!cancelled) setError(errorMessage(cameraError));
+    });
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
   }, []);
 
   useEffect(() => () => {
@@ -68,7 +106,12 @@ export default function CameraProof({ onCapture, onClose }) {
     const scale = Math.min(1, 1280 / sourceWidth);
     canvas.width = Math.round(sourceWidth * scale);
     canvas.height = Math.round(sourceHeight * scale);
-    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setError("The proof photo could not be prepared. Please try again.");
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const quality = analyzePhotoQuality(canvas);
     canvas.toBlob((blob) => {
       if (!blob) {
@@ -79,18 +122,26 @@ export default function CameraProof({ onCapture, onClose }) {
       setCaptured({ blob, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height, quality });
     }, "image/jpeg", 0.86);
   };
+
   const retake = () => {
     if (captured?.url) URL.revokeObjectURL(captured.url);
     setCaptured(null);
   };
+
   const submit = () => {
-    if (captured?.blob) onCapture(captured.blob, { ...handoff, photoQualityWarning: captured.quality?.warning || "" });
+    if (captured?.blob) {
+      void onCapture(captured.blob, {
+        ...handoff,
+        photoQualityWarning: captured.quality.warning
+      });
+    }
   };
-  const handoffReady = Boolean(handoff.customerName.trim() || handoff.signature.trim());
-  const qualityWarning = captured?.quality?.warning || "";
+
+  const handoffReady = Boolean(handoff.customerName?.trim() || handoff.signature?.trim());
+  const qualityWarning = captured?.quality.warning || "";
 
   return (
-    <div className="modal d-block camera-modal" tabIndex="-1">
+    <div className="modal d-block camera-modal" tabIndex={-1}>
       <div className="modal-dialog modal-dialog-centered">
         <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="proof-camera-title">
           <div className="modal-header">
@@ -112,18 +163,18 @@ export default function CameraProof({ onCapture, onClose }) {
                 : cameraReady ? "Point the camera at the handoff or delivered items before capturing." : "Preparing camera..."}
             </small>
             <div className="proof-handoff-grid">
-              <label className="form-label">Customer name<input className="form-control" value={handoff.customerName} onChange={(event) => setHandoff((current) => ({ ...current, customerName: event.target.value }))} placeholder="Name of receiver" /></label>
-              <label className="form-label">Delivery OTP <small>Optional</small><input className="form-control" value={handoff.otp} onChange={(event) => setHandoff((current) => ({ ...current, otp: event.target.value.replace(/\D/g, "").slice(0, 6) }))} placeholder="6-digit code if provided" /></label>
-              <label className="form-label proof-signature">Typed signature<input className="form-control" value={handoff.signature} onChange={(event) => setHandoff((current) => ({ ...current, signature: event.target.value }))} placeholder="Customer signature / initials" /></label>
+              <label className="form-label">Customer name<input className="form-control" value={handoff.customerName || ""} onChange={(event) => setHandoff((current) => ({ ...current, customerName: event.target.value }))} placeholder="Name of receiver" /></label>
+              <label className="form-label">Delivery OTP <small>Optional</small><input className="form-control" value={handoff.otp || ""} onChange={(event) => setHandoff((current) => ({ ...current, otp: event.target.value.replace(/\D/g, "").slice(0, 6) }))} placeholder="6-digit code if provided" /></label>
+              <label className="form-label proof-signature">Typed signature<input className="form-control" value={handoff.signature || ""} onChange={(event) => setHandoff((current) => ({ ...current, signature: event.target.value }))} placeholder="Customer signature / initials" /></label>
             </div>
             {!handoffReady && <small className="proof-required-note">Receiver name or typed signature is required before submitting proof.</small>}
           </div>
           <div className="modal-footer">
-            <button className="btn btn-outline-secondary" onClick={onClose}>Cancel</button>
-            {captured && <button className="btn btn-outline-dark" onClick={retake}>Retake</button>}
+            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>Cancel</button>
+            {captured && <button type="button" className="btn btn-outline-dark" onClick={retake}>Retake</button>}
             {captured
-              ? <button className="btn btn-danger" disabled={!handoffReady} onClick={submit}>Submit proof</button>
-              : <button className="btn btn-danger" disabled={Boolean(error) || !cameraReady} onClick={capture}>Capture photo</button>}
+              ? <button type="button" className="btn btn-danger" disabled={!handoffReady} onClick={submit}>Submit proof</button>
+              : <button type="button" className="btn btn-danger" disabled={Boolean(error) || !cameraReady} onClick={capture}>Capture photo</button>}
           </div>
         </div>
       </div>

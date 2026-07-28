@@ -43,8 +43,16 @@ async function loginAs(page, role) {
   await expect(page.getByRole("button", { name: /Log out/i })).toBeVisible();
 }
 
+async function seedDemoNotifications(page, notifications) {
+  await page.addInitScript((seededNotifications) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({ notifications: seededNotifications }));
+  }, notifications);
+}
+
 async function expectAccessible(page, include) {
   const builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]);
+  const usesEdge = await page.evaluate(() => /\bEdg\//.test(navigator.userAgent));
+  if (usesEdge) builder.setLegacyMode();
   if (include) builder.include(include);
   const accessibility = await builder.analyze();
   const blocking = accessibility.violations.filter((violation) => ["critical", "serious"].includes(violation.impact));
@@ -110,6 +118,52 @@ test("landing page, registration entry, and accessibility are operational", asyn
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("browser notification permission is never requested automatically and denied access stays safe", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__taptapNotificationPermission = "default";
+    window.__taptapNotificationPermissionRequests = 0;
+    class MockNotification {}
+    Object.defineProperty(MockNotification, "permission", {
+      configurable: true,
+      get: () => window.__taptapNotificationPermission
+    });
+    MockNotification.requestPermission = async () => {
+      window.__taptapNotificationPermissionRequests += 1;
+      return window.__taptapNotificationPermission;
+    };
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: MockNotification
+    });
+  });
+
+  const runtime = watchRuntime(page);
+  await loginAs(page, "owner");
+  expect(await page.evaluate(() => window.__taptapNotificationPermissionRequests)).toBe(0);
+
+  await page.getByRole("button", { name: "Open notifications" }).click();
+  let dialog = page.getByRole("dialog", { name: "Notifications" });
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
+  const unavailableAction = dialog.getByTestId("push-notification-toggle");
+  await expect(unavailableAction).toContainText("Browser alerts unavailable");
+  await expect(unavailableAction).toBeDisabled();
+  expect(await page.evaluate(() => window.__taptapNotificationPermissionRequests)).toBe(0);
+
+  await dialog.getByRole("button", { name: "Close notifications" }).click();
+  await page.evaluate(() => {
+    window.__taptapNotificationPermission = "denied";
+  });
+  await page.getByRole("button", { name: "Open notifications" }).click();
+  dialog = page.getByRole("dialog", { name: "Notifications" });
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
+  const blockedAction = dialog.getByTestId("push-notification-toggle");
+  await expect(blockedAction).toContainText("Browser alerts blocked");
+  await expect(blockedAction).toBeDisabled();
+  expect(await page.evaluate(() => window.__taptapNotificationPermissionRequests)).toBe(0);
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
 test("customer can add a meal, confirm a pin, and complete a COD pickup", async ({ page }) => {
   test.setTimeout(60_000);
   const runtime = watchRuntime(page);
@@ -129,6 +183,47 @@ test("customer can add a meal, confirm a pin, and complete a COD pickup", async 
   await page.getByRole("button", { name: /Place order/i }).click();
   await expect(page.getByRole("heading", { name: /Order history/i })).toBeVisible();
   await expect(page.getByText(/TAP-/).first()).toBeVisible();
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("customer reorder skips unavailable items and reduces quantities to current stock", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      menu: {
+        "porkchop-meal": { stock: 1 },
+        "tapa-meal": { stock: 0, unavailable: true }
+      },
+      orders: {
+        "TAP-E2E-REORDER": {
+          customerId: "demo-customer",
+          customerName: "Demo Customer",
+          deliveryType: "pickup",
+          address: "Counter pickup",
+          items: [
+            { id: "porkchop-meal", name: "Porkchop", category: "Favorite Meal", price: 99, qty: 3 },
+            { id: "tapa-meal", name: "Tapa Meal", category: "Favorite Meal", price: 99, qty: 2 }
+          ],
+          subtotal: 495,
+          total: 495,
+          paymentMethod: "cod",
+          paymentStatus: "paid",
+          status: "completed",
+          createdAt: 1700000000000
+        }
+      }
+    }));
+  });
+  const runtime = watchRuntime(page);
+  await loginAs(page, "customer");
+  const navigation = page.getByRole("navigation", { name: /customer navigation/i });
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: "Order History" }));
+  const orderRow = page.locator(".order-table-row").filter({ hasText: "TAP-E2E-REORDER" });
+  await expect(orderRow).toHaveCount(1);
+  await orderRow.getByRole("button", { name: "Order again" }).click();
+  await expect(page.locator(".app-toast")).toContainText("1 item added to your cart");
+  await expect(page.locator(".app-toast")).toContainText("1 unavailable item was skipped");
+  await expect(page.locator(".app-toast")).toContainText("1 item quantity was reduced to current stock");
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
 });
@@ -156,6 +251,24 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   await expectAccessible(page);
   expect(staffRuntime.errors).toEqual([]);
   expect(staffRuntime.deferredRequests).toEqual([]);
+});
+
+test("staff can focus, filter, and add a unique POS product from the keyboard", async ({ page }) => {
+  const runtime = watchRuntime(page);
+  await loginAs(page, "staff");
+  const navigation = page.getByRole("navigation", { name: /staff navigation/i });
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: /Walk-in POS/i }));
+  await expect(page.getByRole("heading", { name: /Walk-in POS/i })).toBeVisible();
+  const search = page.getByPlaceholder("Search POS products");
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+  await search.fill("Egg, Rice, Unli Soup");
+  await search.press("Enter");
+  await expect(page.locator(".staff-cart-list").getByText("Egg, Rice, Unli Soup", { exact: true })).toBeVisible();
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
 });
 
 test("owner can suspend an account with a recorded reason", async ({ page }) => {
@@ -213,6 +326,91 @@ test("owner can suspend an account with a recorded reason", async ({ page }) => 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("owner recovery requires a fresh preview and explicit typed confirmation", async ({ page }) => {
+  let applied = false;
+  let previewRequest = null;
+  let applyRequest = null;
+  const issue = {
+    id: "recovery-issue-test-123456",
+    type: "stock_projection_mismatch",
+    recordId: "porkchop-meal",
+    summary: "Porkchop has different operational and public stock values.",
+    severity: "warning",
+    actionable: true
+  };
+  await page.route("**/api/admin/recovery/**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET" && request.url().includes("/api/admin/recovery/scan")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          generatedAt: 1700000000000,
+          issues: applied ? [] : [issue],
+          summary: applied ? {} : { stock_projection_mismatch: 1 },
+          scanned: { orders: 1, inventoryItems: 1, notifications: 0, idempotencyUsers: 1 },
+          truncated: false
+        })
+      });
+      return;
+    }
+    if (request.method() === "POST" && request.url().endsWith("/api/admin/recovery/preview")) {
+      previewRequest = request.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          issueId: issue.id,
+          type: issue.type,
+          recordId: issue.recordId,
+          previewHash: "a".repeat(64),
+          changes: ["Set public stock to the current operational inventory stock."],
+          dryRun: true
+        })
+      });
+      return;
+    }
+    if (request.method() === "POST" && request.url().endsWith("/api/admin/recovery/apply")) {
+      applyRequest = request.postDataJSON();
+      applied = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "stock_projection_synchronized", recordId: issue.recordId, idempotent: false })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  const runtime = watchRuntime(page);
+  await loginAs(page, "owner");
+  const navigation = page.getByRole("navigation", { name: /owner navigation/i });
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: "System Settings" }));
+  await page.getByRole("button", { name: "Run dry scan" }).click();
+  await expect(page.getByText("Stock display mismatch", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Review safe action" }).click();
+  await page.getByLabel("Recovery reason").fill("Correct public stock projection");
+  await page.getByRole("button", { name: "Preview safe action" }).click();
+  const applyButton = page.getByRole("button", { name: "Apply audited recovery" });
+  await expect(applyButton).toBeDisabled();
+  await page.getByLabel("Type APPLY_RECOVERY to confirm").fill("APPLY_RECOVERY");
+  await expect(applyButton).toBeEnabled();
+  await applyButton.click();
+  await expect(page.getByText("No recovery findings", { exact: true })).toBeVisible();
+  expect(previewRequest).toEqual({ issueId: issue.id, reason: "Correct public stock projection" });
+  expect(applyRequest).toMatchObject({
+    issueId: issue.id,
+    reason: "Correct public stock projection",
+    previewHash: "a".repeat(64),
+    confirmation: "APPLY_RECOVERY"
+  });
+  expect(applyRequest.requestId).toMatch(/^[A-Za-z0-9-]{12,128}$/);
+  await expectAccessible(page, ".recovery-panel");
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
 test("rider can open assigned delivery proof fallback and COD ledger", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("taptap-demo-data", JSON.stringify({
@@ -234,6 +432,23 @@ test("rider can open assigned delivery proof fallback and COD ledger", async ({ 
           status: "arrived",
           handoffOtp: "123456",
           createdAt: Date.now()
+        },
+        "TAP-E2E-RIDER-READY": {
+          customerId: "customer-ready",
+          customerName: "Ready Customer",
+          riderId: "demo-rider",
+          riderName: "Demo Rider",
+          deliveryType: "delivery",
+          deliveryLocation: { lat: 14.452, lng: 120.977, source: "map-picker" },
+          address: "Second delivery address",
+          items: [{ id: "meal-ready", name: "Ready meal", price: 89, qty: 1 }],
+          subtotal: 89,
+          deliveryFee: 49,
+          total: 138,
+          paymentMethod: "gcash",
+          paymentStatus: "paid",
+          status: "ready",
+          createdAt: Date.now() - 60000
         }
       }
     }));
@@ -241,12 +456,27 @@ test("rider can open assigned delivery proof fallback and COD ledger", async ({ 
   const runtime = watchRuntime(page);
   await loginAs(page, "rider");
   await expect(page.getByRole("heading", { name: /^Hi,/i })).toBeVisible();
+  const deliveryCards = await page.locator(".rider-order-card").allTextContents();
+  expect(deliveryCards[0]).toContain("TAP-E2E-RIDER");
+  expect(deliveryCards[1]).toContain("TAP-E2E-RIDER-READY");
   await expectAccessible(page, ".rider-page");
   await page.getByRole("button", { name: /Capture delivery proof/i }).click();
   await expect(page.getByRole("heading", { name: /Proof of delivery/i })).toBeVisible();
   await expect(page.getByText(/Preparing camera|permission|camera/i).first()).toBeVisible();
   await expectAccessible(page, ".camera-modal");
   await page.getByRole("button", { name: /Cancel/i }).click();
+  await page.context().setOffline(true);
+  await page.getByRole("button", { name: "Issue" }).click();
+  await page.getByLabel("Delivery issue").fill("Customer is not answering");
+  await page.getByRole("button", { name: "Send issue" }).click();
+  await expect(page.locator(".app-toast")).toContainText("You are offline");
+  await page.keyboard.press("Escape");
+  const retryButton = page.getByRole("button", { name: "Retry" });
+  await expect(retryButton).toBeDisabled();
+  await page.context().setOffline(false);
+  await expect(retryButton).toBeEnabled();
+  await retryButton.click();
+  await expect(retryButton).toBeHidden();
   await activateWithKeyboard(page, page.getByRole("navigation", { name: /rider navigation/i }).getByRole("button", { name: /COD Ledger/i }));
   await expect(page.getByRole("heading", { name: /COD Ledger/i })).toBeVisible();
   await expectAccessible(page, ".rider-page");
@@ -602,6 +832,175 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
     await page.getByRole("button", { name: /Log out/i }).click();
     await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
   }
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("notification center stays readable and uses one scroll region at every required width", async ({ page }) => {
+  const now = Date.now();
+  await seedDemoNotifications(page, {
+    "sale-1": { targetUserId: "demo-owner", title: "New sale recorded", message: "-OwSaleInternal4821 added 475 PHP to the live sales ledger.", type: "sale", orderId: "-OwSaleInternal4821", entityType: "payment", entityId: "-OwSaleInternal4821", displayReference: "TAP-4821", amount: 475, actionView: "owner-sales", createdAt: now - 1_000, expiresAt: now + 60_000, readAt: null },
+    "sale-2": { targetUserId: "demo-owner", title: "New sale recorded", message: "-OwSaleInternal4822 added 376 PHP to the live sales ledger.", type: "sale", orderId: "-OwSaleInternal4822", entityType: "payment", entityId: "-OwSaleInternal4822", displayReference: "TAP-4822", amount: 376, actionView: "owner-sales", createdAt: now - 2_000, expiresAt: now + 60_000, readAt: null },
+    "sale-3": { targetUserId: "demo-owner", title: "New sale recorded", message: "-OwSaleInternal4823 added 1244 PHP to the live sales ledger.", type: "sale", orderId: "-OwSaleInternal4823", entityType: "payment", entityId: "-OwSaleInternal4823", displayReference: "TAP-4823", amount: 1244, actionView: "owner-sales", createdAt: now - 3_000, expiresAt: now + 60_000, readAt: null },
+    "legacy-order": { targetUserId: "demo-owner", title: "Order status updated", message: "-OwLegacyOrder4821 is now preparing.", type: "order", orderId: "-OwLegacyOrder4821", createdAt: now - 25 * 60 * 60 * 1_000, expiresAt: now + 60_000, readAt: null },
+    complaint: { targetUserId: "demo-owner", title: "New order complaint", message: "A customer reported -OwComplaint4824.", type: "complaint", orderId: "-OwComplaint4824", createdAt: now - 3 * 24 * 60 * 60 * 1_000, expiresAt: now + 60_000, readAt: null },
+    read: { targetUserId: "demo-owner", title: "System notice", message: "Account security is up to date.", type: "system", createdAt: now - 4 * 24 * 60 * 60 * 1_000, expiresAt: now + 60_000, readAt: now - 500 }
+  });
+  const runtime = watchRuntime(page);
+  const viewports = [
+    { width: 320, height: 700 },
+    { width: 375, height: 812 },
+    { width: 430, height: 932 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 }
+  ];
+
+  await page.setViewportSize(viewports[0]);
+  await loginAs(page, "owner");
+  const trigger = page.getByRole("button", { name: "Open notifications" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Notifications" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toBeFocused();
+  await expect(dialog.getByText("5 unread", { exact: true })).toBeVisible();
+  await expectAccessible(page, ".notification-center");
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    const metrics = await dialog.evaluate((panel) => {
+      const header = panel.querySelector(".notification-panel-header");
+      const list = panel.querySelector("[data-testid='notification-scroll-region']");
+      const summary = panel.querySelector(".notification-summary-row");
+      const markAll = panel.querySelector(".notification-mark-all");
+      const visibleButtons = [...panel.querySelectorAll("button")].filter((button) => button.getBoundingClientRect().height > 0);
+      return {
+        bodyOverflow: document.body.style.overflow,
+        documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        headerBottom: header?.getBoundingClientRect().bottom || 0,
+        listTop: list?.getBoundingClientRect().top || 0,
+        listOverflow: list ? getComputedStyle(list).overflowY : "",
+        listHorizontalOverflow: list ? list.scrollWidth - list.clientWidth : 0,
+        markAllWhiteSpace: markAll ? getComputedStyle(markAll).whiteSpace : "",
+        panelOverflow: getComputedStyle(panel).overflow,
+        panelWidth: panel.getBoundingClientRect().width,
+        summaryHeight: summary?.getBoundingClientRect().height || 0,
+        minimumButtonHeight: Math.min(...visibleButtons.map((button) => button.getBoundingClientRect().height))
+      };
+    });
+    expect(metrics.bodyOverflow).toBe("hidden");
+    expect(metrics.documentOverflow).toBeLessThanOrEqual(1);
+    expect(metrics.headerBottom).toBeLessThanOrEqual(metrics.listTop + 1);
+    expect(metrics.listOverflow).toBe("auto");
+    expect(metrics.listHorizontalOverflow).toBeLessThanOrEqual(1);
+    expect(metrics.markAllWhiteSpace).toBe("nowrap");
+    expect(metrics.panelOverflow).toBe("hidden");
+    const expectedPanelWidth = viewport.width <= 520 ? viewport.width : Math.min(420, viewport.width);
+    expect(metrics.panelWidth).toBeLessThanOrEqual(expectedPanelWidth + 1);
+    expect(metrics.summaryHeight).toBeLessThanOrEqual(46);
+    expect(metrics.minimumButtonHeight).toBeGreaterThanOrEqual(44);
+  }
+
+  const repeatedSales = dialog.getByRole("button", { name: /New sale recorded.*3 updates/i });
+  await repeatedSales.click();
+  await expect(dialog.getByText("Order TAP-4821 \u00b7 \u20b1475", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Order TAP-ER4821 is now preparing.");
+  await expect(dialog).not.toContainText("-OwSaleInternal4821");
+  await expect(dialog).not.toContainText("-OwLegacyOrder4821");
+  await expect(dialog.getByRole("heading", { name: "Today" })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Yesterday" })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Earlier" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Payments", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Payments", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("notification actions mark one, deep-link safely, and clear only read records", async ({ page }) => {
+  const now = Date.now();
+  await seedDemoNotifications(page, {
+    "order-ready": { targetUserId: "demo-owner", title: "Order ready", message: "Order -OwReadyOrder9911 is ready.", type: "order", orderId: "-OwReadyOrder9911", entityType: "order", entityId: "-OwReadyOrder9911", displayReference: "TAP-9911", actionView: "owner-sales", createdAt: now, expiresAt: now + 60_000, readAt: null },
+    "system-unread": { targetUserId: "demo-owner", title: "System maintenance", message: "The website is operating normally.", type: "system", createdAt: now - 1_000, expiresAt: now + 60_000, readAt: null },
+    "system-read": { targetUserId: "demo-owner", title: "Security review complete", message: "No action is needed.", type: "system", createdAt: now - 2_000, expiresAt: now + 60_000, readAt: now - 1_000 }
+  });
+  const runtime = watchRuntime(page);
+  await loginAs(page, "owner");
+  const trigger = page.getByRole("button", { name: "Open notifications" });
+  await trigger.click();
+  let dialog = page.getByRole("dialog", { name: "Notifications" });
+  const orderAction = dialog.getByRole("button", { name: /Order ready.*View order/i });
+  await orderAction.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('.role-navigation button[aria-current="page"]')).toContainText("Sales & Orders");
+  let notificationState = await page.evaluate(() => JSON.parse(localStorage.getItem("taptap-demo-data") || "{}").notifications);
+  expect(typeof notificationState["order-ready"].readAt).toBe("number");
+  expect(notificationState["system-unread"].readAt).toBeNull();
+
+  await trigger.click();
+  dialog = page.getByRole("dialog", { name: "Notifications" });
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
+  await dialog.getByRole("menuitem", { name: "Clear read notifications" }).click();
+  let confirmation = page.getByRole("alertdialog", { name: "Clear read notifications?" });
+  await expect(confirmation).toContainText("Unread notifications will stay.");
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirmation).toBeHidden();
+
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
+  await dialog.getByRole("menuitem", { name: "Clear read notifications" }).click();
+  confirmation = page.getByRole("alertdialog", { name: "Clear read notifications?" });
+  await confirmation.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(confirmation).toBeHidden();
+  notificationState = await page.evaluate(() => JSON.parse(localStorage.getItem("taptap-demo-data") || "{}").notifications);
+  expect(notificationState["order-ready"]).toBeUndefined();
+  expect(notificationState["system-read"]).toBeUndefined();
+  expect(notificationState["system-unread"]).toBeTruthy();
+  await expect(dialog.getByText("1 unread", { exact: true })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Mark all read", exact: true }).click();
+  await expect(dialog.getByText("0 unread", { exact: true })).toBeVisible();
+  notificationState = await page.evaluate(() => JSON.parse(localStorage.getItem("taptap-demo-data") || "{}").notifications);
+  expect(typeof notificationState["system-unread"].readAt).toBe("number");
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("notification destinations reject cross-role views and recover from action errors", async ({ page }) => {
+  const now = Date.now();
+  await seedDemoNotifications(page, {
+    restricted: { targetUserId: "demo-staff", title: "System access notice", message: "Review this account update.", type: "admin", actionView: "owner-users", createdAt: now, expiresAt: now + 60_000, readAt: null }
+  });
+  const runtime = watchRuntime(page);
+  await loginAs(page, "staff");
+  const trigger = page.getByRole("button", { name: "Open notifications" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Notifications" });
+  await expect(dialog.getByText("System access notice", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/View (order|payment|stock|complaint)/i)).toHaveCount(0);
+
+  await dialog.getByRole("button", { name: "Remove System access notice" }).click();
+  let confirmation = page.getByRole("alertdialog", { name: "Remove this notification?" });
+  await expect(confirmation).toContainText("This notification is unread.");
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.evaluate(() => {
+    window.__notificationOriginalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === "taptap-demo-data") throw new Error("Simulated storage failure");
+      return window.__notificationOriginalSetItem.call(this, key, value);
+    };
+  });
+  await dialog.getByRole("button", { name: "Mark as read", exact: true }).click();
+  await expect(dialog.getByText("The notification could not be updated. Check your connection and try again.", { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    Storage.prototype.setItem = window.__notificationOriginalSetItem;
+    delete window.__notificationOriginalSetItem;
+  });
+  await dialog.getByRole("button", { name: "Mark as read", exact: true }).click();
+  await expect(dialog.getByText("Notification marked as read.", { exact: true })).toBeVisible();
+  await expect(page.locator('.role-navigation button[aria-current="page"]')).toContainText("Dashboard");
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
 });

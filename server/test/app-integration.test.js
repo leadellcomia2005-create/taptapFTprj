@@ -4,6 +4,7 @@ import test from "node:test";
 import { createApp } from "../src/app.js";
 import { createAuthentication } from "../src/middleware/authentication.js";
 import { createNoopLogger } from "../src/observability/logger.js";
+import { createOperationalMetrics } from "../src/observability/metrics.js";
 import { FakeRealtimeDatabase } from "./helpers/fakeRealtimeDb.js";
 
 const config = {
@@ -59,13 +60,14 @@ function firebaseFixture(initialData = {}, userRecords = {}) {
   };
 }
 
-async function withApp({ firebase, user, authentication = authenticationFor(user) }, run) {
+async function withApp({ firebase, user, authentication = authenticationFor(user), metrics }, run) {
   const app = createApp({
     config,
     firebase,
     authentication,
     realtime: { emit() { return true; } },
     logger: createNoopLogger(),
+    metrics,
     serverStartedAt: Date.now()
   });
   const server = createServer(app);
@@ -122,6 +124,36 @@ test("rejects an unauthenticated API request", async () => {
     const response = await fetch(`${baseUrl}/api/orders`);
     assert.equal(response.status, 401);
     assert.equal((await response.json()).error, "Authentication required.");
+  });
+});
+
+test("notification read endpoints are user scoped and clear only read records", async () => {
+  const now = Date.now();
+  const { firebase, database } = firebaseFixture({
+    notifications: {
+      "own-opened": { targetUserId: "customer-1", title: "Opened", message: "Opened", type: "order", createdAt: now - 3, expiresAt: now + 60_000, readAt: null },
+      "own-unread": { targetUserId: "customer-1", title: "Unread", message: "Unread", type: "system", createdAt: now - 2, expiresAt: now + 60_000, readAt: null },
+      "own-read": { targetUserId: "customer-1", title: "Read", message: "Read", type: "system", createdAt: now - 1, expiresAt: now + 60_000, readAt: now - 1_000 },
+      "other-user": { targetUserId: "customer-2", title: "Other", message: "Other", type: "system", createdAt: now, expiresAt: now + 60_000, readAt: null }
+    }
+  });
+  await withApp({ firebase, user: { uid: "customer-1", role: "customer" } }, async (baseUrl) => {
+    const crossUser = await fetch(`${baseUrl}/api/notifications/other-user/read`, { method: "POST" });
+    assert.equal(crossUser.status, 403);
+
+    const markOne = await fetch(`${baseUrl}/api/notifications/own-opened/read`, { method: "POST" });
+    assert.equal(markOne.status, 200);
+    assert.equal((await markOne.json()).updated, true);
+    assert.equal(typeof database.read("notifications/own-opened/readAt"), "number");
+    assert.equal(database.read("notifications/own-unread/readAt"), null);
+
+    const clearRead = await fetch(`${baseUrl}/api/notifications/read`, { method: "DELETE" });
+    assert.equal(clearRead.status, 200);
+    assert.equal((await clearRead.json()).cleared, 2);
+    assert.equal(database.read("notifications/own-opened"), undefined);
+    assert.equal(database.read("notifications/own-read"), undefined);
+    assert.ok(database.read("notifications/own-unread"));
+    assert.ok(database.read("notifications/other-user"));
   });
 });
 
@@ -190,6 +222,70 @@ test("provides optional role-scoped order pages and validates pagination input",
     const invalid = await fetch(`${baseUrl}/api/orders?limit=999`);
     assert.equal(invalid.status, 400);
     assert.equal((await invalid.json()).code, "VALIDATION_ERROR");
+  });
+});
+
+test("provides validated owner history pages without changing legacy endpoints", async () => {
+  const auditLogs = Object.fromEntries(Array.from({ length: 3 }, (_, index) => [
+    `audit-${index + 1}`,
+    { action: "test", createdAt: index + 1 }
+  ]));
+  const { firebase } = firebaseFixture({ auditLogs });
+  const owner = { uid: "owner-1", role: "owner", name: "Owner" };
+  await withApp({ firebase, user: owner }, async (baseUrl) => {
+    const page = await fetch(`${baseUrl}/api/history/audit-logs?limit=2`);
+    const pageBody = await page.json();
+    assert.equal(page.status, 200);
+    assert.deepEqual(pageBody.records.map((record) => record.id), ["audit-3", "audit-2"]);
+    assert.equal(pageBody.pagination.hasMore, true);
+
+    const invalid = await fetch(`${baseUrl}/api/history/audit-logs?limit=999`);
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).code, "VALIDATION_ERROR");
+  });
+});
+
+test("keeps recovery scans owner-only and validates their bound", async () => {
+  const fixture = firebaseFixture({
+    users: {
+      "owner-1": { role: "owner" },
+      "staff-1": { role: "staff" }
+    },
+    public: { menu: {} },
+    inventory: {}
+  });
+  await withApp({ firebase: fixture.firebase, user: { uid: "owner-1", role: "owner" } }, async (baseUrl) => {
+    const scan = await fetch(`${baseUrl}/api/admin/recovery/scan?limit=20`);
+    assert.equal(scan.status, 200);
+    assert.deepEqual((await scan.json()).issues, []);
+
+    const invalid = await fetch(`${baseUrl}/api/admin/recovery/scan?limit=1`);
+    assert.equal(invalid.status, 400);
+  });
+  await withApp({ firebase: fixture.firebase, user: { uid: "staff-1", role: "staff" } }, async (baseUrl) => {
+    const scan = await fetch(`${baseUrl}/api/admin/recovery/scan?limit=20`);
+    assert.equal(scan.status, 403);
+  });
+});
+
+test("exposes aggregate operational metrics only to owners", async () => {
+  const { firebase } = firebaseFixture();
+  const metrics = createOperationalMetrics({ startedAt: Date.now() - 2_000 });
+  metrics.observeRequest({ method: "GET", path: "/health/live", status: 200, durationMs: 75 });
+
+  await withApp({ firebase, user: { uid: "owner-1", role: "owner" }, metrics }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/admin/metrics`);
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.metrics.requests.total, 1);
+    assert.equal(body.metrics.latency.buckets.le100Ms, 1);
+    assert.equal(body.metrics.counters.authorizationFailures, 0);
+    assert.equal("users" in body.metrics, false);
+  });
+
+  await withApp({ firebase, user: { uid: "staff-1", role: "staff" }, metrics }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/admin/metrics`);
+    assert.equal(response.status, 403);
   });
 });
 

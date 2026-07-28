@@ -1,6 +1,6 @@
 import { serviceStatus } from "../services.js";
 
-export function registerHealthRoutes(app, { config, firebase, serverStartedAt }) {
+export function registerHealthRoutes(app, { config, firebase, serverStartedAt, metrics }) {
   const statusPayload = () => ({
     apiVersion: config.apiVersion,
     serverStartedAt,
@@ -15,6 +15,7 @@ export function registerHealthRoutes(app, { config, firebase, serverStartedAt })
 
   app.get("/health/ready", (_req, res) => {
     const ready = firebase.enabled;
+    if (!ready) metrics?.increment("readinessFailures");
     res.status(ready ? 200 : 503).json({
       status: ready ? "ready" : "not-ready",
       services: { firebase: firebase.enabled, socket: firebase.enabled }

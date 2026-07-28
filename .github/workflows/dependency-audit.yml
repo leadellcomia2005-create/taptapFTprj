@@ -1,0 +1,33 @@
+name: Production dependency audit
+
+on:
+  schedule:
+    - cron: "17 20 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+            functions/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix client
+      - run: npm ci --prefix server
+      - run: npm ci --prefix functions
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --prefix client --omit=dev --audit-level=high
+      - run: npm audit --prefix server --omit=dev --audit-level=high
+      - run: npm audit --prefix functions --omit=dev --audit-level=high

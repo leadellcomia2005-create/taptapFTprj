@@ -38,6 +38,35 @@ export const notificationTypeSchema = z.enum([
   "admin",
   "system"
 ]);
+export const notificationEntityTypeSchema = z.enum([
+  "order",
+  "complaint",
+  "delivery",
+  "payment",
+  "inventory",
+  "review",
+  "shift",
+  "chat",
+  "system"
+]);
+export const notificationActionViewSchema = z.enum([
+  "orders",
+  "receipts",
+  "feedback",
+  "owner-sales",
+  "owner-inventory",
+  "owner-reports",
+  "owner-reviews",
+  "staff-pos",
+  "staff-kitchen",
+  "staff-orders",
+  "staff-inventory",
+  "staff-shifts",
+  "staff-chat",
+  "staff-reviews",
+  "rider-orders",
+  "rider-cod"
+]);
 
 export const deliveryLocationContractSchema = z.object({
   lat: z.number().finite().min(-90).max(90),
@@ -123,7 +152,13 @@ export const notificationContractSchema = z.object({
   title: z.string().min(1).max(120),
   message: z.string().min(1).max(1_000),
   type: notificationTypeSchema,
-  createdAt: z.number().finite()
+  createdAt: z.number().finite(),
+  orderId: z.string().min(1).max(128).optional(),
+  entityType: notificationEntityTypeSchema.optional(),
+  entityId: z.string().min(1).max(128).optional(),
+  displayReference: z.string().min(1).max(80).optional(),
+  amount: z.number().finite().min(0).max(1_000_000_000).optional(),
+  actionView: notificationActionViewSchema.optional()
 }).passthrough();
 
 export const apiErrorResponseSchema = z.object({

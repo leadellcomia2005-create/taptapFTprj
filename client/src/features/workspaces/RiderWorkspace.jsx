@@ -7,6 +7,7 @@ import { getSocket, sendRiderLocation } from "../../services/socket";
 import { estimateDeliveryRoute } from "../../utils/operations";
 import { ReasonModal } from "./WorkspaceModals";
 import { currency, isUnremittedCod, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
+import { prioritizeAssignedDeliveries, prioritizeAvailableDeliveries } from "./riderWorkflow";
 
 const CameraProof = lazy(() => import("../../components/CameraProof"));
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));
@@ -23,8 +24,8 @@ function locationToPoint(location) {
 
 function RiderWorkspaceContent({ section, user, orders, notify }) {
   const deliveryOrders = orders.filter((order) => order.deliveryType === "delivery");
-  const assignedOrders = deliveryOrders.filter((order) => order.riderId === user.uid);
-  const availableOrders = deliveryOrders.filter((order) => order.status === "ready" && !order.riderId);
+  const assignedOrders = prioritizeAssignedDeliveries(deliveryOrders.filter((order) => order.riderId === user.uid));
+  const availableOrders = prioritizeAvailableDeliveries(deliveryOrders.filter((order) => order.status === "ready" && !order.riderId));
   const [selectedId, setSelectedId] = useState("");
   const active = assignedOrders.find((order) => order.id === selectedId) || assignedOrders.find((order) => !["delivered", "completed", "cancelled"].includes(order.status)) || assignedOrders[0];
   const [gpsStatus, setGpsStatus] = useState("offline");
@@ -34,12 +35,18 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const [issueOpen, setIssueOpen] = useState(false);
   const [busyAction, setBusyAction] = useState("");
   const [retryTask, setRetryTask] = useState(null);
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const watchRef = useRef(null);
   const activeOrderIdRef = useRef("");
   const online = gpsStatus === "online";
 
   const runAction = async (label, task) => {
     if (busyAction) return false;
+    if (!navigator.onLine) {
+      setRetryTask({ label, task });
+      notify("You are offline. Reconnect, then retry this delivery action.");
+      return false;
+    }
     setBusyAction(label);
     try {
       await task();
@@ -57,6 +64,16 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   useEffect(() => {
     activeOrderIdRef.current = active?.id || "";
   }, [active?.id]);
+
+  useEffect(() => {
+    const updateNetworkState = () => setNetworkOnline(navigator.onLine);
+    window.addEventListener("online", updateNetworkState);
+    window.addEventListener("offline", updateNetworkState);
+    return () => {
+      window.removeEventListener("online", updateNetworkState);
+      window.removeEventListener("offline", updateNetworkState);
+    };
+  }, []);
 
   useEffect(() => () => {
     if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
@@ -353,7 +370,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 </div>
               )}
               {active.deliveryIssue && <div className="rider-issue-note"><strong>Reported issue</strong><span>{active.deliveryIssue}</span></div>}
-              {retryTask && <div className="rider-retry-bar" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span><strong>{retryTask.label} failed</strong><small>Check your connection, then retry without repeating completed steps.</small></span><button disabled={Boolean(busyAction)} onClick={() => runAction(retryTask.label, retryTask.task)}>Retry</button></div>}
+              {retryTask && <div className="rider-retry-bar" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span><strong>{retryTask.label} failed</strong><small>{networkOnline ? "Retry without repeating completed steps." : "Reconnect to the internet before retrying."}</small></span><button disabled={Boolean(busyAction) || !networkOnline} onClick={() => runAction(retryTask.label, retryTask.task)}>Retry</button></div>}
 
               {nextAction ? <button className={`rider-next-action ${nextAction.tone}`} disabled={Boolean(busyAction)} onClick={nextAction.action}><NextActionIcon size={19} aria-hidden="true" /> {busyAction || nextAction.label}</button> : <div className="rider-complete-state"><CheckCircle2 size={18} aria-hidden="true" /><span>{["delivered", "completed"].includes(active.status) ? "Delivery completed" : "No rider status action is available"}</span></div>}
               <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>

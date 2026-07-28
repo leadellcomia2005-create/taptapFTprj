@@ -2,6 +2,11 @@ import dialogflow from "@google-cloud/dialogflow";
 import nodemailer from "nodemailer";
 import OpenAI from "openai";
 import twilio from "twilio";
+import {
+  createPayMongoCheckoutSession,
+  payMongoConfiguration,
+  retrievePayMongoCheckoutSession
+} from "./integrations/paymongo.js";
 
 const has = (name) => Boolean(process.env[name]);
 const enabled = (name) => process.env[name] === "true";
@@ -13,7 +18,7 @@ export function serviceStatus() {
     twoFactor: has("TWO_FACTOR_ENCRYPTION_KEY"),
     openai: enabled("ENABLE_OPENAI") && has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
-    paymongo: enabled("ENABLE_PAYMONGO") && has("PAYMONGO_SECRET_KEY"),
+    paymongo: payMongoConfiguration().enabled,
     twilio: enabled("ENABLE_TWILIO") && has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
     emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD"),
     turnstile: has("TURNSTILE_SECRET_KEY")
@@ -85,55 +90,12 @@ export function checkoutReturnUrls(orderId) {
 }
 
 export async function createPayMongoCheckout(order) {
-  if (!serviceStatus().paymongo) return null;
   const returnUrls = checkoutReturnUrls(order.orderId);
-  const authorization = Buffer.from(`${process.env.PAYMONGO_SECRET_KEY}:`).toString("base64");
-  const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${authorization}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      data: {
-        attributes: {
-          billing: {
-            email: order.customerEmail,
-            name: order.customerName,
-            phone: order.phone
-          },
-          description: `Taptap Foodtrip ${order.orderId}`,
-          line_items: [
-            ...order.items.map((item) => ({
-              currency: "PHP",
-              amount: Math.round(item.price * 100),
-              name: item.name,
-              quantity: item.qty
-            })),
-            ...(Number(order.deliveryFee || 0) > 0 ? [{
-              currency: "PHP",
-              amount: Math.round(Number(order.deliveryFee) * 100),
-              name: "Delivery fee",
-              quantity: 1
-            }] : [])
-          ],
-          payment_method_types: ["gcash"],
-          success_url: returnUrls.successUrl,
-          cancel_url: returnUrls.cancelUrl,
-          reference_number: order.orderId,
-          send_email_receipt: true,
-          show_description: true,
-          show_line_items: true
-        }
-      }
-    })
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.errors?.[0]?.detail || "Online checkout could not be created.");
-  return {
-    id: payload.data.id,
-    checkoutUrl: payload.data.attributes.checkout_url
-  };
+  return createPayMongoCheckoutSession(order, returnUrls);
+}
+
+export async function retrievePayMongoCheckout(sessionId) {
+  return retrievePayMongoCheckoutSession(sessionId);
 }
 
 export async function sendTwilioSms({ to, orderId, status }) {

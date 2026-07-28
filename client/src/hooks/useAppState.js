@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultViewForRole, navigationForUser } from "../config/appConfig";
+import { buildReorderPlan } from "../features/customer/customerHelpers";
 import { observeAuth } from "../services/firebase/auth";
 import { subscribeNotifications } from "../services/firebase/notifications";
 import { subscribeUserProfile } from "../services/firebase/users";
@@ -118,14 +119,20 @@ export function useRoleNavigation(user) {
 export function useNotificationCenter(user) {
   const [notifications, setNotifications] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
 
   useEffect(() => {
     if (!user) {
       setNotifications([]);
       setNotificationsOpen(false);
+      setNotificationsLoading(false);
       return undefined;
     }
-    return subscribeNotifications(user, setNotifications);
+    setNotificationsLoading(true);
+    return subscribeNotifications(user, (nextNotifications) => {
+      setNotifications(nextNotifications);
+      setNotificationsLoading(false);
+    });
   }, [user]);
 
   const unreadCount = useMemo(
@@ -133,7 +140,7 @@ export function useNotificationCenter(user) {
     [notifications]
   );
 
-  return { notifications, notificationsOpen, setNotificationsOpen, unreadCount };
+  return { notifications, notificationsLoading, notificationsOpen, setNotificationsOpen, unreadCount };
 }
 
 export function useCartState({ menu, navigate, notify, userId }) {
@@ -178,20 +185,17 @@ export function useCartState({ menu, navigate, notify, userId }) {
   }, [cart, hydratedUserId, userId]);
 
   const reorder = useCallback((order) => {
-    const nextCart = (order.items || []).map((item) => {
-      const product = menu.find((candidate) => candidate.id === item.id);
-      if (!product || product.walkInOnly || !menuAvailability(product).available) return null;
-      const stock = Number(product.stock ?? item.stock ?? 0);
-      const qty = Math.min(Number(item.qty || 1), stock);
-      return qty > 0 ? { ...product, stock, qty } : null;
-    }).filter(Boolean);
-    if (nextCart.length === 0) {
+    const plan = buildReorderPlan(order, menu);
+    if (plan.items.length === 0) {
       notify("Those items are not available right now.");
       return;
     }
-    setCart(nextCart);
+    setCart(plan.items);
     navigate("store");
-    notify(`${order.id} added back to your cart.`);
+    const notes = [`${order.id}: ${plan.addedQuantity} item${plan.addedQuantity === 1 ? "" : "s"} added to your cart.`];
+    if (plan.skippedLines) notes.push(`${plan.skippedLines} unavailable item${plan.skippedLines === 1 ? " was" : "s were"} skipped.`);
+    if (plan.adjustedLines) notes.push(`${plan.adjustedLines} item quantit${plan.adjustedLines === 1 ? "y was" : "ies were"} reduced to current stock.`);
+    notify(notes.join(" "));
   }, [menu, navigate, notify]);
 
   const completeCheckout = useCallback(() => {

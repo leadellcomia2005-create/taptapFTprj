@@ -39,8 +39,16 @@ export function createAuthRouter({ config, firebase, authentication }) {
       req,
       sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
       appBaseUrl: config.appBaseUrl,
-      verifyHuman: config.turnstileSecret
-        ? (token, request) => verifyTurnstileToken({ secret: config.turnstileSecret, token, req: request })
+      verifyHuman: config.turnstile?.bypass
+        ? null
+        : config.turnstile?.secret
+          ? (token, request) => verifyTurnstileToken({
+            secret: config.turnstile.secret,
+            token,
+            req: request,
+            expectedAction: config.turnstile.expectedAction,
+            allowedHostnames: config.turnstile.allowedHostnames
+          })
         : null
     });
     res.status(201).json(result);

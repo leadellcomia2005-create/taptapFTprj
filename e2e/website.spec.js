@@ -836,6 +836,16 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("a failed role chunk shows a safe reload action instead of a blank workspace", async ({ page }) => {
+  await page.route(/\/src\/features\/workspaces\/OwnerWorkspace\.jsx(?:\?|$)/, (route) => route.abort("failed"));
+  await loginAs(page, "owner");
+
+  await expect(page.getByRole("heading", { name: "Workspace could not be loaded" })).toBeVisible();
+  await expect(page.getByText("No order or form was submitted.")).toBeVisible();
+  await expectMinimumTouchTarget(page.getByRole("button", { name: "Reload workspace" }));
+  await expectNoHorizontalOverflow(page);
+});
+
 test("notification center stays readable and uses one scroll region at every required width", async ({ page }) => {
   const now = Date.now();
   await seedDemoNotifications(page, {

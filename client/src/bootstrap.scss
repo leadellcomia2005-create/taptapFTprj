@@ -1,0 +1,43 @@
+@use "sass:map";
+
+@import "bootstrap/scss/functions";
+@import "bootstrap/scss/variables";
+@import "bootstrap/scss/variables-dark";
+@import "bootstrap/scss/maps";
+@import "bootstrap/scss/mixins";
+@import "bootstrap/scss/utilities";
+
+$utilities: (
+  "align": map.get($utilities, "align"),
+  "display": map.get($utilities, "display"),
+  "border": map.get($utilities, "border"),
+  "border-top": map.get($utilities, "border-top"),
+  "border-bottom": map.get($utilities, "border-bottom"),
+  "width": map.get($utilities, "width"),
+  "flex-wrap": map.get($utilities, "flex-wrap"),
+  "align-items": map.get($utilities, "align-items"),
+  "margin-top": map.get($utilities, "margin-top"),
+  "margin-bottom": map.get($utilities, "margin-bottom"),
+  "padding": map.get($utilities, "padding"),
+  "padding-y": map.get($utilities, "padding-y"),
+  "gap": map.get($utilities, "gap"),
+  "text-align": map.get($utilities, "text-align"),
+  "color": map.get($utilities, "color"),
+  "background-color": map.get($utilities, "background-color"),
+  "rounded": map.get($utilities, "rounded")
+);
+
+@import "bootstrap/scss/root";
+@import "bootstrap/scss/reboot";
+@import "bootstrap/scss/type";
+@import "bootstrap/scss/containers";
+@import "bootstrap/scss/grid";
+@import "bootstrap/scss/tables";
+@import "bootstrap/scss/forms";
+@import "bootstrap/scss/buttons";
+@import "bootstrap/scss/badge";
+@import "bootstrap/scss/alert";
+@import "bootstrap/scss/close";
+@import "bootstrap/scss/modal";
+@import "bootstrap/scss/helpers";
+@import "bootstrap/scss/utilities/api";

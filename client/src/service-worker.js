@@ -11,6 +11,23 @@ const appShellResources = [
   "/manifest.webmanifest",
   "/assets/taptap-logo.webp"
 ];
+const validPushOrderId = /^[A-Za-z0-9_-]{1,160}$/;
+
+function safePushText(value, fallback, maxLength) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return (text || fallback).slice(0, maxLength);
+}
+
+function safePushData(value = {}) {
+  const orderId = typeof value.orderId === "string" ? value.orderId.trim() : "";
+  return {
+    title: safePushText(value.title, "TapTap Foodtrip", 80),
+    body: safePushText(value.body, "Your order has an update.", 220),
+    event: safePushText(value.event, "order-update", 80),
+    destination: value.destination === "orders" ? "orders" : "",
+    orderId: validPushOrderId.test(orderId) ? orderId : ""
+  };
+}
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -97,9 +114,9 @@ const messagingConfigured = Boolean(
 if (messagingConfigured) {
   const messaging = getMessaging(initializeApp(firebaseConfig, "taptap-service-worker"));
   onBackgroundMessage(messaging, (payload) => {
-    const data = payload.data || {};
-    self.registration.showNotification(data.title || "TapTap Foodtrip", {
-      body: data.body || "Your order has an update.",
+    const data = safePushData(payload.data);
+    self.registration.showNotification(data.title, {
+      body: data.body,
       icon: "/assets/taptap-logo.png",
       badge: "/assets/taptap-logo.png",
       tag: `taptap-${data.orderId || "order"}-${data.event || "update"}`,
@@ -111,7 +128,7 @@ if (messagingConfigured) {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const data = event.notification.data || {};
+  const data = safePushData(event.notification.data);
   const targetUrl = new URL("/", self.location.origin);
   if (data.destination) targetUrl.searchParams.set("push", data.destination);
   if (data.orderId) targetUrl.searchParams.set("orderId", data.orderId);

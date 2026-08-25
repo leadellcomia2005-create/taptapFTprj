@@ -20,6 +20,14 @@ export default defineConfig({
       }
     }
   },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        quietDeps: true,
+        silenceDeprecations: ["import"]
+      }
+    }
+  },
   build: {
     outDir: "dist",
     rollupOptions: {
@@ -31,12 +39,26 @@ export default defineConfig({
         entryFileNames: (chunk) => chunk.name === "service-worker"
           ? "service-worker.js"
           : "assets/[name]-[hash].js",
-        manualChunks: {
-          firebase: ["firebase/app", "firebase/auth", "firebase/database"],
-          "firebase-analytics": ["firebase/analytics"],
-          "firebase-storage": ["firebase/storage"],
-          maps: ["leaflet", "react-leaflet"],
-          charts: ["chart.js", "react-chartjs-2"]
+        onlyExplicitManualChunks: true,
+        manualChunks(id) {
+          const moduleId = id.replaceAll("\\", "/");
+          if (moduleId.includes("/node_modules/firebase/analytics") || moduleId.includes("/node_modules/@firebase/analytics")) {
+            return "firebase-analytics";
+          }
+          if (moduleId.includes("/node_modules/firebase/storage") || moduleId.includes("/node_modules/@firebase/storage")) {
+            return "firebase-storage";
+          }
+          if (
+            moduleId.includes("/node_modules/firebase/app") ||
+            moduleId.includes("/node_modules/firebase/auth") ||
+            moduleId.includes("/node_modules/firebase/database") ||
+            moduleId.includes("/node_modules/@firebase/app") ||
+            moduleId.includes("/node_modules/@firebase/auth") ||
+            moduleId.includes("/node_modules/@firebase/database")
+          ) {
+            return "firebase";
+          }
+          return undefined;
         }
       }
     }

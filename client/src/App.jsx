@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
 import { Bell, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
+import LazyLoadBoundary from "./components/LazyLoadBoundary";
 import { PageLoader, SectionLoader } from "./components/Loaders";
 import MenuPhoto from "./components/MenuPhoto";
 import NotificationCenter from "./components/NotificationCenter";
@@ -981,7 +982,10 @@ export default function App() {
     if (!activeUser) return undefined;
     let active = true;
     let stopForegroundListener = () => {};
-    void syncGrantedPushToken();
+    const syncPushToken = () => {
+      if (document.visibilityState === "visible") void syncGrantedPushToken();
+    };
+    syncPushToken();
     void listenForForegroundPush((message) => {
       if (!active) return;
       setNotice(`${message.title}: ${message.body}`);
@@ -1001,6 +1005,8 @@ export default function App() {
       }
     };
     navigator.serviceWorker?.addEventListener("message", handleServiceWorkerMessage);
+    window.addEventListener("online", syncPushToken);
+    document.addEventListener("visibilitychange", syncPushToken);
 
     const url = new URL(window.location.href);
     const destination = url.searchParams.get("push");
@@ -1016,6 +1022,8 @@ export default function App() {
       active = false;
       stopForegroundListener();
       navigator.serviceWorker?.removeEventListener("message", handleServiceWorkerMessage);
+      window.removeEventListener("online", syncPushToken);
+      document.removeEventListener("visibilitychange", syncPushToken);
     };
   }, [activeUser, navigate]);
   useEffect(() => {
@@ -1143,9 +1151,11 @@ export default function App() {
         </Suspense>
       )}
       {user.role !== "customer" && (
-        <Suspense fallback={<SectionLoader label="Loading workspace..." />}>
-          {workspace}
-        </Suspense>
+        <LazyLoadBoundary key={user.role}>
+          <Suspense fallback={<SectionLoader label="Loading workspace..." />}>
+            {workspace}
+          </Suspense>
+        </LazyLoadBoundary>
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>

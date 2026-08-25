@@ -11,6 +11,9 @@ changing login, checkout, orders, dashboards, or demo mode.
 4. Build and serve the website over HTTPS in production.
 5. Sign in, open Notifications, open More actions, and choose **Turn on browser alerts**.
 
+Use the complete staging matrix in `docs/PUSH_NOTIFICATIONS_STAGING.md` before enabling production
+browser alerts.
+
 The website never asks for permission on page load. Tokens are stored under `pushTokens/{uid}` using
 hashed record IDs. Push content contains only a display order reference and a status message. The
 approved events are confirmed, ready for pickup, out for delivery, rider arrived, cancelled, and

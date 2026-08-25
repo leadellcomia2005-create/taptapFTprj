@@ -8,6 +8,7 @@ import { estimateDeliveryRoute } from "../../utils/operations";
 import { ReasonModal } from "./WorkspaceModals";
 import { currency, isUnremittedCod, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
 import { prioritizeAssignedDeliveries, prioritizeAvailableDeliveries } from "./riderWorkflow";
+import "./styles/rider.css";
 
 const CameraProof = lazy(() => import("../../components/CameraProof"));
 const DeliveryMap = lazy(() => import("../../components/DeliveryMap"));

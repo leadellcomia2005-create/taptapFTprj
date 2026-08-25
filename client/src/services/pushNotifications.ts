@@ -17,6 +17,17 @@ export type PushNotificationSnapshot = {
 
 const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || "";
 const pushConfigured = firebaseEnabled && Boolean(vapidKey);
+const validPushOrderId = /^[A-Za-z0-9_-]{1,160}$/;
+
+function safePushText(value: unknown, fallback: string, maxLength: number): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  return (text || fallback).slice(0, maxLength);
+}
+
+function safePushOrderId(value: unknown): string | undefined {
+  const orderId = typeof value === "string" ? value.trim() : "";
+  return validPushOrderId.test(orderId) ? orderId : undefined;
+}
 
 function browserPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
@@ -53,6 +64,31 @@ async function currentToken(): Promise<string> {
   });
 }
 
+async function removeCurrentBrowserToken(): Promise<void> {
+  const module = await messagingModule();
+  if (!module || !firebaseApp || browserPermission() !== "granted") return;
+
+  const messaging = module.getMessaging(firebaseApp);
+  const token = await currentToken();
+  let removalError: unknown;
+
+  if (token) {
+    try {
+      await api.removePushTokens(token);
+    } catch (error) {
+      removalError = error;
+    }
+  }
+
+  try {
+    await module.deleteToken(messaging);
+  } catch (error) {
+    removalError ||= error;
+  }
+
+  if (removalError) throw removalError;
+}
+
 export async function syncGrantedPushToken(): Promise<PushNotificationSnapshot> {
   const snapshot = currentPushNotificationState();
   if (snapshot.permission !== "granted" || snapshot.state === "unconfigured") return snapshot;
@@ -85,16 +121,21 @@ export async function enablePushNotifications(): Promise<PushNotificationSnapsho
 export async function disablePushNotifications(): Promise<PushNotificationSnapshot> {
   const permission = browserPermission();
   try {
-    const module = await messagingModule();
-    const token = permission === "granted" ? await currentToken().catch(() => "") : "";
-    await api.removePushTokens(token || undefined);
-    if (module && firebaseApp) await module.deleteToken(module.getMessaging(firebaseApp)).catch(() => false);
+    await removeCurrentBrowserToken();
     return {
       state: permission === "denied" ? "denied" : "default",
       permission
     };
   } catch {
     return { state: "error", permission };
+  }
+}
+
+export async function detachCurrentPushTokenForSignOut(): Promise<void> {
+  try {
+    await removeCurrentBrowserToken();
+  } catch {
+    // Signing out must still succeed. Invalid or unreachable tokens are cleaned up server-side.
   }
 }
 
@@ -107,9 +148,9 @@ export async function listenForForegroundPush(
   return module.onMessage(module.getMessaging(firebaseApp), (payload) => {
     const data = payload.data || {};
     listener({
-      title: data.title || "Order update",
-      body: data.body || "Open TapTap Foodtrip for the latest update.",
-      orderId: data.orderId
+      title: safePushText(data.title, "Order update", 80),
+      body: safePushText(data.body, "Open TapTap Foodtrip for the latest update.", 220),
+      orderId: safePushOrderId(data.orderId)
     });
   });
 }

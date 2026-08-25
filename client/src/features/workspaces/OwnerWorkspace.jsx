@@ -10,6 +10,7 @@ import RecoveryPanel from "./RecoveryPanel";
 import { ReasonModal } from "./WorkspaceModals";
 import { buildDailyReport, buildLocalDecisionSupport, currency, isRevenueOrder, isUnremittedCod, localDateInputValue, orderItemText, orderPaymentLabel, printOwnerDailyReport, setWorkspaceHelpers, statusLabel, sumByTotal } from "./workspaceHelpers";
 import { auditActionLabel, auditCategories, auditCategory, auditDetailText, auditFriendlyMessage, auditRecordLabel, auditSearchText, auditSeverity, ownerPlanningDefaults, ownerPlanningStorageKey, safeAuditIdentifier, securityAuditActions } from "./ownerAudit";
+import "./styles/owner.css";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const apply = process.argv.includes("--apply");
+const deep = process.argv.includes("--deep");
 const disposableDirectories = [
   "client/dist",
   "output",
@@ -11,6 +12,13 @@ const disposableDirectories = [
   "test-results",
   "tmp"
 ];
+const deepDisposableDirectories = [
+  ".agents",
+  ".codex-tools",
+  "client/src/lib",
+  "separated-menu-photos"
+];
+const deepDisposableFiles = ["config.yml"];
 const logDirectories = [".", "client"];
 
 function safeWorkspacePath(relativePath, { allowRoot = false } = {}) {
@@ -58,10 +66,17 @@ async function rootLogFiles(relativeDirectory) {
 }
 
 const targets = [];
-for (const relativePath of disposableDirectories) {
+for (const relativePath of deep ? [...disposableDirectories, ...deepDisposableDirectories] : disposableDirectories) {
   const target = safeWorkspacePath(relativePath);
   const size = await directorySize(target);
   if (size !== null) targets.push({ target, relativePath, size, directory: true });
+}
+if (deep) {
+  for (const relativePath of deepDisposableFiles) {
+    const target = safeWorkspacePath(relativePath);
+    const size = await existingFileSize(target);
+    if (size !== null) targets.push({ target, relativePath, size, directory: false });
+  }
 }
 for (const relativeDirectory of logDirectories) {
   for (const target of await rootLogFiles(relativeDirectory)) {
@@ -78,7 +93,7 @@ const totalBytes = targets.reduce((total, target) => total + target.size, 0);
 const megabytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 if (!targets.length) {
-  console.log("Workspace cleanup found no disposable artifacts.");
+  console.log(`Workspace ${deep ? "deep " : ""}cleanup found no disposable artifacts.`);
   process.exit(0);
 }
 
@@ -88,4 +103,7 @@ for (const target of targets.sort((left, right) => left.relativePath.localeCompa
 }
 
 console.log(`${apply ? "Removed" : "Found"} ${targets.length} disposable target(s), ${megabytes(totalBytes)} total.`);
-if (!apply) console.log("Dry run only. Use `npm run clean:workspace:apply` to remove these generated artifacts.");
+if (!apply) {
+  const command = deep ? "npm run clean:workspace:deep" : "npm run clean:workspace:apply";
+  console.log(`Dry run only. Use \`${command}\` to remove these generated artifacts.`);
+}

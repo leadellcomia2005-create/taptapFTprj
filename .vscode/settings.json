@@ -5,6 +5,8 @@
     "./client"
   ],
   "files.exclude": {
+    "**/.DS_Store": true,
+    "**/.env": true,
     "**/node_modules": true,
     "**/dist": true,
     "**/.cache": true,
@@ -18,11 +20,20 @@
     "**/separated-menu-photos": true,
     "**/test-results": true,
     "**/tmp": true,
+    "**/Thumbs.db": true,
+    "**/Desktop.ini": true,
+    "**/*.bak": true,
     "**/*.log": true,
+    "**/*.swp": true,
+    "**/*.tmp": true,
+    "**/*.7z": true,
+    "**/*.rar": true,
+    "**/*.zip": true,
     "**/config.yml": true,
     "**/service-account*.json": true
   },
   "search.exclude": {
+    "**/.env": true,
     "**/node_modules": true,
     "**/dist": true,
     "**/.cache": true,
@@ -36,7 +47,11 @@
     "**/separated-menu-photos": true,
     "**/test-results": true,
     "**/tmp": true,
-    "**/*.log": true
+    "**/*.bak": true,
+    "**/*.log": true,
+    "**/*.swp": true,
+    "**/*.tmp": true,
+    "**/service-account*.json": true
   },
   "files.watcherExclude": {
     "**/node_modules/**": true,

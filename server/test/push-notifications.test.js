@@ -50,6 +50,38 @@ test("registers and removes private user-scoped push tokens", async () => {
   assert.equal(db.read("users/customer-1/notificationPreferences/push"), false);
 });
 
+test("keeps other devices registered when the current browser token is removed", async () => {
+  const db = new FakeRealtimeDatabase({ users: { "customer-1": { role: "customer" } } });
+  const { firebase } = messagingFixture();
+  const user = { uid: "customer-1", role: "customer" };
+  const secondToken = `${token}-second-device`;
+
+  await registerPushToken(db, firebase, user, token);
+  await registerPushToken(db, firebase, user, secondToken);
+  await removePushTokens(db, user, { token });
+
+  const status = await pushStatus(db, firebase, user.uid);
+  assert.deepEqual(status, { configured: true, enabled: true, tokenCount: 1 });
+  assert.equal(Object.values(db.read("pushTokens/customer-1"))[0].token, secondToken);
+  assert.equal(db.read("users/customer-1/notificationPreferences/push"), true);
+});
+
+test("refreshes an existing token record without creating a duplicate", async () => {
+  const db = new FakeRealtimeDatabase({ users: { "customer-1": { role: "customer" } } });
+  const { firebase } = messagingFixture();
+  const user = { uid: "customer-1", role: "customer" };
+
+  await registerPushToken(db, firebase, user, token);
+  const firstRecord = Object.values(db.read("pushTokens/customer-1"))[0];
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await registerPushToken(db, firebase, user, token);
+  const records = Object.values(db.read("pushTokens/customer-1"));
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].createdAt, firstRecord.createdAt);
+  assert.ok(records[0].updatedAt >= firstRecord.updatedAt);
+});
+
 test("maps only approved customer order events to push messages", () => {
   assert.equal(orderPushEvent({ status: "preparing" }, {}, { created: true }), null);
   assert.equal(orderPushEvent({ status: "ready", deliveryType: "delivery" }, { status: "ready" }), null);
@@ -111,6 +143,34 @@ test("sends a privacy-safe order push once and deduplicates the same event", asy
   ]);
 });
 
+test("does not send order pushes when the customer disabled order updates", async () => {
+  const db = new FakeRealtimeDatabase({
+    users: {
+      "customer-1": {
+        role: "customer",
+        notificationPreferences: { orderUpdates: false, push: true }
+      }
+    }
+  });
+  const fixture = messagingFixture();
+  await registerPushToken(db, fixture.firebase, { uid: "customer-1", role: "customer" }, token);
+
+  const result = await dispatchOrderPush({
+    firebase: fixture.firebase,
+    db,
+    orderId: "order-opted-out",
+    order: {
+      customerId: "customer-1",
+      deliveryType: "delivery",
+      status: "out-for-delivery"
+    },
+    changes: { status: "out-for-delivery" }
+  });
+
+  assert.deepEqual(result, { sent: false, reason: "preference-disabled" });
+  assert.equal(fixture.calls.length, 0);
+});
+
 test("removes an invalid FCM token after a provider rejection", async () => {
   const db = new FakeRealtimeDatabase({
     users: {
@@ -141,6 +201,42 @@ test("removes an invalid FCM token after a provider rejection", async () => {
   assert.equal(result.sent, false);
   assert.deepEqual(db.read("pushTokens/customer-1"), {});
   assert.equal(db.read("users/customer-1/notificationPreferences/push"), false);
+});
+
+test("removes only rejected tokens when another device receives the push", async () => {
+  const secondToken = `${token}-second-device`;
+  const db = new FakeRealtimeDatabase({
+    users: {
+      "customer-1": {
+        role: "customer",
+        notificationPreferences: { orderUpdates: true, push: true }
+      }
+    }
+  });
+  const fixture = messagingFixture([
+    { success: false, error: { code: "messaging/registration-token-not-registered" } },
+    { success: true }
+  ]);
+  const user = { uid: "customer-1", role: "customer" };
+  await registerPushToken(db, fixture.firebase, user, token);
+  await registerPushToken(db, fixture.firebase, user, secondToken);
+
+  const result = await dispatchOrderPush({
+    firebase: fixture.firebase,
+    db,
+    orderId: "order-partial-delivery",
+    order: {
+      customerId: "customer-1",
+      deliveryType: "pickup",
+      status: "ready"
+    },
+    changes: { status: "ready" }
+  });
+
+  assert.equal(result.sent, true);
+  assert.equal(Object.values(db.read("pushTokens/customer-1")).length, 1);
+  assert.equal(Object.values(db.read("pushTokens/customer-1"))[0].token, secondToken);
+  assert.equal(db.read("users/customer-1/notificationPreferences/push"), true);
 });
 
 test("keeps order workflows successful when optional push delivery cannot read its records", async () => {

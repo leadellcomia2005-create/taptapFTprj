@@ -21,7 +21,8 @@
     "check:operations-docs": "node scripts/check-operations-docs.mjs",
     "paymongo:check": "node scripts/check-paymongo-config.mjs",
     "clean:workspace": "node scripts/clean-workspace.mjs",
-    "clean:workspace:apply": "node scripts/clean-workspace.mjs --apply"
+    "clean:workspace:apply": "node scripts/clean-workspace.mjs --apply",
+    "clean:workspace:deep": "node scripts/clean-workspace.mjs --apply --deep"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
@@ -29,8 +30,5 @@
     "@playwright/test": "^1.61.1",
     "concurrently": "^9.2.1",
     "firebase-tools": "^15.23.0"
-  },
-  "dependencies": {
-    "openai": "^6.44.0"
   }
 }

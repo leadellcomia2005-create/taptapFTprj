@@ -7,6 +7,7 @@ import { createOrder } from "../../services/firebase/orders";
 import { createRequestKey, orderPrepClock } from "../../utils/operations";
 import { ComplaintResolutionModule, InventoryModule, KitchenQueue, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule, SupportChat } from "./SharedWorkspaceModules";
 import { currency, inRange, isRevenueOrder, localDateInputValue, printReceipt, reportDateRange, setWorkspaceHelpers } from "./workspaceHelpers";
+import "./styles/staff.css";
 
 const staffDashboardProfiles = {
   manager: { eyebrow: "Staff manager", title: "Operations dashboard", detail: "Counter, kitchen, inventory, and shift exceptions for today." },

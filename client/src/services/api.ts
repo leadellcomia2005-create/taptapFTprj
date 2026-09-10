@@ -81,6 +81,27 @@ export interface PushNotificationStatusResponse extends ApiResult {
   tokenCount: number;
 }
 
+export interface AssistantResponse extends ApiResult {
+  text: string;
+  source?: string;
+  intent?: string;
+}
+
+export interface InventoryInsightResponse extends ApiResult {
+  text: string;
+  provider?: "groq" | "openai";
+  generatedAt?: number;
+  insight?: {
+    summary: string;
+    salesTrend: string;
+    peakPeriod: string;
+    ownerAction: string;
+    stockRisks: Array<{ product: string; currentStock: number; reorderPoint: number; severity: "low" | "medium" | "high"; reason: string }>;
+    reorderRecommendations: Array<{ product: string; currentStock: number; suggestedQuantity: number; reason: string }>;
+    wasteRisks: Array<{ product: string; risk: string; action: string }>;
+  };
+}
+
 export interface HistoryPage<T extends ApiResult = ApiResult> extends ApiResult {
   records: Array<T & { id: EntityId }>;
   pagination: {
@@ -256,12 +277,12 @@ export const api = {
       body: JSON.stringify(credential),
     }),
   assistant: (message: string, sessionId: string, context: JsonObject) =>
-    request("/assistant", {
+    request<AssistantResponse>("/assistant", {
       method: "POST",
       body: JSON.stringify({ message, sessionId, context }),
     }),
   insights: (sales: JsonValue, inventory: InventoryItem[]) =>
-    request("/insights", {
+    request<InventoryInsightResponse>("/insights", {
       method: "POST",
       body: JSON.stringify({ sales, inventory }),
     }),

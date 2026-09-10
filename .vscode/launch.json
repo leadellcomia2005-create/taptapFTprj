@@ -2,13 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Taptap Full Project (Recommended)",
+      "name": "Run TapTap Website (One Click)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev",
       "cwd": "${workspaceFolder}",
+      "env": {
+        "ENABLE_PAYMONGO": "false"
+      },
       "serverReadyAction": {
-        "pattern": "Local:\\s+(http://localhost:5173/)",
+        "pattern": "server_started.*(http://localhost:5173)",
         "uriFormat": "%s",
         "action": "openExternally"
       }

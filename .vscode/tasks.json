@@ -7,6 +7,11 @@
       "script": "dev",
       "isBackground": true,
       "problemMatcher": [],
+      "options": {
+        "env": {
+          "ENABLE_PAYMONGO": "false"
+        }
+      },
       "runOptions": {
         "instanceLimit": 1
       },
@@ -39,6 +44,11 @@
       "path": "server",
       "isBackground": true,
       "problemMatcher": [],
+      "options": {
+        "env": {
+          "ENABLE_PAYMONGO": "false"
+        }
+      },
       "runOptions": {
         "instanceLimit": 1
       },

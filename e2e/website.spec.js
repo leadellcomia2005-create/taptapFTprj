@@ -43,6 +43,16 @@ async function loginAs(page, role) {
   await expect(page.getByRole("button", { name: /Log out/i })).toBeVisible();
 }
 
+async function mockLasPinasGeocoding(page, onRequest = () => {}) {
+  await page.route("https://nominatim.openstreetmap.org/search?**", async (route) => {
+    onRequest(new URL(route.request().url()));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([{ lat: "14.4509229", lon: "120.9764514" }])
+    });
+  });
+}
+
 async function seedDemoNotifications(page, notifications) {
   await page.addInitScript((seededNotifications) => {
     localStorage.setItem("taptap-demo-data", JSON.stringify({ notifications: seededNotifications }));
@@ -187,6 +197,31 @@ test("customer can add a meal, confirm a pin, and complete a COD pickup", async 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("customer menu shows only available or sold-out product states", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      menu: {
+        "porkchop-meal": { stock: 1 },
+        "tapa-meal": { stock: 0 }
+      }
+    }));
+  });
+
+  const runtime = watchRuntime(page);
+  await loginAs(page, "customer");
+  await expect(page.getByRole("heading", { name: /Choose your foodtrip/i })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Filter by availability" })).toHaveCount(0);
+  await expect(page.getByText("Low stock", { exact: true })).toHaveCount(0);
+
+  const porkchop = page.locator(".menu-list-card").filter({ hasText: "Porkchop" }).first();
+  const tapa = page.locator(".menu-list-card").filter({ hasText: "Tapa Meal" }).first();
+  await expect(porkchop.locator(".stock-note")).toHaveText("Available");
+  await expect(tapa.locator(".stock-note")).toHaveText("Sold out");
+  await expect(tapa.locator(".add-item-button")).toBeDisabled();
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
 test("customer reorder skips unavailable items and reduces quantities to current stock", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("taptap-demo-data", JSON.stringify({
@@ -251,6 +286,43 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   await expectAccessible(page);
   expect(staffRuntime.errors).toEqual([]);
   expect(staffRuntime.deferredRequests).toEqual([]);
+});
+
+test("owner Groq inventory advisor renders structured review-only recommendations", async ({ page }) => {
+  await page.route("**/api/status", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ services: { firebase: false, socket: false, groq: true, openai: false, dialogflow: false, paymongo: false, twilio: false } })
+  }));
+  await page.route("**/api/insights", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      text: "Bangus Meal needs owner attention.",
+      provider: "groq",
+      generatedAt: Date.now(),
+      insight: {
+        summary: "Bangus Meal needs owner attention.",
+        salesTrend: "Paid meal sales were steady in the selected period.",
+        peakPeriod: "The busiest period was 12 PM to 1 PM.",
+        ownerAction: "Review the Bangus Meal reorder recommendation before receiving stock.",
+        stockRisks: [{ product: "Bangus Meal", currentStock: 4, reorderPoint: 10, severity: "high", reason: "Stock is below its reorder point." }],
+        reorderRecommendations: [{ product: "Bangus Meal", currentStock: 4, suggestedQuantity: 16, reason: "Restore a cautious buffer." }],
+        wasteRisks: []
+      }
+    })
+  }));
+
+  await loginAs(page, "owner");
+  const advisor = page.locator(".owner-decision-card");
+  await expect(advisor.getByRole("heading", { name: "AI Inventory Advisor" })).toBeVisible();
+  await expect(advisor.getByText("Groq ready")).toHaveCount(0);
+  await advisor.getByLabel("Analysis period").selectOption("7d");
+  await advisor.getByRole("button", { name: "Generate analysis" }).click();
+  await expect(advisor.getByText("Bangus Meal needs owner attention.")).toBeVisible();
+  await expect(advisor.getByText("Stock risks", { exact: true })).toBeVisible();
+  await expect(advisor.getByText("Reorder priorities", { exact: true })).toBeVisible();
+  await expect(advisor.getByText("+16")).toBeVisible();
+  await expect(advisor).toContainText("Recommendations require owner review");
+  await expectNoHorizontalOverflow(page);
 });
 
 test("staff can focus, filter, and add a unique POS product from the keyboard", async ({ page }) => {
@@ -518,9 +590,18 @@ test("375px landing and customer workspace have no horizontal overflow", async (
   const supportButton = page.getByRole("button", { name: /Open customer support/i });
   await expectMinimumTouchTarget(supportButton);
   await expect(page.locator(".assistant-launcher")).toHaveCount(0);
+  await page.route("**/api/assistant", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ text: "Available choices include Bangus Meal (PHP 99).", source: "local" })
+  }));
   await supportButton.click();
   const supportPanel = page.getByRole("dialog", { name: /TapTap customer support/i });
   await expect(supportPanel).toBeVisible();
+  const availableSuggestion = supportPanel.getByRole("button", { name: "What meals are available?" });
+  await expectMinimumTouchTarget(availableSuggestion);
+  await availableSuggestion.click();
+  await expect(supportPanel.getByText("Available choices include Bangus Meal (PHP 99).", { exact: true })).toBeVisible();
+  await expect(supportPanel.locator(".assistant-messages time")).not.toHaveCount(0);
   const [supportBox, navigationBox] = await Promise.all([supportPanel.boundingBox(), mobileNavigation.boundingBox()]);
   expect((supportBox?.y || 0) + (supportBox?.height || 0)).toBeLessThanOrEqual((navigationBox?.y || 0) + 1);
   await supportPanel.getByRole("button", { name: /Close customer support/i }).click();
@@ -533,6 +614,7 @@ test("375px landing and customer workspace have no horizontal overflow", async (
 
 test("mobile cart rows and checkout actions remain visible", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
+  await mockLasPinasGeocoding(page);
   const runtime = watchRuntime(page);
   await loginAs(page, "customer");
 
@@ -581,6 +663,7 @@ test("mobile cart rows and checkout actions remain visible", async ({ page }) =>
   const placeOrderButton = checkout.getByRole("button", { name: /Place order.*₱/i });
   const phoneInput = checkout.getByLabel(/Mobile number/i);
   const addressInput = checkout.getByLabel(/Delivery address/i);
+  const barangayInput = checkout.getByLabel(/Barangay/i);
   await expect(cancelButton).toBeVisible();
   await expect(placeOrderButton).toBeVisible();
   await expect(checkout.getByRole("button", { name: /GCash/i })).toHaveCount(0);
@@ -591,18 +674,23 @@ test("mobile cart rows and checkout actions remain visible", async ({ page }) =>
   await expect(checkout.getByText(/Use a valid Philippine mobile number/i)).toBeVisible();
   await phoneInput.fill("09171234567");
   await placeOrderButton.click();
-  await expect(addressInput).toBeFocused();
-  await expect(checkout.getByText(/Add a complete delivery address/i)).toBeVisible();
-  await addressInput.fill("17 Gemini Street, Pamplona Dos, Las Pinas City");
+  await expect(barangayInput).toBeFocused();
+  await expect(checkout.getByText(/Choose a barangay in Las Piñas City/i)).toBeVisible();
+  await barangayInput.selectOption("Pamplona Dos");
   await placeOrderButton.click();
-  await expect(checkout.getByRole("button", { name: /Choose pin on map/i })).toBeFocused();
-  await expect(checkout.getByText(/Choose or capture the exact rider drop-off pin/i)).toBeVisible();
+  await expect(addressInput).toBeFocused();
+  await expect(checkout.getByText(/Enter the house or building number and street name/i)).toBeVisible();
+  await addressInput.fill("17 Gemini Street");
+  await addressInput.press("Tab");
+  await expect(checkout.getByText(/Starting pin placed near Pamplona Dos/i)).toBeVisible();
+  await expect(checkout.getByLabel("Latitude")).toHaveValue("14.4509229");
 
   await checkout.getByRole("button", { name: /^Pickup/i }).click();
   await expect(checkout.getByRole("button", { name: /Pay on pickup/i })).toHaveAttribute("aria-pressed", "true");
   await expect(phoneInput).toHaveValue("09171234567");
   await checkout.getByRole("button", { name: /^Delivery/i }).click();
-  await expect(addressInput).toHaveValue("17 Gemini Street, Pamplona Dos, Las Pinas City");
+  await expect(addressInput).toHaveValue("17 Gemini Street");
+  await expect(barangayInput).toHaveValue("Pamplona Dos");
   const [cancelBox, placeOrderBox] = await Promise.all([cancelButton.boundingBox(), placeOrderButton.boundingBox()]);
   expect(Math.abs((placeOrderBox?.y || 0) - (cancelBox?.y || 0))).toBeLessThanOrEqual(2);
   expect((placeOrderBox?.y || 0) + (placeOrderBox?.height || 0)).toBeLessThanOrEqual(812);
@@ -660,6 +748,7 @@ test("stored cart and checkout draft recover without trusting stale product data
 });
 
 test("checkout details follow draft, current input, and profile priority", async ({ page }) => {
+  await mockLasPinasGeocoding(page);
   await page.addInitScript(() => {
     localStorage.setItem("taptap-cart:v1:demo-customer", JSON.stringify({
       version: 1,
@@ -669,7 +758,7 @@ test("checkout details follow draft, current input, and profile priority", async
       users: {
         "demo-customer": {
           phone: "09175550123",
-          address: "Profile address, Pamplona Dos",
+          address: "55 Profile Street, Pamplona Dos, Las Piñas City",
           landmark: "Profile landmark",
           deliveryLocation: { lat: 14.451, lng: 120.977, accuracy: 20, source: "profile" }
         }
@@ -680,7 +769,7 @@ test("checkout details follow draft, current input, and profile priority", async
       deliveryType: "delivery",
       payment: "gcash",
       phone: "09176660123",
-      address: "Draft address, Las Pinas City",
+      address: "66 Draft Street, Talon Uno, Las Piñas City",
       landmark: "Draft landmark",
       notes: "Draft note",
       deliveryLocation: { lat: 14.452, lng: 120.978, accuracy: 15, source: "draft" }
@@ -693,7 +782,8 @@ test("checkout details follow draft, current input, and profile priority", async
   const checkout = page.locator(".checkout-modal");
   await expect(checkout.getByText("Checkout details restored")).toBeVisible();
   await expect(checkout.getByLabel(/Mobile number/i)).toHaveValue("09176660123");
-  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("Draft address, Las Pinas City");
+  await expect(checkout.getByLabel(/Barangay/i)).toHaveValue("Talon Uno");
+  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("66 Draft Street");
   await expect(checkout.getByLabel(/Landmark/i)).toHaveValue("Draft landmark");
   await expect(checkout.getByLabel(/Order notes/i)).toHaveValue("Draft note");
   await expect(checkout.getByLabel("Latitude")).toHaveValue("14.452");
@@ -702,17 +792,52 @@ test("checkout details follow draft, current input, and profile priority", async
 
   await checkout.locator(".checkout-draft-notice").getByRole("button", { name: /Clear/i }).click();
   await expect(checkout.getByLabel(/Mobile number/i)).toHaveValue("09175550123");
-  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("Profile address, Pamplona Dos");
+  await expect(checkout.getByLabel(/Barangay/i)).toHaveValue("Pamplona Dos");
+  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("55 Profile Street");
   await expect(checkout.getByLabel(/Landmark/i)).toHaveValue("Profile landmark");
   await expect(checkout.getByLabel("Latitude")).toHaveValue("14.451");
 
   await checkout.getByLabel(/Mobile number/i).fill("09178880123");
-  await checkout.getByLabel(/Delivery address/i).fill("Current checkout address");
+  await checkout.getByLabel(/Delivery address/i).fill("77 Current Street");
   await checkout.getByRole("button", { name: /^Pickup/i }).click();
   await expect(checkout.getByRole("button", { name: /Pay on pickup/i })).toHaveAttribute("aria-pressed", "true");
   await checkout.getByRole("button", { name: /^Delivery/i }).click();
   await expect(checkout.getByLabel(/Mobile number/i)).toHaveValue("09178880123");
-  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("Current checkout address");
+  await expect(checkout.getByLabel(/Delivery address/i)).toHaveValue("77 Current Street");
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("Las Piñas checkout barangay selection places a private approximate map pin", async ({ page }) => {
+  const lookupRequests = [];
+  await mockLasPinasGeocoding(page, (url) => lookupRequests.push(url));
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-cart:v1:demo-customer", JSON.stringify({
+      version: 1,
+      items: [{ id: "porkchop-meal", qty: 1 }]
+    }));
+  });
+
+  const runtime = watchRuntime(page);
+  await loginAs(page, "customer");
+  await page.getByLabel("Current order").getByRole("button", { name: /Continue to checkout/i }).click();
+  const checkout = page.locator(".checkout-modal");
+  const barangay = checkout.getByLabel(/Barangay/i);
+  const street = checkout.getByLabel(/Delivery address/i);
+
+  await expect(barangay.locator("option")).toHaveCount(21);
+  await expect(checkout.getByLabel(/City/i)).toHaveValue("Las Piñas City");
+  await barangay.selectOption("Pamplona Dos");
+  await street.fill("17 Gemini Street");
+  await street.press("Tab");
+
+  await expect(checkout.getByText(/Starting pin placed near Pamplona Dos/i)).toBeVisible();
+  await expect(checkout.getByText("17 Gemini Street, Pamplona Dos, Las Piñas City", { exact: true })).toBeVisible();
+  await expect(checkout.getByLabel("Latitude")).toHaveValue("14.4509229");
+  await expect(checkout.getByLabel("Longitude")).toHaveValue("120.9764514");
+  expect(lookupRequests).toHaveLength(1);
+  expect(lookupRequests[0].searchParams.get("q")).toContain("Pamplona Dos");
+  expect(lookupRequests[0].searchParams.get("q")).not.toContain("17 Gemini Street");
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
 });

@@ -32,6 +32,7 @@ Realtime Database is authoritative for operational data.
 | Cross-cutting hooks | `client/src/hooks/useAppState.js` | Auth/profile, role navigation, notifications, and cart/checkout state |
 | Role features | `client/src/features/` | Customer, owner, staff, rider, and authentication screens |
 | Shared UI | `client/src/components/` | Branding, loaders, maps, charts, photos, and camera proof |
+| Customer assistant | `client/src/components/CustomerAssistant.tsx` | Lazy typed chat UI, safe live context, retry states, and staff-message continuity |
 | Typed contracts | `client/src/types/` and `client/src/contracts/` | Domain types, constants, API records, and runtime guards |
 | API adapter | `client/src/services/api.ts` | Authenticated HTTP requests and response-object validation |
 | Firebase facades | `client/src/services/firebase/` | Domain-specific import boundaries and subscription APIs |
@@ -197,6 +198,8 @@ Never put server secrets in `client/.env` or commit any `.env` file.
   claims without deleting fingerprints. Every completed repair writes a deterministic audit event.
 - Aggregate gaps, malformed order quantities, failed notifications, unresolved COD, and missing proofs
   are review-only findings. The server does not invent payments, proof, stock history, or delivery facts.
+- Optional AI requests use bounded inputs, one retry, and a ten-second provider timeout. Common store,
+  menu, payment, and authenticated order questions use deterministic local answers where possible.
 - The owner-only operational metrics endpoint reports process-lifetime request, latency, checkout,
   stock-conflict, authorization, readiness, socket, cancellation, and COD aggregates without customer data.
 - Customer reorders are rebuilt from the current menu and report skipped or stock-reduced items. Staff POS
@@ -243,6 +246,7 @@ npm run smoke:preview --prefix client
 npm run test:rules
 npm run test:e2e
 npm run check:cycles
+npm run check:client-secrets
 npm run check:operations-docs
 npm run audit:production
 ```
@@ -252,6 +256,10 @@ demo servers on ports 4173 and 8181. It covers the landing and registration flow
 owner reports, staff POS/order queue, rider delivery/proof workflow, console errors,
 accessibility, touch targets, and responsive layouts at 320x700, 375x812, 430x932, 768x1024,
 812x375, and desktop widths.
+
+`npm run check:client-secrets` scans browser source, public assets, and the current production build for
+recognizable server tokens and private keys. Demo account credentials are intentionally preserved because
+they are non-production preview data, not server credentials.
 
 `npm run validate:release` runs every required release gate in order. Both deployment commands invoke
 it first, so a failed typecheck, lint, cycle scan, operations-document check, production dependency audit,

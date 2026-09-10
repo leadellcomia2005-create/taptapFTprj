@@ -1116,6 +1116,13 @@ button { font: inherit; }
 .assistant-messages .bot { background: white; }
 .assistant-messages .user { margin-left: auto; color: white; background: var(--red); }
 .assistant-messages small { display: block; margin-top: 4px; opacity: .55; font-size: 7px; }
+.assistant-messages time { display: block; margin-top: 5px; opacity: .55; font-size: 8px; }
+.assistant-typing { color: var(--muted); }
+.assistant-error { border: 1px solid rgba(217,54,36,.22); }
+.assistant-error button { min-height: 36px; margin-top: 8px; padding: 0 12px; color: var(--red); border: 1px solid currentColor; background: transparent; border-radius: 7px; font-size: 9px; font-weight: 900; }
+.assistant-suggestions { display: flex; gap: 7px; overflow-x: auto; padding: 10px 11px 2px; background: white; scrollbar-width: thin; }
+.assistant-suggestions button { min-height: 40px; flex: 0 0 auto; padding: 7px 10px; color: var(--ink); border: 1px solid var(--line); background: var(--paper); border-radius: 8px; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.assistant-suggestions button:hover:not(:disabled),.assistant-suggestions button:focus-visible { border-color: var(--red); color: var(--red); }
 .assistant-panel form { display: flex; gap: 7px; padding: 11px; }
 .assistant-panel input { min-width: 0; flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; }
 .assistant-panel form button { color: white; border: 0; background: var(--red); border-radius: 8px; font-size: 9px; font-weight: 800; }
@@ -1679,7 +1686,8 @@ button:not(:disabled),
 .checkout-section-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .checkout-section .form-label { margin: 0 0 7px; }
 .checkout-section .checkout-field-hint { margin: 6px 0 0; }
-.checkout-section .form-control.is-invalid { border-color: var(--red); background-image: none; }
+.checkout-section .form-control.is-invalid,
+.checkout-section .form-select.is-invalid { border-color: var(--red); background-image: none; }
 .checkout-payment-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .checkout-payment-grid.single { grid-template-columns: 1fr; }
 .checkout-review-list { display: grid; gap: 8px; }
@@ -1714,6 +1722,49 @@ button:not(:disabled),
   grid-template-columns: minmax(0,1.1fr) minmax(220px,.9fr);
   align-items: end;
 }
+.checkout-address-fields {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}
+.checkout-street-field { grid-column: 1 / -1; }
+.checkout-city-field {
+  color: var(--muted);
+  background: var(--paper-soft);
+  cursor: default;
+}
+.checkout-address-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  background: #fffaf5;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.checkout-address-preview span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.checkout-address-preview strong {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.checkout-address-lookup,
+.checkout-geocoder-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.checkout-address-lookup.loading { color: var(--muted); }
+.checkout-address-lookup.success { color: var(--green); font-weight: 750; }
+.checkout-address-lookup.error { color: var(--red); font-weight: 750; }
+.checkout-geocoder-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .checkout-location-panel {
   background: #fffaf5;
 }
@@ -1891,6 +1942,8 @@ button:not(:disabled),
   .checkout-section-heading { grid-template-columns: 36px minmax(0,1fr); gap: 10px; }
   .checkout-section-icon { width: 36px; height: 36px; }
   .checkout-payment-grid { grid-template-columns: 1fr; }
+  .checkout-address-fields { grid-template-columns: 1fr; }
+  .checkout-street-field { grid-column: auto; }
   .checkout-footer-actions { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); width: 100%; gap: 8px; }
   .checkout-footer-actions .btn { min-width: 0; padding-inline: 9px; line-height: 1.15; white-space: normal; }
   .checkout-modal .modal-footer .btn { width: 100%; }
@@ -2848,9 +2901,6 @@ button:not(:disabled),
 }
 /* Four-role dashboard workflow improvements */
 .storefront-filter-bar {
-  display: grid;
-  grid-template-columns: minmax(240px,1fr) auto;
-  gap: 12px;
   margin: 12px 0 18px;
 }
 .menu-search-field {
@@ -2876,29 +2926,6 @@ button:not(:disabled),
   background: transparent;
   font-size: 14px;
 }
-.menu-availability-filter {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  background: #fffdf9;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-.menu-availability-filter button {
-  min-height: 40px;
-  padding: 0 11px;
-  color: var(--muted);
-  border: 0;
-  background: transparent;
-  border-radius: 7px;
-  font-size: 10px;
-  font-weight: 900;
-}
-.menu-availability-filter button.active {
-  color: white;
-  background: var(--ink);
-}
 .store-cart-totals > div:nth-child(2) strong {
   max-width: 150px;
   color: var(--muted);
@@ -2908,9 +2935,6 @@ button:not(:disabled),
 .mobile-cart-backdrop,
 .mobile-cart-sheet { display: none; }
 @media (max-width: 900px) {
-  .storefront-filter-bar { grid-template-columns: 1fr; }
-  .menu-availability-filter { overflow-x: auto; }
-  .menu-availability-filter button { min-height: 44px; flex: 1 0 auto; }
   .store-cart-column { display: none; }
   .floating-checkout { display: block; }
   .mobile-cart-backdrop {
@@ -4962,8 +4986,7 @@ button:not(:disabled),
   font-size: clamp(38px,4.2vw,52px);
   line-height: 1;
 }
-.category-rail button,
-.menu-availability-filter button {
+.category-rail button {
   min-height: var(--control-height);
 }
 .add-item-button {
@@ -4984,7 +5007,7 @@ button:not(:disabled),
   width: min(380px,calc(100vw - 36px));
   max-height: min(620px,calc(100dvh - 112px));
   display: grid;
-  grid-template-rows: auto minmax(0,1fr) auto;
+  grid-template-rows: auto minmax(0,1fr) auto auto;
   border: 1px solid var(--ops-border);
   border-radius: var(--radius-panel);
 }
@@ -5091,6 +5114,7 @@ button:not(:disabled),
     width: auto;
     max-height: calc(100dvh - 190px - env(safe-area-inset-bottom,0px));
   }
+  .assistant-suggestions button { min-height: 44px; }
   .owner-workspace-header h1,
   .staff-workspace-header h1,
   .rider-workspace-header h1 {

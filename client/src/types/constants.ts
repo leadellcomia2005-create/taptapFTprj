@@ -248,6 +248,7 @@ export const SERVICE_DISPLAY_NAMES = {
   api: "App connection",
   firebase: "Secure login",
   socket: "Live updates",
+  groq: "AI assistance",
   openai: "Business insight",
   dialogflow: "Assistant answers",
   paymongo: "Online payment",

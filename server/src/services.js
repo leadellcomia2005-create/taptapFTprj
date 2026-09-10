@@ -2,6 +2,7 @@ import dialogflow from "@google-cloud/dialogflow";
 import nodemailer from "nodemailer";
 import OpenAI from "openai";
 import twilio from "twilio";
+import { z } from "zod";
 import {
   createPayMongoCheckoutSession,
   payMongoConfiguration,
@@ -16,6 +17,7 @@ export function serviceStatus() {
     firebase: has("FIREBASE_DATABASE_URL"),
     socket: true,
     twoFactor: has("TWO_FACTOR_ENCRYPTION_KEY"),
+    groq: enabled("ENABLE_GROQ") && has("GROQ_API_KEY"),
     openai: enabled("ENABLE_OPENAI") && has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: payMongoConfiguration().enabled,
@@ -48,7 +50,224 @@ export async function detectDialogflowIntent({ message, sessionId }) {
 }
 
 function openaiClient() {
-  return serviceStatus().openai ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+  return serviceStatus().openai ? new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: 10_000,
+    maxRetries: 1
+  }) : null;
+}
+
+function groqClient() {
+  return serviceStatus().groq
+    ? new OpenAI({
+        apiKey: process.env.GROQ_API_KEY,
+        baseURL: "https://api.groq.com/openai/v1",
+        timeout: 10_000,
+        maxRetries: 1
+      })
+    : null;
+}
+
+const conciseText = (value, maxLength = 240) => String(value || "").trim().slice(0, maxLength);
+
+const inventoryNarrativeSchema = z.object({
+  summary: z.string().trim().min(1).max(1200),
+  salesTrend: z.string().trim().min(1).max(500),
+  peakPeriod: z.string().trim().min(1).max(300),
+  ownerAction: z.string().trim().min(1).max(500)
+}).strict();
+
+const inventoryNarrativeJsonSchema = {
+  name: "taptap_inventory_narrative",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string" },
+      salesTrend: { type: "string" },
+      peakPeriod: { type: "string" },
+      ownerAction: { type: "string" }
+    },
+    required: ["summary", "salesTrend", "peakPeriod", "ownerAction"]
+  }
+};
+
+export function buildAssistantContext(context = {}) {
+  const menu = Array.isArray(context?.menu) ? context.menu : [];
+  const orders = Array.isArray(context?.orders) ? context.orders : [];
+  const store = context?.store && typeof context.store === "object" ? context.store : {};
+  return {
+    menu: menu.slice(0, 100).map((item) => ({
+      name: conciseText(item?.name, 100),
+      description: conciseText(item?.description),
+      allergens: conciseText(item?.allergens, 160),
+      category: conciseText(item?.category, 80),
+      price: Math.max(0, Number(item?.price || 0)),
+      available: Number(item?.stock || 0) > 0 && item?.unavailable !== true
+    })),
+    store: {
+      hours: conciseText(store?.hours, 200),
+      serviceArea: conciseText(store?.serviceArea, 200),
+      orderOptions: Array.isArray(store?.orderOptions) ? store.orderOptions.slice(0, 5).map((value) => conciseText(value, 40)).filter(Boolean) : [],
+      paymentMethods: Array.isArray(store?.paymentMethods) ? store.paymentMethods.slice(0, 5).map((value) => conciseText(value, 40)).filter(Boolean) : [],
+      prepTime: conciseText(store?.prepTime, 80)
+    },
+    orders: orders.slice(0, 5).map((order) => ({
+      reference: conciseText(order?.reference, 40),
+      status: conciseText(order?.status, 40),
+      orderType: conciseText(order?.orderType, 40),
+      total: Math.max(0, Number(order?.total || 0)),
+      itemCount: Math.max(0, Number(order?.itemCount || 0)),
+      createdAt: Number(order?.createdAt || 0)
+    }))
+  };
+}
+
+export function buildAssistantOrderContext(orders = []) {
+  return (Array.isArray(orders) ? orders : []).slice(0, 5).map((order) => ({
+    reference: conciseText(order?.displayReference, 40) || `TAP-${conciseText(order?.id, 40).slice(-6).toUpperCase()}`,
+    status: conciseText(order?.status, 40),
+    orderType: conciseText(order?.deliveryType, 40),
+    total: Math.max(0, Number(order?.total || 0)),
+    itemCount: (Array.isArray(order?.items) ? order.items : []).reduce((sum, item) => sum + Math.max(0, Number(item?.qty || item?.quantity || 0)), 0),
+    createdAt: Number(order?.createdAt || 0)
+  }));
+}
+
+export function answerCommonAssistantQuestion(message, context = {}) {
+  const question = conciseText(message, 500).toLowerCase();
+  const safe = buildAssistantContext(context);
+  if (/\b(password|passcode|one[- ]?time code|otp|card number|cvv|security code)\b/.test(question)) {
+    return "For your security, never share passwords, one-time codes, or complete payment credentials in chat.";
+  }
+  if (/\b(cancel|refund|modify|change)\b.*\b(order|payment)\b|\b(order|payment)\b.*\b(cancel|refund|modify|change)\b/.test(question)) {
+    return "I can explain the process, but I cannot change orders, issue refunds, or modify payments. Please use the available order action or contact the support team for review.";
+  }
+  if (/\b(hours?|open|close|closing)\b/.test(question) && safe.store.hours) {
+    return `Our store hours are ${safe.store.hours}.`;
+  }
+  if (/\b(payment|pay|cash|cod|gcash)\b/.test(question) && safe.store.paymentMethods.length) {
+    return `Available payment methods: ${safe.store.paymentMethods.join(", ")}.`;
+  }
+  if (/\b(deliver|delivery|barangay|service area|location)\b/.test(question) && safe.store.serviceArea) {
+    return `${safe.store.serviceArea} Delivery availability is confirmed during checkout.`;
+  }
+  if (/\b(my order|order status|track.*order|where.*order)\b/.test(question)) {
+    const latest = safe.orders[0];
+    return latest
+      ? `${latest.reference} is currently ${latest.status.replaceAll("-", " ")}. Open Orders to view its latest details.`
+      : "You do not have a recent order to track yet.";
+  }
+  if (/\b(menu|meal|food|available)\b/.test(question)) {
+    const available = safe.menu.filter((item) => item.available).slice(0, 6);
+    return available.length
+      ? `Available choices include ${available.map((item) => `${item.name} (PHP ${item.price})`).join(", ")}. Open Menu for the complete live list.`
+      : "The live menu does not currently show an available item. Please check Menu again shortly.";
+  }
+  return null;
+}
+
+export function buildInventoryInsightContext(sales = [], inventory = []) {
+  const orders = Array.isArray(sales) ? sales.slice(-500) : [];
+  const productSales = new Map();
+  const hourlyOrders = new Map();
+  let grossSales = 0;
+  let analyzedOrderCount = 0;
+
+  for (const order of orders) {
+    if (["cancelled", "pending-payment"].includes(String(order?.status || ""))) continue;
+    analyzedOrderCount += 1;
+    grossSales += Math.max(0, Number(order?.total || 0));
+    const hour = new Date(Number(order?.createdAt || 0)).getHours();
+    if (Number.isInteger(hour)) hourlyOrders.set(hour, (hourlyOrders.get(hour) || 0) + 1);
+    for (const item of Array.isArray(order?.items) ? order.items : []) {
+      const name = conciseText(item?.name, 100);
+      if (!name) continue;
+      productSales.set(name, (productSales.get(name) || 0) + Math.max(0, Number(item?.qty || item?.quantity || 0)));
+    }
+  }
+
+  return {
+    orderCount: analyzedOrderCount,
+    grossSales,
+    productSales: [...productSales.entries()].map(([name, quantity]) => ({ name, quantity })),
+    hourlyOrders: [...hourlyOrders.entries()].map(([hour, count]) => ({ hour, count })),
+    inventory: (Array.isArray(inventory) ? inventory : []).slice(0, 250).map((item) => ({
+      name: conciseText(item?.name, 100),
+      category: conciseText(item?.category, 80),
+      price: Math.max(0, Number(item?.price || 0)),
+      stock: Math.max(0, Number(item?.stock || 0)),
+      reorderPoint: Math.max(0, Number(item?.reorderPoint || 0)),
+      unavailable: Boolean(item?.unavailable)
+    }))
+  };
+}
+
+export function normalizeInventoryInsight(insight, context) {
+  const inventory = Array.isArray(context?.inventory) ? context.inventory : [];
+  const productSales = new Map((Array.isArray(context?.productSales) ? context.productSales : []).map((item) => [item.name, Number(item.quantity || 0)]));
+  const modelStockRisks = new Map(insight.stockRisks.map((item) => [item.product, item]));
+  const modelReorders = new Map(insight.reorderRecommendations.map((item) => [item.product, item]));
+  const modelWasteRisks = new Map(insight.wasteRisks.map((item) => [item.product, item]));
+
+  const stockRisks = inventory
+    .filter((item) => item.unavailable || item.stock <= item.reorderPoint)
+    .slice(0, 8)
+    .map((item) => {
+      const modelRisk = modelStockRisks.get(item.name);
+      const severity = item.unavailable || item.stock <= item.reorderPoint * 0.5 ? "high" : "medium";
+      return {
+        product: item.name,
+        currentStock: item.stock,
+        reorderPoint: item.reorderPoint,
+        severity,
+        reason: conciseText(modelRisk?.reason, 300) || `${item.stock} units remain against a reorder point of ${item.reorderPoint}.`
+      };
+    });
+
+  const reorderRecommendations = stockRisks.map((risk) => {
+    const modelRecommendation = modelReorders.get(risk.product);
+    const suggestedQuantity = Math.max(0, Math.ceil(risk.reorderPoint * 2 - risk.currentStock));
+    return {
+      product: risk.product,
+      currentStock: risk.currentStock,
+      suggestedQuantity,
+      reason: conciseText(modelRecommendation?.reason, 300) || `Restore stock to a cautious target of ${risk.reorderPoint * 2} units.`
+    };
+  });
+
+  const wasteRisks = inventory
+    .filter((item) => item.stock > item.reorderPoint && (productSales.get(item.name) || 0) === 0)
+    .slice(0, 8)
+    .map((item) => {
+      const modelRisk = modelWasteRisks.get(item.name);
+      return {
+        product: item.name,
+        risk: conciseText(modelRisk?.risk, 300) || `${item.stock} units are in stock with no sales in the selected period.`,
+        action: conciseText(modelRisk?.action, 300) || "Review demand before replenishing this product."
+      };
+    });
+
+  return { ...insight, stockRisks, reorderRecommendations, wasteRisks };
+}
+
+async function askGroq({ message, context = {} }) {
+  const client = groqClient();
+  if (!client) return null;
+  const response = await client.chat.completions.create({
+    model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+    temperature: 0.2,
+    max_completion_tokens: 500,
+    messages: [
+      {
+        role: "system",
+        content: "You are the concise TapTap Foodtrip customer assistant. Answer only menu, allergen, store, ordering, delivery, and basic support questions using supplied context. Order records belong only to the authenticated customer. Never invent availability, order status, prices, policies, or customer details. Never claim to cancel, refund, modify, or place an order. If the context cannot answer, say the support team must assist. Never request passwords, one-time codes, full payment credentials, or unnecessary personal information."
+      },
+      { role: "user", content: `Context:\n${JSON.stringify(buildAssistantContext(context))}\n\nCustomer message: ${message}` }
+    ]
+  });
+  return conciseText(response.choices?.[0]?.message?.content, 3000) || null;
 }
 
 export async function askOpenAI({ message, context = {} }) {
@@ -57,20 +276,68 @@ export async function askOpenAI({ message, context = {} }) {
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || "gpt-5-mini",
     instructions: "You are the concise Taptap Foodtrip assistant. Answer menu, allergen, store and order questions. Never invent stock or order status; use only the supplied context.",
-    input: `Context:\n${JSON.stringify(context)}\n\nCustomer message: ${message}`
+    input: `Context:\n${JSON.stringify(buildAssistantContext(context))}\n\nCustomer message: ${message}`
   });
   return response.output_text;
 }
 
+export async function askAssistant(input) {
+  const commonResponse = answerCommonAssistantQuestion(input.message || input.text, input.context);
+  if (commonResponse) return { text: commonResponse, source: "local" };
+  const groqResponse = await askGroq(input);
+  if (groqResponse) return { text: groqResponse, source: "groq" };
+  const openaiResponse = await askOpenAI(input);
+  return openaiResponse ? { text: openaiResponse, source: "openai" } : null;
+}
+
 export async function generateInsights({ sales, inventory }) {
+  const safeContext = buildInventoryInsightContext(sales, inventory);
+  const groq = groqClient();
+  if (groq) {
+    const requestInsight = async () => {
+      try {
+        const response = await groq.chat.completions.create({
+          model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+          temperature: 0.2,
+          reasoning_effort: "low",
+          max_completion_tokens: 3000,
+          store: false,
+          response_format: { type: "json_schema", json_schema: inventoryNarrativeJsonSchema },
+          messages: [
+            {
+              role: "system",
+              content: "Act as the TapTap Foodtrip inventory adviser. Return only the required JSON with exactly four short text properties: summary, salesTrend, peakPeriod, and ownerAction. Use supplied figures only. Do not create stock-risk, reorder, or waste lists because trusted project code calculates those. Never claim to change inventory, prices, availability, or orders. Every recommendation requires owner review. Use Philippine pesos where money is mentioned."
+            },
+            { role: "user", content: JSON.stringify(safeContext) }
+          ]
+        });
+        const content = conciseText(response.choices?.[0]?.message?.content, 16000);
+        if (!content) return null;
+        const narrative = inventoryNarrativeSchema.parse(JSON.parse(content));
+        return normalizeInventoryInsight({ ...narrative, stockRisks: [], reorderRecommendations: [], wasteRisks: [] }, safeContext);
+      } catch (error) {
+        if (Number(error?.status) === 400 && /failed.generation|generated json|jsonschema/i.test(`${error?.code || ""} ${error?.message || ""}`)) {
+          return null;
+        }
+        if (error instanceof SyntaxError || error?.name === "ZodError") return null;
+        throw error;
+      }
+    };
+    const insight = await requestInsight() || await requestInsight();
+    if (!insight) {
+        return null;
+      }
+    return { text: insight.summary, insight, provider: "groq", generatedAt: Date.now() };
+  }
   const client = openaiClient();
   if (!client) return null;
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || "gpt-5-mini",
     instructions: "Act as a food-service inventory analyst. Give a short sales trend summary, reorder recommendations, likely peak periods and one waste-reduction action. Use Philippine pesos.",
-    input: JSON.stringify({ sales, inventory })
+    input: JSON.stringify(safeContext)
   });
-  return response.output_text;
+  const text = conciseText(response.output_text, 4000);
+  return text ? { text, provider: "openai", generatedAt: Date.now() } : null;
 }
 
 export function checkoutReturnUrls(orderId) {

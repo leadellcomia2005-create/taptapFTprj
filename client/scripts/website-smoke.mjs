@@ -88,7 +88,7 @@ record("owner workspace is reachable", appShell.includes("<OwnerWorkspace"));
 record("staff workspace is reachable", appShell.includes("<StaffWorkspace"));
 record("rider workspace is reachable", appShell.includes("<RiderWorkspace"));
 record("storefront total waits for fulfillment choice", appShell.includes("Calculated at checkout") && appShell.includes("Estimated total") && !appShell.includes("const deliveryFee = cart.length"));
-record("storefront search and availability filters exist", appShell.includes("menu-search-field") && appShell.includes("menu-availability-filter"));
+record("storefront search exists without the removed availability filter", appShell.includes("menu-search-field") && !appShell.includes("menu-availability-filter"));
 record("mobile cart sheet replaces direct floating checkout", appShell.includes("mobile-cart-sheet") && appShell.includes("Review order -"));
 record("checkout conversion events use the analytics boundary", appShell.includes("trackCheckoutStart") && appShell.includes("trackCheckoutAbandonment"));
 record("notifications require explicit read action", notificationCenter.includes("Mark all read") && notificationCenter.includes("markNotificationRead(notification.id, user.uid)") && !notificationCenter.includes("api.markAllNotificationsRead().catch"));

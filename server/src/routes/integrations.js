@@ -1,6 +1,8 @@
 import { Router } from "express";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { listOrdersForUser } from "../application/orders.js";
 import { confirmPayMongoPayment, recordPayMongoCheckoutSession } from "../application/payments.js";
-import { assistantRequestSchema, orderIdBodySchema } from "../contracts/schemas.js";
+import { assistantRequestSchema, insightRequestSchema, orderIdBodySchema } from "../contracts/schemas.js";
 import {
   assertPayMongoConfiguration,
   checkoutPaymentFromEvent,
@@ -10,10 +12,11 @@ import { asyncRoute } from "../middleware/errors.js";
 import { validateBody } from "../middleware/validation.js";
 import { requireRoles, canAccessOrder, HttpError } from "../security.js";
 import {
-  askOpenAI,
+  askAssistant,
   createPayMongoCheckout,
   detectDialogflowIntent,
   generateInsights,
+  buildAssistantOrderContext,
   retrievePayMongoCheckout,
   sendTwilioSms
 } from "../services.js";
@@ -22,6 +25,14 @@ import { dispatchOrderPush } from "../pushNotifications.js";
 export function createIntegrationsRouter({ config, firebase, authentication, logger }) {
   const router = Router();
   const { authenticate } = authentication;
+  const assistantLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: 15,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user?.uid || ipKeyGenerator(req.ip),
+    message: { error: "Too many assistant messages. Please wait a minute, then try again." }
+  });
 
   router.post("/payments/paymongo/webhook", asyncRoute(async (req, res) => {
     const configuration = assertPayMongoConfiguration();
@@ -58,19 +69,41 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
     return res.json({ received: true, duplicate: result.duplicate });
   }));
 
-  router.post("/assistant", authenticate, validateBody(assistantRequestSchema), asyncRoute(async (req, res) => {
+  router.post("/assistant", authenticate, assistantLimiter, validateBody(assistantRequestSchema), asyncRoute(async (req, res) => {
+    const message = String(req.body.message || req.body.text || "");
+    const needsOrderContext = /\b(my order|order status|track.*order|where.*order)\b/i.test(message);
+    const customerOrders = req.user.role === "customer" && needsOrderContext
+      ? await listOrdersForUser(firebase.db(), req.user)
+      : [];
+    const assistantInput = {
+      ...req.body,
+      context: {
+        ...req.body.context,
+        orders: buildAssistantOrderContext(customerOrders)
+      }
+    };
     const detected = await detectDialogflowIntent(req.body);
     if (detected && detected.intent !== "Default Fallback Intent" && detected.confidence >= 0.55) {
       return res.json({ text: detected.text, source: "assistant", intent: detected.intent });
     }
-    const generated = await askOpenAI(req.body);
-    if (generated) return res.json({ text: generated, source: "assistant" });
+    const generated = await askAssistant(assistantInput);
+    if (generated) return res.json(generated);
     return res.json({ text: detected?.text || "Live assistant answers are not ready yet.", source: "assistant" });
   }));
 
-  router.post("/insights", authenticate, requireRoles("owner"), asyncRoute(async (req, res) => {
-    const text = await generateInsights(req.body);
-    res.json({ text: text || "Business insight is not ready yet." });
+  router.post("/insights", authenticate, requireRoles("owner"), validateBody(insightRequestSchema), asyncRoute(async (req, res) => {
+    try {
+      const result = await generateInsights(req.body);
+      if (!result) throw new HttpError(503, "AI inventory analysis is temporarily unavailable.");
+      res.json(result);
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      if (Number(error?.status) === 429) {
+        throw new HttpError(429, "The AI analysis limit was reached. Wait a minute, then retry.", { code: "AI_RATE_LIMITED" });
+      }
+      logger?.warn("ai_inventory_analysis_failed", { provider: "groq", errorCode: error?.code || "PROVIDER_ERROR" });
+      throw new HttpError(503, "AI inventory analysis is temporarily unavailable.", { code: "AI_UNAVAILABLE" });
+    }
   }));
 
   router.post("/payments/checkout", authenticate, validateBody(orderIdBodySchema), asyncRoute(async (req, res) => {

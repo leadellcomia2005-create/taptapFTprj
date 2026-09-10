@@ -281,9 +281,15 @@ export const recoveryApplySchema = recoveryPreviewSchema.extend({
 }).passthrough();
 
 export const assistantRequestSchema = z.object({
-  message: z.string().trim().min(1).max(2000).optional(),
-  text: z.string().trim().min(1).max(2000).optional(),
+  message: z.string().trim().min(1).max(500).optional(),
+  text: z.string().trim().min(1).max(500).optional(),
   sessionId: optionalText(128)
 }).passthrough().refine((input) => Boolean(input.message || input.text), "Enter an assistant message.");
+
+const insightRecordSchema = z.object({}).passthrough();
+export const insightRequestSchema = z.object({
+  sales: z.array(insightRecordSchema).max(500),
+  inventory: z.array(insightRecordSchema).max(250)
+}).strict();
 
 export const recordIdParams = (name) => z.object({ [name]: recordIdSchema }).passthrough();

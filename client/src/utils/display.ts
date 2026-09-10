@@ -35,6 +35,6 @@ export const relativeTime = (timestamp: TimestampMs | string | null | undefined)
 
 export const assistantSourceLabel = (source: unknown): string => {
   const value = String(source || "").toLowerCase();
-  if (!value || ["assistant", "demo", "openai", "dialogflow", "dialogflow fallback"].includes(value)) return "";
+  if (!value || ["assistant", "demo", "local", "groq", "openai", "dialogflow", "dialogflow fallback"].includes(value)) return "";
   return String(source);
 };

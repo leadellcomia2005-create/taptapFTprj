@@ -13,6 +13,8 @@ Privacy-safe operational metrics, alert thresholds, and the current CSP/App Chec
 [`docs/SECURITY_MONITORING.md`](docs/SECURITY_MONITORING.md).
 FCM, Analytics, Performance Monitoring, Turnstile, and PWA opt-in setup is in
 [`docs/NO_COST_INTEGRATIONS.md`](docs/NO_COST_INTEGRATIONS.md).
+Groq chatbot and inventory-adviser setup is in
+[`docs/GROQ_SETUP.md`](docs/GROQ_SETUP.md).
 
 ## Technology coverage
 
@@ -35,6 +37,7 @@ FCM, Analytics, Performance Monitoring, Turnstile, and PWA opt-in setup is in
 | Firebase Cloud Functions | Matching secure API implementation is included but not deployed on Spark |
 | Socket.IO | Low-latency rider location and order broadcasts |
 | Dialogflow ES | FAQ and known-intent chatbot responses |
+| Groq | Optional customer AI answers and owner-only inventory recommendations |
 | OpenAI API | Optional code retained but deferred and disabled for this update |
 | PayMongo | Optional hosted GCash checkout with test/live isolation and signed webhook confirmation |
 | Twilio | Optional code retained; website notifications, TOTP, and email are the tested paths |
@@ -187,7 +190,8 @@ This repository is linked to Firebase project
    keep this setup free.
 7. The default `npm run deploy` command runs the complete release validation
    gate and deploys Database rules only when every check passes.
-8. Keep OpenAI and Twilio credentials empty unless those integrations are
+8. Configure Groq only through `server/.env` when AI assistance is needed.
+   Keep OpenAI and Twilio credentials empty unless those integrations are
    intentionally enabled. PayMongo can remain disabled or be configured in
    test mode using [the credential-safe setup guide](docs/PAYMONGO_TEST_SETUP.md).
 9. The paid deployment command remains intentionally separate and must not be
@@ -210,7 +214,9 @@ Socket.IO and mirrored into Firebase Realtime Database.
 
 ## Optional third-party integrations
 
-OpenAI and Twilio remain deferred. PayMongo hosted checkout is implemented but
+Groq is the preferred optional AI provider for the current test setup. See
+[`docs/GROQ_SETUP.md`](docs/GROQ_SETUP.md). OpenAI and Twilio remain deferred.
+PayMongo hosted checkout is implemented but
 stays disabled until a mode-matched secret key, webhook secret, and
 `ENABLE_PAYMONGO=true` are configured. See
 [`docs/PAYMONGO_TEST_SETUP.md`](docs/PAYMONGO_TEST_SETUP.md) before enabling it.

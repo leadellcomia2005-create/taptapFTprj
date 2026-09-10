@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, MapPin, PackageCheck, Phone, ReceiptText, RotateCcw, Star, WalletCards } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
+import { buildLasPinasAddress, isWithinLasPinasBounds, LAS_PINAS_BARANGAYS, LAS_PINAS_CITY, parseLasPinasAddress } from "../../data/lasPinas";
 import { api } from "../../services/api";
+import { geocodeLasPinasBarangay } from "../../services/geocoding";
 import { runPerformanceTrace } from "../../services/performance";
 import { submitComplaint, submitReview } from "../../services/firebase/feedback";
 import { createOrder, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
@@ -40,37 +42,55 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   const checkoutCompletedRef = useRef(false);
   const placingRef = useRef(false);
   const phoneInputRef = useRef(null);
+  const barangayInputRef = useRef(null);
   const addressInputRef = useRef(null);
   const pinActionRef = useRef(null);
   const validationSummaryRef = useRef(null);
+  const addressLookupRequestRef = useRef(0);
+  const lastAddressLookupKeyRef = useRef("");
   const defaultPayment = paymongoEnabled ? "gcash" : "cod";
   const [checkoutDefaults] = useState(() => {
+    const profileAddressParts = parseLasPinasAddress(profile?.address || "");
     const baseline = {
       deliveryType: "delivery",
       payment: defaultPayment,
       phone: profile?.phone || "",
-      address: profile?.address || "",
+      address: buildLasPinasAddress(profileAddressParts.streetAddress, profileAddressParts.barangay),
       landmark: profile?.landmark || "",
       notes: "",
       deliveryLocation: sanitizeCheckoutLocation(profile?.deliveryLocation)
     };
     const stored = readCheckoutDraft(user.uid, paymongoEnabled);
-    return { baseline, initial: stored || baseline, restored: Boolean(stored) };
+    const initial = stored || baseline;
+    const initialAddressParts = parseLasPinasAddress(initial.address);
+    return {
+      baseline,
+      baselineAddressParts: profileAddressParts,
+      initial: {
+        ...initial,
+        address: buildLasPinasAddress(initialAddressParts.streetAddress, initialAddressParts.barangay)
+      },
+      initialAddressParts,
+      restored: Boolean(stored)
+    };
   });
-  const { baseline: baselineDraft, initial: initialDraft } = checkoutDefaults;
+  const { baseline: baselineDraft, baselineAddressParts, initial: initialDraft, initialAddressParts } = checkoutDefaults;
   const [draftRestored, setDraftRestored] = useState(checkoutDefaults.restored);
   const [payment, setPayment] = useState(initialDraft?.payment || defaultPayment);
   const [deliveryType, setDeliveryType] = useState(initialDraft?.deliveryType || "delivery");
   const [phone, setPhone] = useState(initialDraft?.phone || profile?.phone || "");
-  const [address, setAddress] = useState(initialDraft?.address || profile?.address || "");
+  const [barangay, setBarangay] = useState(initialAddressParts.barangay);
+  const [streetAddress, setStreetAddress] = useState(initialAddressParts.streetAddress);
   const [landmark, setLandmark] = useState(initialDraft?.landmark || profile?.landmark || "");
   const [deliveryLocation, setDeliveryLocation] = useState(initialDraft?.deliveryLocation || sanitizeCheckoutLocation(profile?.deliveryLocation));
+  const [addressLookup, setAddressLookup] = useState({ status: "idle", message: "" });
   const [smsOptIn, setSmsOptIn] = useState(Boolean(profile?.smsNotifications || profile?.smsNotificationsRequested));
   const [locating, setLocating] = useState(false);
   const [notes, setNotes] = useState(initialDraft?.notes || "");
   const [busy, setBusy] = useState(false);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [touched, setTouched] = useState({ phone: false, address: false });
+  const address = useMemo(() => buildLasPinasAddress(streetAddress, barangay), [barangay, streetAddress]);
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryFee = deliveryType === "delivery" && cart.length > 0 ? 49 : 0;
   const total = subtotal + deliveryFee;
@@ -78,22 +98,27 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   const validPhone = isValidPhilippineMobile(normalizedPhone);
   const verifiedPhone = phoneIsVerified(profile, normalizedPhone);
   const smsReady = Boolean(verifiedPhone && smsProviderEnabled);
-  const deliveryMarker = locationToMarker(deliveryLocation);
+  const deliveryMarker = isWithinLasPinasBounds(deliveryLocation) ? locationToMarker(deliveryLocation) : null;
   const needsPhone = !validPhone;
-  const needsDeliveryAddress = deliveryType === "delivery" && !address.trim();
+  const needsBarangay = deliveryType === "delivery" && !barangay;
+  const needsStreetAddress = deliveryType === "delivery" && !streetAddress.trim();
+  const needsDeliveryAddress = needsBarangay || needsStreetAddress;
   const needsDeliveryPin = deliveryType === "delivery" && !deliveryMarker;
   const checkoutBlockReason = !online
     ? "Reconnect to the internet before placing the order."
     : needsPhone
       ? "Enter a valid Philippine mobile number."
-      : needsDeliveryAddress
-        ? "Add the delivery address."
+      : needsBarangay
+        ? "Choose a Las Piñas barangay."
+        : needsStreetAddress
+          ? "Enter the house number and street."
         : needsDeliveryPin
           ? "Confirm the delivery pin."
           : "";
   const checkoutReady = !checkoutBlockReason;
   const phoneInvalid = needsPhone && (attemptedSubmit || touched.phone);
   const addressInvalid = needsDeliveryAddress && (attemptedSubmit || touched.address);
+  const barangayInvalid = needsBarangay && (attemptedSubmit || touched.address);
   const pinInvalid = needsDeliveryPin && attemptedSubmit;
   const effectivePayment = payment === "gcash" && paymongoEnabled ? "gcash" : "cod";
   const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Pay on pickup";
@@ -111,6 +136,11 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   }, [effectivePayment, payment]);
 
   useEffect(() => {
+    if (!initialDraft?.deliveryLocation || !initialAddressParts.barangay || !initialAddressParts.streetAddress) return;
+    lastAddressLookupKeyRef.current = `${initialAddressParts.barangay}|${initialAddressParts.streetAddress.trim().toLowerCase()}`;
+  }, [initialAddressParts, initialDraft]);
+
+  useEffect(() => {
     if (checkoutCompletedRef.current) return;
     const draft = { deliveryType, payment: effectivePayment, phone, address, landmark, notes, deliveryLocation: sanitizeCheckoutLocation(deliveryLocation) };
     const matchesBaseline = JSON.stringify(draft) === JSON.stringify(baselineDraft);
@@ -126,14 +156,60 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
     setDeliveryType(baselineDraft.deliveryType);
     setPayment(baselineDraft.payment);
     setPhone(baselineDraft.phone);
-    setAddress(baselineDraft.address);
+    setBarangay(baselineAddressParts.barangay);
+    setStreetAddress(baselineAddressParts.streetAddress);
     setLandmark(baselineDraft.landmark);
     setNotes(baselineDraft.notes);
     setDeliveryLocation(baselineDraft.deliveryLocation || null);
+    setAddressLookup({ status: "idle", message: "" });
+    lastAddressLookupKeyRef.current = baselineDraft.deliveryLocation && baselineAddressParts.barangay && baselineAddressParts.streetAddress
+      ? `${baselineAddressParts.barangay}|${baselineAddressParts.streetAddress.trim().toLowerCase()}`
+      : "";
     setDraftRestored(false);
     setAttemptedSubmit(false);
     setTouched({ phone: false, address: false });
     notify("Saved checkout details cleared.");
+  };
+
+  const locateSelectedBarangay = async (selectedBarangay = barangay, typedStreet = streetAddress) => {
+    const street = typedStreet.trim();
+    if (!selectedBarangay || !street) return;
+    const lookupKey = `${selectedBarangay}|${street.toLowerCase()}`;
+    if (lookupKey === lastAddressLookupKeyRef.current && deliveryMarker) return;
+    const requestId = addressLookupRequestRef.current + 1;
+    addressLookupRequestRef.current = requestId;
+    setDeliveryLocation(null);
+    setAddressLookup({ status: "loading", message: `Locating ${selectedBarangay} on the map...` });
+    try {
+      const location = await geocodeLasPinasBarangay(selectedBarangay);
+      if (requestId !== addressLookupRequestRef.current) return;
+      setDeliveryLocation(location);
+      lastAddressLookupKeyRef.current = lookupKey;
+      setAddressLookup({
+        status: "success",
+        message: `Starting pin placed near ${selectedBarangay}. Drag it to the exact house.`
+      });
+    } catch (error) {
+      if (requestId !== addressLookupRequestRef.current) return;
+      setAddressLookup({
+        status: "error",
+        message: error?.message || "The barangay could not be located. Choose the pin manually."
+      });
+    }
+  };
+
+  const changeBarangay = (event) => {
+    const nextBarangay = event.target.value;
+    setBarangay(nextBarangay);
+    setTouched((current) => ({ ...current, address: true }));
+    lastAddressLookupKeyRef.current = "";
+    setAddressLookup({ status: "idle", message: "" });
+    if (streetAddress.trim()) void locateSelectedBarangay(nextBarangay, streetAddress);
+  };
+
+  const finishStreetAddress = () => {
+    setTouched((current) => ({ ...current, address: true }));
+    void locateSelectedBarangay(barangay, streetAddress);
   };
 
   const useCurrentLocation = () => {
@@ -143,12 +219,19 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
     }
     setLocating(true);
     navigator.geolocation.getCurrentPosition(({ coords }) => {
-      setDeliveryLocation({
+      const location = {
         lat: coords.latitude,
         lng: coords.longitude,
         accuracy: coords.accuracy,
         source: "gps"
-      });
+      };
+      if (!isWithinLasPinasBounds(location)) {
+        setLocating(false);
+        notify("Your current location is outside the Las Piñas delivery area.");
+        return;
+      }
+      setDeliveryLocation(location);
+      setAddressLookup({ status: "success", message: "Current location captured. Drag the pin if adjustment is needed." });
       setLocating(false);
       notify("Delivery pin captured. You can drag the pin to adjust it.");
     }, (error) => {
@@ -158,23 +241,34 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   };
   const confirmManualPin = () => {
     const current = deliveryLocation || defaultStorePin;
+    if (!isWithinLasPinasBounds(current)) {
+      notify("The delivery pin must stay within Las Piñas City.");
+      return;
+    }
     setDeliveryLocation({ ...current, source: current.source || "map-picker", accuracy: Number(current.accuracy || 0) });
     notify("Delivery pin confirmed.");
   };
   const updatePin = ({ lat, lng }) => {
+    if (!isWithinLasPinasBounds({ lat, lng })) {
+      notify("The delivery pin must stay within Las Piñas City.");
+      return;
+    }
     setDeliveryLocation((current) => ({
       ...(current || defaultStorePin),
       lat,
       lng,
       source: current?.source === "gps" ? "gps-adjusted" : "map-picker"
     }));
+    setAddressLookup({ status: "success", message: "Exact delivery pin adjusted within Las Piñas City." });
   };
   const focusFirstCheckoutIssue = (offline = false) => {
     const target = offline
       ? validationSummaryRef.current
       : needsPhone
         ? phoneInputRef.current
-        : needsDeliveryAddress
+        : needsBarangay
+          ? barangayInputRef.current
+          : needsStreetAddress
           ? addressInputRef.current
           : needsDeliveryPin
             ? pinActionRef.current
@@ -303,9 +397,29 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
                 <CheckoutSectionHeading icon={MapPin} id="checkout-delivery-title" title="Delivery details" detail="Confirm the address, landmark, and rider drop-off pin." />
                 <div className="checkout-address-stack">
                   <div>
-                    <label className="form-label" htmlFor="checkout-address">Delivery address <span className="checkout-required">Required</span></label>
-                    <textarea ref={addressInputRef} className={`form-control ${addressInvalid ? "is-invalid" : ""}`} id="checkout-address" autoComplete="street-address" aria-describedby="checkout-address-hint" aria-invalid={addressInvalid} value={address} onBlur={() => setTouched((current) => ({ ...current, address: true }))} onChange={(event) => setAddress(event.target.value)} placeholder="House no., street, barangay, city" />
-                    <small className={`checkout-field-hint ${addressInvalid ? "error" : ""}`} id="checkout-address-hint" role={addressInvalid ? "alert" : undefined}>{addressInvalid ? "Add a complete delivery address." : "Include the barangay, street, and house or building number."}</small>
+                    <div className="checkout-address-fields">
+                      <div>
+                        <label className="form-label" htmlFor="checkout-barangay">Barangay <span className="checkout-required">Required</span></label>
+                        <select ref={barangayInputRef} className={`form-select ${barangayInvalid ? "is-invalid" : ""}`} id="checkout-barangay" autoComplete="address-level3" aria-describedby="checkout-barangay-hint" aria-invalid={barangayInvalid} value={barangay} onChange={changeBarangay}>
+                          <option value="">Choose barangay</option>
+                          {LAS_PINAS_BARANGAYS.map((item) => <option key={item} value={item}>{item}</option>)}
+                        </select>
+                        <small className={`checkout-field-hint ${barangayInvalid ? "error" : ""}`} id="checkout-barangay-hint" role={barangayInvalid ? "alert" : undefined}>{barangayInvalid ? "Choose a barangay in Las Piñas City." : "Delivery is limited to Las Piñas City."}</small>
+                      </div>
+                      <div>
+                        <label className="form-label" htmlFor="checkout-city">City</label>
+                        <input className="form-control checkout-city-field" id="checkout-city" autoComplete="address-level2" value={LAS_PINAS_CITY} readOnly />
+                        <small className="checkout-field-hint">Fixed delivery city</small>
+                      </div>
+                      <div className="checkout-street-field">
+                        <label className="form-label" htmlFor="checkout-address">House no. and street <span className="checkout-required">Required</span></label>
+                        <input ref={addressInputRef} className={`form-control ${addressInvalid && needsStreetAddress ? "is-invalid" : ""}`} id="checkout-address" autoComplete="street-address" aria-label="Delivery address: house no. and street" aria-describedby="checkout-address-hint" aria-invalid={addressInvalid && needsStreetAddress} value={streetAddress} onBlur={finishStreetAddress} onChange={(event) => { setStreetAddress(event.target.value); setAddressLookup({ status: "idle", message: "" }); }} placeholder="Example: 17 Gemini Street" />
+                        <small className={`checkout-field-hint ${addressInvalid && needsStreetAddress ? "error" : ""}`} id="checkout-address-hint" role={addressInvalid && needsStreetAddress ? "alert" : undefined}>{addressInvalid && needsStreetAddress ? "Enter the house or building number and street name." : "The pin is placed after you finish this field."}</small>
+                      </div>
+                    </div>
+                    {address && <div className="checkout-address-preview"><span>Complete delivery address</span><strong>{address}</strong></div>}
+                    {addressLookup.message && <small className={`checkout-address-lookup ${addressLookup.status}`} role="status">{addressLookup.message}</small>}
+                    <small className="checkout-geocoder-note">Approximate barangay location from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>. Your typed house and street stay in TapTap checkout.</small>
                   </div>
                   <div><label className="form-label" htmlFor="checkout-landmark">Landmark</label><input className="form-control" id="checkout-landmark" value={landmark} onChange={(event) => setLandmark(event.target.value)} placeholder="Example: near sari-sari store, blue gate" /></div>
                 </div>
@@ -324,7 +438,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
                       </div>
                     </>
                   ) : <div className="empty-chat checkout-pin-empty">No delivery pin selected.</div>}
-                  <small className={`checkout-field-hint ${pinInvalid ? "error" : ""}`} id="checkout-pin-hint" role={pinInvalid ? "alert" : undefined}>{pinInvalid ? "Choose or capture the exact rider drop-off pin." : deliveryMarker ? `Pin confirmed from ${deliveryLocation?.source || "map-picker"}.` : "A confirmed pin is required for delivery."}</small>
+                  <small className={`checkout-field-hint ${pinInvalid ? "error" : ""}`} id="checkout-pin-hint" role={pinInvalid ? "alert" : undefined}>{pinInvalid ? "Choose or capture the exact rider drop-off pin." : deliveryMarker ? deliveryLocation?.source === "barangay-lookup" ? "An approximate barangay pin is shown. Drag it to the exact drop-off point." : "Delivery pin confirmed within Las Piñas City." : "A confirmed pin is required for delivery."}</small>
                 </div>
               </section>
             )}

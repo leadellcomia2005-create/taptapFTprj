@@ -646,7 +646,7 @@ export function SettingsModule({ title, serviceStatus, staff = false, notify }) 
     { key: "turnstile", label: "Registration protection", detail: "Protects customer registration from automated abuse.", fix: "Add the public site key and secret key, then restart the app server.", required: true },
     { key: "twilio", label: "SMS provider", detail: "Optional phone texts for verified customers.", fix: "Connect an SMS sender before enabling paid text updates.", optional: true },
     { key: "paymongo", label: "Online payments", detail: "Optional online payment checkout.", fix: "Add payment credentials when online checkout is ready to launch.", optional: true },
-    { key: "openai", label: "Owner recommendations", detail: "Optional owner decision support.", fix: "Add an AI key only when owner recommendation summaries are needed.", optional: true }
+    { key: "groq", label: "Groq AI assistance", detail: "Optional customer answers and owner inventory recommendations.", fix: "Add the server-side Groq key and enable Groq when AI assistance is needed.", optional: true }
   ].map((item) => {
     const ready = Boolean(serviceStatus?.[item.key]);
     const status = ready ? "Ready" : item.optional ? "Optional" : "Needs attention";

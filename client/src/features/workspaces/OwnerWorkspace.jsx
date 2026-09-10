@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, ClipboardList, CreditCard, MessageSquareWarning, PackageSearch, WifiOff } from "lucide-react";
+import { AlertTriangle, ArrowRight, ClipboardList, CreditCard, MessageSquareWarning, PackageSearch, Sparkles, WifiOff } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
 import { securityMethodLabels, staffRoleLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
@@ -14,7 +14,6 @@ import "./styles/owner.css";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
-  const menu = inventory;
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const bestSellerRows = bestSellers(revenueOrders, inventory, 5);
@@ -32,7 +31,11 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       .filter((order) => Number(order.createdAt || 0) >= start && Number(order.createdAt || 0) < end)
       .reduce((sum, order) => sum + Number(order.total || 0), 0);
   });
-  const [insight, setInsight] = useState("Generate a free best-seller and stock recommendation.");
+  const [insight, setInsight] = useState(null);
+  const [insightStatus, setInsightStatus] = useState("idle");
+  const [insightError, setInsightError] = useState("");
+  const [insightPeriod, setInsightPeriod] = useState("30d");
+  const [insightCategory, setInsightCategory] = useState("all");
   const [planning, setPlanning] = useState(ownerPlanningDefaults);
   const salesGoal = planning.salesGoal;
   const [dashboardPeriod, setDashboardPeriod] = useState("today");
@@ -75,6 +78,17 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const lowStockItems = inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0));
   const unremittedCodOrders = dashboardOrders.filter(isUnremittedCod);
   const unresolvedComplaints = complaints.filter((complaint) => !["resolved", "closed"].includes(String(complaint.status || "open").toLowerCase()));
+  const aiReady = Boolean(serviceStatus?.groq || serviceStatus?.openai);
+  const insightCategories = [...new Set(inventory.map((item) => item.category).filter(Boolean))].sort();
+  const insightPeriodStart = insightPeriod === "today"
+    ? todayStart
+    : insightPeriod === "7d"
+      ? now - 7 * 24 * 60 * 60 * 1000
+      : insightPeriod === "30d"
+        ? now - 30 * 24 * 60 * 60 * 1000
+        : 0;
+  const insightOrders = (insightPeriodStart ? orders.filter((order) => Number(order.createdAt || 0) >= insightPeriodStart) : orders).slice(-500);
+  const insightInventory = (insightCategory === "all" ? inventory : inventory.filter((item) => item.category === insightCategory)).slice(0, 250);
   const unavailableServices = Object.entries(serviceStatus || {}).filter(([, ready]) => ready === false);
   const dataUpdatedAt = Math.max(0, ...orders.map((order) => Number(order.updatedAt || order.createdAt || 0)));
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
@@ -133,16 +147,22 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     notify(`${order.id} COD marked as remitted.`);
   };
   const generateInsight = async () => {
-    if (!serviceStatus?.openai) {
-      setInsight(buildLocalDecisionSupport(orders, menu));
+    setInsightError("");
+    if (!aiReady) {
+      setInsight({ text: buildLocalDecisionSupport(insightOrders, insightInventory), generatedAt: Date.now(), provider: "local" });
+      setInsightStatus("local");
       notify("Free recommendation generated from your local sales and inventory.");
       return;
     }
+    setInsightStatus("loading");
     try {
-      const result = await api.insights(orders, menu);
-      setInsight(result.text);
-    } catch {
-      setInsight(`${buildLocalDecisionSupport(orders, menu)} Online insight is not ready yet.`);
+      const result = await api.insights(insightOrders, insightInventory);
+      setInsight(result);
+      setInsightStatus("success");
+    } catch (error) {
+      setInsight({ text: buildLocalDecisionSupport(insightOrders, insightInventory), generatedAt: Date.now(), provider: "local" });
+      setInsightError(error.message || "Groq could not generate an analysis. The local recommendation is shown instead.");
+      setInsightStatus("error");
     }
   };
   const updateRole = async (event) => {
@@ -502,11 +522,32 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{hour.count}</b></div>)}</div>
         <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.dailyVelocity.toFixed(1)} sold/day</small></span><b>{item.daysLeft.toFixed(1)}d</b></div>)}</div>
         <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{shift.orderCount} orders - variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)}</b></div>)}</div>
-        <div className="dashboard-card ai-insight owner-decision-card">
-          <p className="eyebrow">{serviceStatus?.openai ? "Business insight" : "Local business insight"}</p>
-          <h3>Decision support</h3>
-          <p>{insight}</p>
-          <button className="btn btn-warning w-100" onClick={generateInsight}>{serviceStatus?.openai ? "Generate business summary" : "Generate local summary"}</button>
+        <div className="dashboard-card ai-insight owner-decision-card" aria-live="polite">
+          <div className="owner-ai-heading">
+            <div><p className="eyebrow">Inventory intelligence</p><h3>AI Inventory Advisor</h3><small>Recommendations require owner review and never change records automatically.</small></div>
+          </div>
+          <div className="owner-ai-controls">
+            <label>Analysis period<select value={insightPeriod} onChange={(event) => { setInsightPeriod(event.target.value); setInsight(null); setInsightStatus("idle"); setInsightError(""); }} disabled={insightStatus === "loading"}><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All records</option></select></label>
+            <label>Product category<select value={insightCategory} onChange={(event) => { setInsightCategory(event.target.value); setInsight(null); setInsightStatus("idle"); setInsightError(""); }} disabled={insightStatus === "loading"}><option value="all">All categories</option>{insightCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+          </div>
+          {insightStatus === "idle" && <div className="owner-ai-empty"><Sparkles aria-hidden="true" /><div><strong>Generate an inventory analysis</strong><p>Groq will summarize sales patterns, stock risks, reorder priorities, and possible waste using the selected records.</p></div></div>}
+          {insightStatus === "loading" && <div className="owner-ai-empty loading" role="status"><span className="spinner-border spinner-border-sm" aria-hidden="true" /><div><strong>Analyzing sales and inventory...</strong><p>This normally takes only a few seconds.</p></div></div>}
+          {insightError && <div className="owner-ai-error" role="alert"><strong>Groq analysis unavailable</strong><span>{insightError} The local analysis is shown below.</span></div>}
+          {insight && <div className="owner-ai-result">
+            <section className="owner-ai-summary"><span>Summary</span><p>{insight.insight?.summary || insight.text}</p></section>
+            {insight.insight && <>
+              <div className="owner-ai-counts"><span><strong>{insight.insight.stockRisks.length}</strong> stock risks</span><span><strong>{insight.insight.reorderRecommendations.length}</strong> reorder priorities</span><span><strong>{insight.insight.wasteRisks.length}</strong> waste risks</span></div>
+              <div className="owner-ai-observations"><section><span>Sales trend</span><p>{insight.insight.salesTrend}</p></section><section><span>Peak period</span><p>{insight.insight.peakPeriod}</p></section></div>
+              <section className="owner-ai-section"><div><span>Stock risks</span><small>Based on current stock and reorder points</small></div>{insight.insight.stockRisks.length === 0 ? <p>No immediate stock risk in the selected records.</p> : insight.insight.stockRisks.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.reason}</small></div><span className={`owner-ai-severity ${item.severity}`}>{item.severity}</span><b>{item.currentStock} / {item.reorderPoint}</b></article>)}</section>
+              <section className="owner-ai-section"><div><span>Reorder priorities</span><small>Suggested additions only</small></div>{insight.insight.reorderRecommendations.length === 0 ? <p>No reorder recommendation from the selected records.</p> : insight.insight.reorderRecommendations.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.reason}</small></div><span>{item.currentStock} now</span><b>+{item.suggestedQuantity}</b></article>)}</section>
+              <section className="owner-ai-section"><div><span>Waste watch</span><small>Products needing owner attention</small></div>{insight.insight.wasteRisks.length === 0 ? <p>No clear waste risk in the selected records.</p> : insight.insight.wasteRisks.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.risk}</small></div><span>{item.action}</span></article>)}</section>
+              <section className="owner-ai-action"><span>Recommended owner action</span><p>{insight.insight.ownerAction}</p></section>
+            </>}
+          </div>}
+          <div className="owner-ai-footer">
+            <small>{insight?.generatedAt ? `Last generated ${new Date(insight.generatedAt).toLocaleString("en-PH")}${insight.provider === "groq" ? " with Groq" : " using local analysis"}.` : "No analysis generated yet."}</small>
+            <button className="btn btn-warning" onClick={generateInsight} disabled={insightStatus === "loading"}><Sparkles size={16} aria-hidden="true" />{insightStatus === "loading" ? "Analyzing..." : insightStatus === "error" ? "Retry Groq" : aiReady ? "Generate analysis" : "Generate local analysis"}</button>
+          </div>
         </div>
       </section>
     </main>

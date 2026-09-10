@@ -451,6 +451,18 @@ export interface Notification {
   expiresAt?: TimestampMs;
 }
 
+export interface SupportMessage {
+  id: EntityId;
+  customerId: EntityId;
+  customerName: string;
+  conversationId: EntityId;
+  senderId: EntityId;
+  senderName: string;
+  senderRole: UserRole;
+  text: string;
+  createdAt: TimestampMs;
+}
+
 export interface AppUser {
   uid: EntityId;
   email: string | null;

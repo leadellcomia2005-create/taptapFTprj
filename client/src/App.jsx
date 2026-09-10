@@ -16,7 +16,7 @@ import { subscribeRiderLocation } from "./services/firebase/delivery";
 import { subscribeComplaints, subscribeReviews } from "./services/firebase/feedback";
 import { subscribeInventory } from "./services/firebase/inventory";
 import { subscribeMenu } from "./services/firebase/menu";
-import { sendSupportMessage, subscribeAuditLogs, subscribeShiftLogs, subscribeSupportMessages } from "./services/firebase/operations";
+import { subscribeAuditLogs, subscribeShiftLogs, subscribeSupportMessages } from "./services/firebase/operations";
 import { subscribeOrders } from "./services/firebase/orders";
 import { listenForForegroundPush, syncGrantedPushToken } from "./services/pushNotifications";
 import { startPerformanceTrace } from "./services/performance";
@@ -24,9 +24,10 @@ import { disconnectSocket, getSocket, subscribeSocketRiderLocation } from "./ser
 import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
 import { useAuthSession, useCartState, useNotificationCenter, useRoleNavigation } from "./hooks/useAppState";
 import { menuAvailability } from "./utils/operations";
-import { assistantSourceLabel, currency, statusLabel } from "./utils/display";
+import { currency, statusLabel } from "./utils/display";
 
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
+const CustomerAssistant = lazy(() => import("./components/CustomerAssistant"));
 const Checkout = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.Checkout })));
 const OrdersView = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.OrdersView })));
 const CustomerProfile = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.CustomerProfile })));
@@ -554,7 +555,6 @@ function StoreCartPanel({ cart, cartCount, cartSubtotal, add, decrease, remove, 
 const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, notify }) {
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
-  const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [removedItem, setRemovedItem] = useState(null);
   const customerMenu = useMemo(() => menu.filter((item) => !item.walkInOnly && menuAvailability(item).available), [menu]);
@@ -563,16 +563,11 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
     const categoryMatch = category === "All" || item.category === category;
     const query = search.trim().toLowerCase();
     const searchMatch = !query || `${item.name} ${item.description || ""} ${item.category || ""}`.toLowerCase().includes(query);
-    const stock = Number(item.stock || 0);
-    const availabilityMatch = availabilityFilter === "all"
-      || (availabilityFilter === "available" && stock > 7)
-      || (availabilityFilter === "low" && stock > 0 && stock <= 7)
-      || (availabilityFilter === "sold-out" && stock <= 0);
-    return categoryMatch && searchMatch && availabilityMatch;
-  }), [availabilityFilter, category, customerMenu, search]);
+    return categoryMatch && searchMatch;
+  }), [category, customerMenu, search]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
   const cartSubtotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
-  const stockLabel = (stock) => stock <= 0 ? "Sold out" : stock <= 7 ? "Low stock" : "Available";
+  const stockLabel = (stock) => stock <= 0 ? "Sold out" : "Available";
   // erick: i-cap ang add-to-cart sa available stock (gaya ng POS) para hindi lumampas.
   const add = useCallback((product) => setCart((current) => {
     const availableStock = Number(product.stock ?? 0);
@@ -658,15 +653,10 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
               <span className="visually-hidden">Search menu</span>
               <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search meals, drinks, or categories" />
             </label>
-            <div className="menu-availability-filter" role="group" aria-label="Filter by availability">
-              {[["all", "All"], ["available", "Available"], ["low", "Low stock"], ["sold-out", "Sold out"]].map(([value, label]) => (
-                <button type="button" key={value} className={availabilityFilter === value ? "active" : ""} aria-pressed={availabilityFilter === value} onClick={() => setAvailabilityFilter(value)}>{label}</button>
-              ))}
-            </div>
           </div>
 
           <div className="menu-list">
-            {visible.length === 0 && <div className="empty-state compact">No menu items match these filters.</div>}
+            {visible.length === 0 && <div className="empty-state compact">No menu items match this search or category.</div>}
             {visible.map((product, index) => {
               const stock = Number(product.stock ?? 0);
               return (
@@ -677,12 +667,12 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
                       <h3>{product.name}</h3>
                       <p>{product.description}</p>
                     </div>
-                    <small>Allergens: {product.allergens?.join(", ") || "none listed"} - {menuAvailability(product).label}</small>
+                    <small>Allergens: {product.allergens?.join(", ") || "none listed"}</small>
                   </div>
                   <div className="menu-item-action">
                     <strong>{currency(product.price)}</strong>
-                    <span className={stock <= 7 ? "stock-note low" : "stock-note"}>{stockLabel(stock)}</span>
-                    <button className="add-item-button" disabled={stock === 0} onClick={() => add(product)} aria-label={`Add ${product.name} to cart`}><Plus size={17} aria-hidden="true" /></button>
+                    <span className={stock <= 0 ? "stock-note low" : "stock-note"}>{stockLabel(stock)}</span>
+                    <button className="add-item-button" disabled={stock <= 0} onClick={() => add(product)} aria-label={`Add ${product.name} to cart`}><Plus size={17} aria-hidden="true" /></button>
                   </div>
                 </article>
               );
@@ -766,61 +756,6 @@ function TrackingView({ order, onClose }) {
   );
 }
 
-function Assistant({ user, menu, open, onOpenChange }) {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([{ from: "bot", text: "Hi! Ask about menu items, allergens, store details or your order." }]);
-  const receivedSupportReplies = useRef(new Set());
-
-  useEffect(() => {
-    if (!open) return undefined;
-    return subscribeSupportMessages((supportMessages) => {
-      const newReplies = supportMessages.filter((message) =>
-        message.senderRole === "staff" && !receivedSupportReplies.current.has(message.id)
-      );
-      if (newReplies.length === 0) return;
-      newReplies.forEach((message) => receivedSupportReplies.current.add(message.id));
-      setMessages((current) => [
-        ...current,
-        ...newReplies.map((message) => ({
-          from: "bot",
-          text: message.text,
-          source: `Staff support - ${message.senderName}`
-        }))
-      ]);
-    }, user.uid);
-  }, [open, user.uid]);
-  useEffect(() => {
-    if (!open) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") onOpenChange(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onOpenChange, open]);
-
-  const send = async (event) => {
-    event.preventDefault();
-    if (!input.trim()) return;
-    const message = input.trim();
-    setInput("");
-    setMessages((current) => [...current, { from: "user", text: message }]);
-    await sendSupportMessage(message, user, {
-      customerId: user.uid,
-      customerName: user.name,
-      conversationId: user.uid
-    });
-    try {
-      const response = await api.assistant(message, user.uid, { menu: menu.map(({ name, description, allergens, stock }) => ({ name, description, allergens, stock })) });
-      setMessages((current) => [...current, { from: "bot", text: response.text, source: response.source }]);
-    } catch {
-      const popular = menu.filter((item) => item.featured).map((item) => item.name).join(", ");
-      setMessages((current) => [...current, { from: "bot", text: `Popular choices are ${popular}. Live assistant answers are not ready yet.`, source: "" }]);
-    }
-  };
-  if (!open) return null;
-  return <aside className="assistant-panel" id="assistant-panel" role="dialog" aria-label="TapTap customer support"><header><div><strong>TapTap Assistant</strong><small>Live answers + staff support</small></div><button aria-label="Close customer support" onClick={() => onOpenChange(false)}><X size={18} strokeWidth={2.5} aria-hidden="true" /></button></header><div className="assistant-messages">{messages.map((message, index) => { const sourceLabel = assistantSourceLabel(message.source); return <div key={index} className={message.from}><span>{message.text}</span>{sourceLabel && <small>{sourceLabel}</small>}</div>; })}</div><form onSubmit={send}><input aria-label="Message customer support" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask or contact staff..." /><button type="submit">Send</button></form></aside>;
-}
-
 export default function App() {
   const { user, setUser, profile, activeUser, currentUser } = useAuthSession();
   const { view, navigate } = useRoleNavigation(currentUser);
@@ -840,7 +775,7 @@ export default function App() {
   const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
   const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
+  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
   const previousOrderCount = useRef(0);
   const paymentReturnHandledRef = useRef(false);
   const payingOrderRef = useRef("");
@@ -1163,7 +1098,7 @@ export default function App() {
         </Suspense>
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
-      {user.role === "customer" && <Assistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} open={assistantOpen} onOpenChange={setAssistantOpen} />}
+      {user.role === "customer" && <Suspense fallback={null}><CustomerAssistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} open={assistantOpen} onOpenChange={setAssistantOpen} /></Suspense>}
       {user.role === "customer" && <CustomerBottomNav activeView={view} onNavigate={navigate} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} loading={notificationsLoading} user={currentUser} onClose={() => setNotificationsOpen(false)} onNavigate={navigate} onOpenOrder={setPendingNotificationOrderId} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}

@@ -13,6 +13,8 @@ const environmentSchema = z.object({
   TURNSTILE_BYPASS: z.enum(["true", "false"]).default("false"),
   TURNSTILE_EXPECTED_ACTION: z.string().trim().min(1).max(80).default("customer_registration"),
   TURNSTILE_ALLOWED_HOSTNAMES: z.string().trim().optional(),
+  REGISTRATION_VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(180),
+  REGISTRATION_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(15),
   ENABLE_PAYMONGO: z.enum(["true", "false"]).default("false"),
   PAYMONGO_MODE: z.enum(["test", "live"]).default("test"),
   PAYMONGO_SECRET_KEY: z.string().trim().optional(),
@@ -95,6 +97,10 @@ export function loadServerConfig(environment = process.env) {
       bypass: env.TURNSTILE_BYPASS === "true",
       expectedAction: env.TURNSTILE_EXPECTED_ACTION,
       allowedHostnames: [...new Set(turnstileAllowedHostnames)]
+    },
+    registration: {
+      verificationTtlMs: env.REGISTRATION_VERIFICATION_TTL_SECONDS * 1000,
+      cleanupIntervalMs: env.REGISTRATION_CLEANUP_INTERVAL_SECONDS * 1000
     },
     firebase: {
       databaseUrl: env.FIREBASE_DATABASE_URL || "",

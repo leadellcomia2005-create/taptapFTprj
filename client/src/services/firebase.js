@@ -189,6 +189,7 @@ function readDemoData() {
     approvalRequests: {},
     activeShifts: {},
     messages: {},
+    supportConversations: {},
     complaints: {},
     shiftLogs: {},
     reviews: {},
@@ -1183,6 +1184,106 @@ export function subscribeSupportMessages(callback, customerId = null) {
     window.removeEventListener("taptap-demo-data", emit);
     window.removeEventListener("storage", emit);
   };
+}
+
+const defaultSupportConversation = (customerId) => ({
+  customerId,
+  mode: "assistant",
+  assignedStaffId: null,
+  assignedStaffName: null,
+  updatedAt: 0
+});
+
+export function subscribeSupportConversation(callback, customerId) {
+  const normalize = (value) => callback(value
+    ? { ...defaultSupportConversation(customerId), ...value, customerId }
+    : defaultSupportConversation(customerId));
+  if (!customerId) {
+    normalize(null);
+    return () => {};
+  }
+  if (firebaseEnabled) return onValue(ref(db, `supportConversations/${customerId}`), (snapshot) => normalize(snapshot.val()));
+  const emit = () => normalize(readDemoData().supportConversations?.[customerId]);
+  emit();
+  window.addEventListener("taptap-demo-data", emit);
+  window.addEventListener("storage", emit);
+  return () => {
+    window.removeEventListener("taptap-demo-data", emit);
+    window.removeEventListener("storage", emit);
+  };
+}
+
+export async function replyToSupportConversation(text, actor, conversation) {
+  if (firebaseEnabled) return api.replyToSupportConversation(conversation.customerId, text, conversation.customerName);
+  const data = readDemoData();
+  const current = data.supportConversations?.[conversation.customerId] || defaultSupportConversation(conversation.customerId);
+  if (current.mode === "staff" && current.assignedStaffId !== actor.uid && actor.role !== "owner") {
+    throw new Error(`This conversation is already assigned to ${current.assignedStaffName || "another staff member"}.`);
+  }
+  const now = Date.now();
+  const next = {
+    customerId: conversation.customerId,
+    mode: "staff",
+    assignedStaffId: actor.uid,
+    assignedStaffName: actor.name,
+    assignedStaffRole: actor.role,
+    takenOverAt: current.mode === "staff" ? current.takenOverAt || now : now,
+    lastStaffReplyAt: now,
+    updatedAt: now
+  };
+  const id = `MSG-${now}-${Math.random().toString(16).slice(2, 7)}`;
+  const message = {
+    text,
+    senderId: actor.uid,
+    senderName: actor.name,
+    senderRole: actor.role,
+    customerId: conversation.customerId,
+    customerName: conversation.customerName,
+    conversationId: conversation.customerId,
+    channel: "support",
+    createdAt: now
+  };
+  data.supportConversations ||= {};
+  data.messages.support ||= {};
+  data.supportConversations[conversation.customerId] = next;
+  data.messages.support[id] = message;
+  data.auditLogs[`AUD-${now}-${Math.random().toString(16).slice(2, 7)}`] = {
+    action: current.mode !== "staff" ? "support_takeover_started" : current.assignedStaffId !== actor.uid ? "support_reassigned" : "support_staff_replied",
+    customerId: conversation.customerId,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    previousMode: current.mode,
+    mode: "staff",
+    createdAt: now
+  };
+  writeDemoData(data);
+  await createNotification({ targetUserId: conversation.customerId, title: "Support team replied", message: `${actor.name}: ${text}`, type: "chat" });
+  return { conversation: next, message: { id, ...message } };
+}
+
+export async function resumeSupportAssistant(customerId, actor) {
+  if (firebaseEnabled) return api.resumeSupportAssistant(customerId);
+  const data = readDemoData();
+  const current = data.supportConversations?.[customerId] || defaultSupportConversation(customerId);
+  if (current.mode !== "staff" || (current.assignedStaffId !== actor.uid && actor.role !== "owner")) {
+    throw new Error("Only the assigned staff member or an owner can return this conversation to the assistant.");
+  }
+  const now = Date.now();
+  const conversation = { ...defaultSupportConversation(customerId), resumedAt: now, updatedAt: now };
+  data.supportConversations[customerId] = conversation;
+  data.auditLogs[`AUD-${now}-${Math.random().toString(16).slice(2, 7)}`] = {
+    action: "support_assistant_resumed",
+    customerId,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    previousMode: "staff",
+    mode: "assistant",
+    createdAt: now
+  };
+  writeDemoData(data);
+  return { conversation };
 }
 
 export async function sendSupportMessage(text, actor, conversation = {}) {

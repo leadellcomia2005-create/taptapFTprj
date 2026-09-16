@@ -191,7 +191,16 @@ async function enforceRegistrationRateLimit(db, source) {
   }
 }
 
-export async function createCustomerRegistration({ db, auth, input, req, sendVerificationEmail, appBaseUrl, verifyHuman }) {
+export async function createCustomerRegistration({
+  db,
+  auth,
+  input,
+  req,
+  sendVerificationEmail,
+  appBaseUrl,
+  verifyHuman,
+  verificationTtlMs = 3 * 60 * 1000
+}) {
   const values = validateCustomerRegistration(input);
   const source = registrationSource(req, values.email);
   await enforceRegistrationRateLimit(db, source);
@@ -213,6 +222,7 @@ export async function createCustomerRegistration({ db, auth, input, req, sendVer
 
   let userRecord;
   const now = Date.now();
+  const verificationExpiresAt = now + verificationTtlMs;
   try {
     userRecord = await auth.createUser({
       email: values.email,
@@ -248,7 +258,8 @@ export async function createCustomerRegistration({ db, auth, input, req, sendVer
         userAgent: source.userAgent,
         botProtection: humanCheck.configured ? "turnstile" : "honeypot-rate-limit",
         botProtectionVerified: humanCheck.configured === true,
-        createdAt: now
+        createdAt: now,
+        verificationExpiresAt
       },
       createdAt: now,
       updatedAt: now
@@ -281,7 +292,8 @@ export async function createCustomerRegistration({ db, auth, input, req, sendVer
       uid: userRecord.uid,
       email: values.email,
       profilePath: `users/${userRecord.uid}`,
-      verificationSent
+      verificationSent,
+      verificationExpiresAt
     };
   } catch (error) {
     if (userRecord?.uid) {

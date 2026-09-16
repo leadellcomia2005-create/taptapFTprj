@@ -267,6 +267,7 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   const ownerRuntime = watchRuntime(page);
   await loginAs(page, "owner");
   await expect(page.getByRole("heading", { name: /Operations control center/i })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: /owner mobile navigation/i })).toBeHidden();
   await expectAccessible(page);
   await activateWithKeyboard(page, page.getByRole("navigation", { name: /owner navigation/i }).getByRole("button", { name: "Reports" }));
   await expect(page.getByRole("heading", { name: /Reports & Reconciliation/i })).toBeVisible();
@@ -277,6 +278,7 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   const staffRuntime = watchRuntime(page);
   await loginAs(page, "staff");
   await expect(page.getByRole("heading", { name: /Operations dashboard/i })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: /staff mobile navigation/i })).toBeHidden();
   await expectAccessible(page);
   const navigation = page.getByRole("navigation", { name: /staff navigation/i });
   await activateWithKeyboard(page, navigation.getByRole("button", { name: /Walk-in POS/i }), "Space");
@@ -704,6 +706,83 @@ test("mobile cart rows and checkout actions remain visible", async ({ page }) =>
   expect(modalIsAboveNavigation).toBe(true);
   await expectNoHorizontalOverflow(page);
   expect(runtime.errors).toEqual([]);
+});
+
+test("staff takeover pauses chatbot replies while keeping customer messages active", async ({ page }) => {
+  let assistantRequests = 0;
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      messages: {
+        support: {
+          initial: {
+            customerId: "demo-customer",
+            customerName: "Juan Dela Cruz",
+            conversationId: "demo-customer",
+            senderId: "demo-customer",
+            senderName: "Juan Dela Cruz",
+            senderRole: "customer",
+            text: "Can someone help with my order?",
+            createdAt: 1
+          }
+        }
+      },
+      supportConversations: {
+        "demo-customer": {
+          customerId: "demo-customer",
+          mode: "staff",
+          assignedStaffId: "demo-staff",
+          assignedStaffName: "Mika Reyes",
+          assignedStaffRole: "staff",
+          updatedAt: 2
+        }
+      }
+    }));
+  });
+  await page.route("**/api/assistant", async (route) => {
+    assistantRequests += 1;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ text: "This reply should not appear." }) });
+  });
+
+  await loginAs(page, "customer");
+  await page.getByRole("button", { name: /Open customer support/i }).click();
+  const panel = page.getByRole("dialog", { name: /TapTap customer support/i });
+  await expect(panel.getByText(/Mika Reyes is handling your conversation/i)).toBeVisible();
+  await expect(panel.locator(".assistant-suggestions")).toHaveCount(0);
+  await panel.getByLabel("Message customer support").fill("Here is another detail.");
+  await panel.getByRole("button", { name: /^Send$/ }).click();
+  await expect(panel.getByText("Here is another detail.", { exact: true })).toBeVisible();
+  expect(assistantRequests).toBe(0);
+});
+
+test("staff reply claims a demo conversation and can return it to the assistant", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      messages: {
+        support: {
+          initial: {
+            customerId: "demo-customer",
+            customerName: "Juan Dela Cruz",
+            conversationId: "demo-customer",
+            senderId: "demo-customer",
+            senderName: "Juan Dela Cruz",
+            senderRole: "customer",
+            text: "I need assistance.",
+            createdAt: 1
+          }
+        }
+      }
+    }));
+  });
+
+  await loginAs(page, "staff");
+  await page.getByRole("navigation", { name: /staff navigation/i }).getByRole("button", { name: /^Chat Support$/i }).click();
+  await expect(page.getByRole("heading", { name: "Chat Support" })).toBeVisible();
+  await expect(page.getByText("Assistant active", { exact: true })).toBeVisible();
+  await page.getByPlaceholder(/Reply to Juan Dela Cruz/i).fill("I will handle this conversation.");
+  await page.getByRole("button", { name: /^Send$/ }).click();
+  await expect(page.getByText(/Handled by Mika Reyes/i)).toBeVisible();
+  await page.getByRole("button", { name: /Return to assistant/i }).click();
+  await expect(page.getByText("Assistant active", { exact: true })).toBeVisible();
 });
 
 test("stored cart and checkout draft recover without trusting stale product data", async ({ page }) => {

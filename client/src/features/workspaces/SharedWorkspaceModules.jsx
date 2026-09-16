@@ -5,7 +5,7 @@ import { api } from "../../services/api";
 import { moderateReview, updateComplaintStatus } from "../../services/firebase/feedback";
 import { adjustInventory } from "../../services/firebase/inventory";
 import { createMenuItem, updateMenuItem } from "../../services/firebase/menu";
-import { archiveCompletedOrders, closeActiveShift, createApprovalRequest, resolveApprovalRequest, sendSupportMessage, startShift, subscribeApprovalRequests } from "../../services/firebase/operations";
+import { archiveCompletedOrders, closeActiveShift, createApprovalRequest, replyToSupportConversation, resolveApprovalRequest, resumeSupportAssistant, startShift, subscribeApprovalRequests, subscribeSupportConversation } from "../../services/firebase/operations";
 import { updateOrder } from "../../services/firebase/orders";
 import { orderPrepClock } from "../../utils/operations";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
@@ -459,6 +459,8 @@ export function ShiftLogsModule({ orders, logs, user, notify, readOnly = false, 
 
 export function SupportChat({ messages, user, notify }) {
   const [text, setText] = useState("");
+  const [conversationState, setConversationState] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const conversations = useMemo(() => {
     const grouped = new Map();
     for (const message of messages) {
@@ -489,16 +491,49 @@ export function SupportChat({ messages, user, notify }) {
     }
   }, [conversations, selectedCustomerId]);
 
+  useEffect(() => {
+    if (!selectedConversation?.customerId) {
+      setConversationState(null);
+      return undefined;
+    }
+    return subscribeSupportConversation(setConversationState, selectedConversation.customerId);
+  }, [selectedConversation?.customerId]);
+
+  const assignedElsewhere = conversationState?.mode === "staff"
+    && conversationState.assignedStaffId !== user.uid
+    && user.role !== "owner";
+  const canResumeAssistant = conversationState?.mode === "staff"
+    && (conversationState.assignedStaffId === user.uid || user.role === "owner");
+
   const send = async (event) => {
     event.preventDefault();
-    if (!text.trim() || !selectedConversation) return;
-    await sendSupportMessage(text.trim(), user, {
-      customerId: selectedConversation.customerId,
-      customerName: selectedConversation.customerName,
-      conversationId: selectedConversation.customerId
-    });
-    setText("");
-    notify(`Reply sent to ${selectedConversation.customerName}.`);
+    if (!text.trim() || !selectedConversation || assignedElsewhere || submitting) return;
+    setSubmitting(true);
+    try {
+      await replyToSupportConversation(text.trim(), user, {
+        customerId: selectedConversation.customerId,
+        customerName: selectedConversation.customerName
+      });
+      setText("");
+      notify(`Reply sent to ${selectedConversation.customerName}. The assistant is paused.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "The reply could not be sent.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resumeAssistant = async () => {
+    if (!selectedConversation || !canResumeAssistant || submitting) return;
+    setSubmitting(true);
+    try {
+      await resumeSupportAssistant(selectedConversation.customerId, user);
+      notify(`Assistant restored for ${selectedConversation.customerName}.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "The assistant could not be restored.");
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <div className="dashboard-card support-chat">
@@ -513,12 +548,21 @@ export function SupportChat({ messages, user, notify }) {
           })}
         </aside>
         <div className="support-thread">
-          <header><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer conversation" : "Messages will appear here"}</small></header>
+          <header className="support-thread-header">
+            <div><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer conversation" : "Messages will appear here"}</small></div>
+            {selectedConversation && <div className="support-mode-actions">
+              <span className={`support-mode-badge ${conversationState?.mode === "staff" ? "staff" : "assistant"}`}>
+                {conversationState?.mode === "staff" ? `Handled by ${conversationState.assignedStaffName || "support team"}` : "Assistant active"}
+              </span>
+              {canResumeAssistant && <button className="btn btn-outline-dark btn-sm" type="button" disabled={submitting} onClick={resumeAssistant}>Return to assistant</button>}
+            </div>}
+          </header>
           <div className="support-message-list">
             {visibleMessages.length === 0 && <div className="empty-chat">No support messages yet.</div>}
             {visibleMessages.map((message) => <div className={message.senderId === user.uid ? "message-own" : "message-other"} key={message.id}><strong>{message.senderName} <small>{message.senderRole}</small></strong><p>{message.text}</p><time>{new Date(message.createdAt).toLocaleString("en-PH")}</time></div>)}
           </div>
-          <form className="support-compose" onSubmit={send}><input className="form-control" disabled={!selectedConversation} value={text} onChange={(event) => setText(event.target.value)} placeholder={selectedConversation ? `Reply to ${selectedConversation.customerName}...` : "Select a customer conversation"} /><button className="btn btn-danger" disabled={!selectedConversation}>Send</button></form>
+          {assignedElsewhere && <p className="support-assignment-note" role="status">{conversationState.assignedStaffName || "Another staff member"} is handling this conversation.</p>}
+          <form className="support-compose" onSubmit={send}><input className="form-control" maxLength="500" disabled={!selectedConversation || assignedElsewhere || submitting} value={text} onChange={(event) => setText(event.target.value)} placeholder={assignedElsewhere ? "This conversation is assigned to another staff member" : selectedConversation ? `Reply to ${selectedConversation.customerName}...` : "Select a customer conversation"} /><button className="btn btn-danger" disabled={!selectedConversation || assignedElsewhere || submitting || !text.trim()}>{submitting ? "Sending" : "Send"}</button></form>
         </div>
       </div>
     </div>

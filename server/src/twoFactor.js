@@ -268,6 +268,7 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
     name: profile.name || user.name || user.email,
     role,
     emailVerified: user.email_verified === true,
+    verificationExpiresAt: Number(profile.registration?.verificationExpiresAt || 0) || null,
     enabled: Boolean(config.enabled),
     method: config.method || null,
     locked: Boolean(config.locked),

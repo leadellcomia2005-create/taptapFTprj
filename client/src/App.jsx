@@ -1023,7 +1023,7 @@ export default function App() {
     if (payingOrderRef.current) return;
     payingOrderRef.current = order.id;
     try {
-      const result = await api.createPayment({ orderId: order.id });
+      const result = await api.createPayment(order.id);
       if (!result.checkoutUrl) throw new Error("Online checkout is not available for this order.");
       window.location.assign(result.checkoutUrl);
     } catch (error) {

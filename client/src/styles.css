@@ -1052,6 +1052,11 @@ button { font: inherit; }
 .support-conversations button time { color: var(--muted); font-size: 7px; }
 .support-thread { min-width: 0; display: flex; flex-direction: column; background: white; }
 .support-thread > header { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.support-thread-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.support-mode-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.support-mode-badge { display: inline-flex; min-height: 28px; align-items: center; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--green); background: var(--green-soft); font-size: 8px; font-weight: 900; }
+.support-mode-badge.staff { color: #8b2a20; border-color: #efb3aa; background: #fff1ee; }
+.support-assignment-note { margin: 0; padding: 9px 12px; color: #713027; background: #fff1ee; border-top: 1px solid #efb3aa; font-size: 9px; font-weight: 700; }
 .support-thread > header strong,.support-thread > header small { display: block; }
 .support-thread > header strong { font-size: 11px; }
 .support-thread > header small { margin-top: 3px; color: var(--muted); font-size: 8px; }
@@ -1272,6 +1277,9 @@ button { font: inherit; }
   .support-conversations > button { grid-template-columns: 32px minmax(0,1fr); }
   .support-conversations > button time { grid-column: 2; }
   .support-thread > header { padding: 12px 14px; }
+  .support-thread-header { align-items: flex-start; flex-direction: column; }
+  .support-mode-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .support-mode-badge { justify-content: center; text-align: center; }
   .support-message-list { min-height: 300px; max-height: 50vh; padding: 14px; }
   .support-message-list > div:not(.empty-chat) { width: 100%; max-width: none; border-radius: 10px; }
   .support-compose { flex-direction: column; }
@@ -1721,6 +1729,9 @@ button:not(:disabled),
 .checkout-address-stack {
   grid-template-columns: minmax(0,1.1fr) minmax(220px,.9fr);
   align-items: end;
+}
+.registration-turnstile-widget .btn {
+  min-height: 44px;
 }
 .checkout-address-fields {
   display: grid;
@@ -5007,7 +5018,7 @@ button:not(:disabled),
   width: min(380px,calc(100vw - 36px));
   max-height: min(620px,calc(100dvh - 112px));
   display: grid;
-  grid-template-rows: auto minmax(0,1fr) auto auto;
+  grid-template-rows: auto auto minmax(0,1fr) auto auto;
   border: 1px solid var(--ops-border);
   border-radius: var(--radius-panel);
 }
@@ -5022,6 +5033,12 @@ button:not(:disabled),
 }
 .assistant-messages {
   overflow-y: auto;
+}
+@media (min-width: 901px) {
+  .workspace-menu-drawer,
+  .workspace-menu-backdrop {
+    display: none !important;
+  }
 }
 @media (max-width: 1100px) {
   .role-nav-group-label {
@@ -5164,6 +5181,8 @@ button:not(:disabled),
     gap: 5px;
   }
 }
+.assistant-mode-status { padding: 8px 12px; color: #246546; background: #edf8f1; border-bottom: 1px solid var(--ops-border); font-size: 10px; font-weight: 800; }
+.assistant-mode-status.staff { color: #7d2c21; background: #fff1ee; }
 
 .lazy-load-failure {
   min-height: calc(100dvh - 76px);

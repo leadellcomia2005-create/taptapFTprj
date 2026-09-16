@@ -148,6 +148,7 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
   const [status, setStatus] = useState("loading");
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
     if (!siteKey || !containerRef.current) return undefined;
@@ -179,10 +180,13 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
             onToken("");
             onError("Security check expired. Please complete it again.");
           },
+          retry: "auto",
+          "retry-interval": 3000,
           "error-callback"() {
             setStatus("error");
             onToken("");
-            onError("Security check could not be completed. Refresh the page or check your connection.");
+            onError("Security check could not be completed. Retry or use a regular browser without blocking extensions.");
+            return true;
           }
         });
         setStatus("ready");
@@ -205,16 +209,53 @@ function TurnstileWidget({ siteKey, resetKey, onToken, onError }) {
       }
       widgetIdRef.current = null;
     };
-  }, [siteKey, resetKey, onToken, onError]);
+  }, [siteKey, resetKey, retryAttempt, onToken, onError]);
 
   return (
     <div className="registration-turnstile-widget">
       <div ref={containerRef} />
       {status === "loading" && <small>Loading security check...</small>}
       {status === "expired" && <small>Security check expired. Please complete it again.</small>}
-      {status === "error" && <small>Security check could not be completed. Refresh the page or check your connection.</small>}
+      {status === "error" && (
+        <button
+          type="button"
+          className="btn btn-outline-danger btn-sm"
+          onClick={() => {
+            onToken("");
+            onError("");
+            setRetryAttempt((current) => current + 1);
+          }}
+        >
+          Retry security check
+        </button>
+      )}
     </div>
   );
+}
+
+function remainingDeadlineSeconds(expiresAt) {
+  return expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) : null;
+}
+
+function useDeadlineSeconds(deadline) {
+  const expiresAt = Number(deadline || 0);
+  const [seconds, setSeconds] = useState(() => remainingDeadlineSeconds(expiresAt));
+
+  useEffect(() => {
+    const refresh = () => setSeconds(remainingDeadlineSeconds(expiresAt));
+    refresh();
+    if (!expiresAt) return undefined;
+    const timer = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(timer);
+  }, [expiresAt]);
+
+  return seconds;
+}
+
+function verificationCountdownLabel(seconds) {
+  if (seconds === null) return "";
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function LoginPanel({ onLoggedIn }) {
@@ -483,6 +524,23 @@ function LoginPanel({ onLoggedIn }) {
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
   const passwordItems = passwordChecklist(password);
+  const registrationDetailsReady = registering && validateCustomerRegistrationForm({
+    name,
+    email,
+    password,
+    confirmPassword,
+    termsAccepted,
+    privacyAccepted,
+    botField,
+    turnstileRequired: false
+  }).valid;
+  useEffect(() => {
+    if (registrationDetailsReady || !turnstileToken) return;
+    setTurnstileToken("");
+    setTurnstileMessage("");
+  }, [registrationDetailsReady, turnstileToken]);
+  const registrationVerificationSeconds = useDeadlineSeconds(registrationResult?.verificationExpiresAt);
+  const registrationVerificationExpired = registrationVerificationSeconds === 0;
   const orderingDetails = getOrderingDetails();
   const popularMeals = getPopularMeals(landingMenu);
   const menuCategories = getLandingMenuCategories(landingMenu);
@@ -626,14 +684,18 @@ function LoginPanel({ onLoggedIn }) {
                 <strong>Security check</strong>
                 <small>Confirms this signup is made by a real customer.</small>
               </div>
-              <TurnstileWidget
-                siteKey={turnstileSiteKey}
-                resetKey={turnstileResetKey}
-                onToken={setTurnstileToken}
-                onError={setTurnstileMessage}
-              />
+              {registrationDetailsReady ? (
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  resetKey={turnstileResetKey}
+                  onToken={setTurnstileToken}
+                  onError={setTurnstileMessage}
+                />
+              ) : (
+                <small>Complete the required account details and agreements to continue.</small>
+              )}
               {(fieldErrors.turnstileToken || turnstileMessage) && (
-                <small className="registration-field-error">{fieldErrors.turnstileToken || turnstileMessage}</small>
+                <small className="registration-field-error">{turnstileMessage || fieldErrors.turnstileToken}</small>
               )}
             </div>
           )}
@@ -654,17 +716,20 @@ function LoginPanel({ onLoggedIn }) {
           {registrationResult && (
             <div className="registration-result">
               <div>
-                <strong>Customer account created</strong>
-                <span>Your TapTap account is ready. Verify your email before ordering.</span>
+                <strong>{registrationVerificationExpired ? "Registration expired" : "Customer account created"}</strong>
+                <span>{registrationVerificationExpired
+                  ? "The unverified registration is being removed. Start again to create an account."
+                  : `Verify your email within ${verificationCountdownLabel(registrationVerificationSeconds)} to keep this account.`}</span>
               </div>
               <ul>
                 <li><b>Account created</b><span>Your customer profile was saved.</span></li>
                 <li><b>Email verification required</b><span>{registrationResult.verificationSent ? "A verification email was sent." : "Sign in later to resend the verification email."}</span></li>
+                <li><b>Time remaining</b><span>{registrationVerificationExpired ? "Expired" : verificationCountdownLabel(registrationVerificationSeconds)}</span></li>
                 <li><b>Security setup required</b><span>After sign in, choose passkey, email code, or security app.</span></li>
               </ul>
               <div className="registration-result-actions">
-                <a className="btn btn-outline-danger btn-sm" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
-                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>Back to sign in</button>
+                {!registrationVerificationExpired && <a className="btn btn-outline-danger btn-sm" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>}
+                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>{registrationVerificationExpired ? "Start again" : "Back to sign in"}</button>
               </div>
               {!registrationResult.verificationSent && <small>Use Resend verification after signing in if the email did not arrive.</small>}
             </div>
@@ -1069,6 +1134,8 @@ function EmailVerificationPanel({ user, onVerified }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const verificationSeconds = useDeadlineSeconds(user.twoFactor?.verificationExpiresAt);
+  const verificationExpired = verificationSeconds === 0;
 
   const resend = async () => {
     setBusy("resend");
@@ -1108,14 +1175,16 @@ function EmailVerificationPanel({ user, onVerified }) {
     <div className="security-screen">
       <div className="security-card">
         <p className="eyebrow text-danger">First login verification</p>
-        <h2>Verify your email</h2>
-        <p>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>.</p>
+        <h2>{verificationExpired ? "Registration expired" : "Verify your email"}</h2>
+        <p>{verificationExpired
+          ? "This unverified registration is being removed. Sign out, then register again."
+          : <>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>. You have <strong>{verificationCountdownLabel(verificationSeconds)}</strong> remaining.</>}</p>
         <div className="email-verification-actions">
-          <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>
-          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy)} onClick={resend}>
+          {!verificationExpired && <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>}
+          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy) || verificationExpired} onClick={resend}>
             {busy === "resend" ? "Sending..." : "Resend verification email"}
           </button>
-          <button className="btn btn-danger w-100" disabled={Boolean(busy)} onClick={check}>
+          <button className="btn btn-danger w-100" disabled={Boolean(busy) || verificationExpired} onClick={check}>
             {busy === "check" ? "Checking your email..." : "I verified my email, check again"}
           </button>
         </div>

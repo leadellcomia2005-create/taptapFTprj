@@ -84,6 +84,15 @@ const seed = {
     own: { targetUserId: "customer-1", title: "Own", message: "Own notification", createdAt: 1 },
     other: { targetUserId: "customer-2", title: "Other", message: "Other notification", createdAt: 1 }
   },
+  messages: {
+    support: {
+      customerMessage: { text: "Help", senderId: "customer-1", senderName: "Customer One", senderRole: "customer", customerId: "customer-1", conversationId: "customer-1", createdAt: 1 }
+    }
+  },
+  supportConversations: {
+    "customer-1": { customerId: "customer-1", mode: "staff", assignedStaffId: "staff-1", assignedStaffName: "Staff One", updatedAt: 1 },
+    "customer-2": { customerId: "customer-2", mode: "assistant", assignedStaffId: null, assignedStaffName: null, updatedAt: 1 }
+  },
   deliveryProofs: {
     "order-own": { riderId: "rider-1", createdAt: 1, expiresAt: 2 }
   }
@@ -207,4 +216,15 @@ test("sensitive records reject all direct browser writes", async () => {
   await assertFails(set(ref(owner, "idempotency/fake"), { orderId: "fake" }));
   await assertFails(set(ref(owner, "paymongoWebhookEvents/fake"), { status: "complete" }));
   await assertFails(set(ref(rider, "deliveryProofs/order-own"), { riderId: "rider-1" }));
+  await assertFails(update(ref(staff, "supportConversations/customer-1"), { mode: "assistant" }));
+  await assertFails(set(ref(staff, "messages/support/staff-direct"), { text: "Bypass", senderId: "staff-1", senderName: "Staff", senderRole: "staff", customerId: "customer-1", conversationId: "customer-1", createdAt: 2 }));
+});
+
+test("support conversation state is visible only to its customer and support roles", async () => {
+  const customer = databaseFor("customer-1", "customer");
+  await assertSucceeds(get(ref(customer, "supportConversations/customer-1")));
+  await assertFails(get(ref(customer, "supportConversations/customer-2")));
+  await assertSucceeds(get(ref(databaseFor("staff-1", "staff"), "supportConversations/customer-1")));
+  await assertSucceeds(get(ref(databaseFor("owner-1", "owner"), "supportConversations/customer-1")));
+  await assertFails(get(ref(databaseFor("rider-1", "rider"), "supportConversations/customer-1")));
 });

@@ -286,6 +286,11 @@ export const assistantRequestSchema = z.object({
   sessionId: optionalText(128)
 }).passthrough().refine((input) => Boolean(input.message || input.text), "Enter an assistant message.");
 
+export const supportReplySchema = z.object({
+  text: z.string().trim().min(1).max(500),
+  customerName: optionalText(80)
+}).strict();
+
 const insightRecordSchema = z.object({}).passthrough();
 export const insightRequestSchema = z.object({
   sales: z.array(insightRecordSchema).max(500),

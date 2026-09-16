@@ -12,6 +12,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { createIntegrationsRouter } from "./routes/integrations.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
 import { createOrdersRouter } from "./routes/orders.js";
+import { createSupportRouter } from "./routes/support.js";
 import { createWorkforceRouter } from "./routes/workforce.js";
 import { createErrorHandler, notFoundHandler } from "./middleware/errors.js";
 import { requestContext } from "./middleware/requestContext.js";
@@ -39,6 +40,7 @@ export function createApp({ config, firebase, authentication, realtime, logger, 
   app.use("/api", createAuthRouter(dependencies));
   app.use("/api", createIntegrationsRouter(dependencies));
   app.use("/api", createNotificationsRouter(dependencies));
+  app.use("/api", createSupportRouter(dependencies));
   app.use("/api", createOrdersRouter(dependencies));
   app.use("/api", createCatalogRouter(dependencies));
   app.use("/api", createFeedbackRouter(dependencies));

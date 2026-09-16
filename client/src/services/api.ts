@@ -14,6 +14,8 @@ import type {
   Review,
   ShiftLog,
   StaffRole,
+  SupportConversation,
+  SupportMessage,
   UserRole
 } from "../types/domain";
 import type { ApiErrorResponse } from "../types/records";
@@ -40,10 +42,19 @@ export interface RegisterCustomerRequest extends JsonObject {
   turnstileToken?: string;
 }
 
+export interface RegisterCustomerResponse extends ApiResult {
+  uid: EntityId;
+  email: string;
+  profilePath: string;
+  verificationSent: boolean;
+  verificationExpiresAt: number;
+}
+
 export interface TwoFactorStatusResponse extends ApiResult {
   role?: UserRole;
   name?: string;
   emailVerified?: boolean;
+  verificationExpiresAt?: number | null;
 }
 
 export type TwoFactorPurpose = "setup" | "challenge";
@@ -85,6 +96,13 @@ export interface AssistantResponse extends ApiResult {
   text: string;
   source?: string;
   intent?: string;
+  status?: "staff_handling";
+  assignedStaffName?: string | null;
+}
+
+export interface SupportReplyResponse extends ApiResult {
+  conversation: SupportConversation;
+  message: SupportMessage;
 }
 
 export interface InventoryInsightResponse extends ApiResult {
@@ -235,7 +253,7 @@ export const api = {
     return request<HistoryPage<T>>(`/history/${encodeURIComponent(collection)}${query}`);
   },
   registerCustomer: (values: RegisterCustomerRequest) =>
-    publicRequest("/auth/register", {
+    publicRequest<RegisterCustomerResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify(values),
     }),
@@ -281,15 +299,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message, sessionId, context }),
     }),
+  replyToSupportConversation: (customerId: EntityId, text: string, customerName: string) =>
+    request<SupportReplyResponse>(`/support/conversations/${encodeURIComponent(customerId)}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ text, customerName }),
+    }),
+  resumeSupportAssistant: (customerId: EntityId) =>
+    request<{ conversation: SupportConversation }>(`/support/conversations/${encodeURIComponent(customerId)}/resume-assistant`, {
+      method: "POST",
+      body: "{}",
+    }),
   insights: (sales: JsonValue, inventory: InventoryItem[]) =>
     request<InventoryInsightResponse>("/insights", {
       method: "POST",
       body: JSON.stringify({ sales, inventory }),
     }),
-  createPayment: (order: Partial<Order>) =>
-    request<PaymentCheckoutResponse>("/payments/checkout", {
+  createPayment: (orderId: EntityId) =>
+    request<PaymentCheckoutResponse>(`/payments/checkout/${encodeURIComponent(orderId)}`, {
       method: "POST",
-      body: JSON.stringify(order),
+      body: "{}",
     }),
   createOrder: (order: OrderCreateRequest) =>
     request("/orders", {

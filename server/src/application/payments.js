@@ -49,33 +49,33 @@ export async function recordPayMongoCheckoutSession(db, orderId, session, mode) 
   if (!validRecordId(orderId)) throw new HttpError(400, "Invalid order ID.");
   let updateError;
   const orderRef = db.ref(`orders/${orderId}`);
+  const existingOrder = (await orderRef.once("value")).val();
+  if (!existingOrder) throw new HttpError(404, "Order not found.");
   const transaction = await orderRef.transaction((order) => {
-    if (!order) {
-      updateError = new HttpError(404, "Order not found.");
-      return undefined;
-    }
-    if (order.paymentMethod !== "gcash") {
+    // Admin transactions may begin with an empty local cache before comparing with the server.
+    const currentOrder = order || existingOrder;
+    if (currentOrder.paymentMethod !== "gcash") {
       updateError = new HttpError(409, "Only GCash orders use PayMongo checkout.");
       return undefined;
     }
-    if (order.status === "cancelled") {
+    if (currentOrder.status === "cancelled") {
       updateError = new HttpError(409, "A cancelled order cannot start payment.");
       return undefined;
     }
-    if (order.paymentStatus === "paid") {
+    if (currentOrder.paymentStatus === "paid") {
       updateError = new HttpError(409, "This order is already paid.");
       return undefined;
     }
-    if (order.providerSessionId && order.providerSessionId !== session.id) {
+    if (currentOrder.providerSessionId && currentOrder.providerSessionId !== session.id) {
       updateError = new HttpError(409, "This order already has a different PayMongo checkout session.");
       return undefined;
     }
     return {
-      ...order,
+      ...currentOrder,
       paymentProvider: "paymongo",
       providerSessionId: session.id,
       providerLivemode: mode === "live",
-      checkoutCreatedAt: order.checkoutCreatedAt || Date.now(),
+      checkoutCreatedAt: currentOrder.checkoutCreatedAt || Date.now(),
       updatedAt: Date.now()
     };
   });

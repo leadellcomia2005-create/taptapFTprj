@@ -18,6 +18,7 @@
       }
     },
     "users": {
+      ".indexOn": ["registration/verificationExpiresAt"],
       "$uid": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')",
         ".write": "auth != null && ((!data.exists() && auth.uid == $uid && newData.child('role').val() == 'customer') || (auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')))",
@@ -82,9 +83,16 @@
         ".indexOn": ["customerId", "createdAt"],
         "$messageId": {
           ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || data.child('customerId').val() == auth.uid)",
-          ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && !data.exists() && newData.child('senderId').val() == auth.uid && ((newData.child('senderRole').val() == 'customer' && newData.child('customerId').val() == auth.uid && (auth.token.role == 'customer' || auth.token.role == null)) || (newData.child('senderRole').val() == 'staff' && auth.token.role == 'staff'))",
+          ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && !data.exists() && newData.child('senderId').val() == auth.uid && newData.child('senderRole').val() == 'customer' && newData.child('customerId').val() == auth.uid && (auth.token.role == 'customer' || auth.token.role == null)",
           ".validate": "newData.hasChildren(['text', 'senderId', 'senderName', 'senderRole', 'customerId', 'conversationId', 'createdAt']) && newData.child('text').isString() && newData.child('text').val().length <= 2000"
         }
+      }
+    },
+    "supportConversations": {
+      "$customerId": {
+        ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $customerId || auth.token.role == 'owner' || auth.token.role == 'staff')",
+        ".write": false,
+        ".validate": "newData.hasChildren(['customerId', 'mode', 'updatedAt']) && newData.child('customerId').val() == $customerId && (newData.child('mode').val() == 'assistant' || newData.child('mode').val() == 'staff')"
       }
     },
     "auditLogs": {

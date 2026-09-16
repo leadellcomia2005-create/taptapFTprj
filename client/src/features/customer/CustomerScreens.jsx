@@ -329,7 +329,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
       setDraftRestored(false);
       if (effectivePayment === "gcash") {
         try {
-          const result = await api.createPayment({ orderId });
+          const result = await api.createPayment(orderId);
           if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
           else notify(`Order ${orderId} created. Online payment setup is not ready yet.`);
         } catch (paymentError) {

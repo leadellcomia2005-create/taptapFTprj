@@ -463,6 +463,20 @@ export interface SupportMessage {
   createdAt: TimestampMs;
 }
 
+export type SupportConversationMode = "assistant" | "staff";
+
+export interface SupportConversation {
+  customerId: EntityId;
+  mode: SupportConversationMode;
+  assignedStaffId: EntityId | null;
+  assignedStaffName: string | null;
+  assignedStaffRole?: "owner" | "staff" | null;
+  takenOverAt?: TimestampMs;
+  lastStaffReplyAt?: TimestampMs;
+  resumedAt?: TimestampMs;
+  updatedAt: TimestampMs;
+}
+
 export interface AppUser {
   uid: EntityId;
   email: string | null;

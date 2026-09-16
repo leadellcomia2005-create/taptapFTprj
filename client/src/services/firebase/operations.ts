@@ -1,8 +1,11 @@
 import {
   sendSupportMessage as sendSupportMessageCompatibility,
+  replyToSupportConversation as replyToSupportConversationCompatibility,
+  resumeSupportAssistant as resumeSupportAssistantCompatibility,
+  subscribeSupportConversation as subscribeSupportConversationCompatibility,
   subscribeSupportMessages as subscribeSupportMessagesCompatibility
 } from "../firebase.js";
-import type { AppUser, EntityId, SupportMessage } from "../../types/domain";
+import type { AppUser, EntityId, SupportConversation, SupportMessage } from "../../types/domain";
 
 export {
   archiveCompletedOrders,
@@ -30,3 +33,19 @@ export const subscribeSupportMessages = (
   callback: (messages: SupportMessage[]) => void,
   customerId?: EntityId
 ) => () => void)(callback, customerId);
+
+export const subscribeSupportConversation = (
+  callback: (conversation: SupportConversation) => void,
+  customerId: EntityId
+): (() => void) => subscribeSupportConversationCompatibility(callback, customerId);
+
+export const replyToSupportConversation = (
+  text: string,
+  actor: Pick<AppUser, "uid" | "name" | "role">,
+  conversation: { customerId: EntityId; customerName: string }
+) => replyToSupportConversationCompatibility(text, actor, conversation);
+
+export const resumeSupportAssistant = (
+  customerId: EntityId,
+  actor: Pick<AppUser, "uid" | "name" | "role">
+) => resumeSupportAssistantCompatibility(customerId, actor);

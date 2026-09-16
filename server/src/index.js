@@ -8,6 +8,7 @@ import { createLogger } from "./observability/logger.js";
 import { createOperationalMetrics } from "./observability/metrics.js";
 import { createRealtimeHub } from "./realtime/hub.js";
 import { createSocketServer } from "./sockets/index.js";
+import { cleanupExpiredCustomerRegistrations } from "./application/registrationCleanup.js";
 
 dotenv.config({ override: false });
 
@@ -21,11 +22,30 @@ const realtime = createRealtimeHub();
 const app = createApp({ config, firebase, authentication, realtime, logger, metrics, serverStartedAt });
 const server = createServer(app);
 const io = createSocketServer(server, { config, firebase, authentication, realtime, logger, metrics });
+let registrationCleanupTimer;
+let registrationCleanupRunning = false;
+
+async function runRegistrationCleanup() {
+  if (!firebase.enabled || registrationCleanupRunning) return;
+  registrationCleanupRunning = true;
+  try {
+    await cleanupExpiredCustomerRegistrations({
+      db: firebase.db(),
+      auth: firebase.auth(),
+      logger
+    });
+  } catch (error) {
+    logger.warn("registration_cleanup_unavailable", { errorCode: error?.code || "CLEANUP_ERROR" });
+  } finally {
+    registrationCleanupRunning = false;
+  }
+}
 
 let shuttingDown = false;
 async function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (registrationCleanupTimer) clearInterval(registrationCleanupTimer);
   logger.info("server_shutdown_started", { signal });
   const forceExit = setTimeout(() => {
     logger.error("server_shutdown_timed_out", { signal, timeoutMs: config.shutdownTimeoutMs });
@@ -55,6 +75,9 @@ server.listen(config.port, () => {
     firebaseReady: firebase.enabled,
     allowedOrigins: config.allowedOrigins
   });
+  void runRegistrationCleanup();
+  registrationCleanupTimer = setInterval(runRegistrationCleanup, config.registration.cleanupIntervalMs);
+  registrationCleanupTimer.unref();
 });
 
 process.once("SIGTERM", () => void shutdown("SIGTERM"));

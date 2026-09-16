@@ -385,3 +385,40 @@ test("staff cannot access owner account administration", async () => {
     assert.equal(response.status, 403);
   });
 });
+
+test("staff takeover pauses customer assistant responses and rider access is denied", async () => {
+  const fixture = firebaseFixture({
+    messages: {
+      support: {
+        first: { customerId: "customer-1", customerName: "Juan", senderId: "customer-1", senderName: "Juan", senderRole: "customer", text: "Help", createdAt: 1 }
+      }
+    }
+  });
+
+  await withApp({ firebase: fixture.firebase, user: { uid: "staff-1", role: "staff", name: "Mika" } }, async (baseUrl) => {
+    const reply = await fetch(`${baseUrl}/api/support/conversations/customer-1/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "I am checking your order.", customerName: "Juan" })
+    });
+    assert.equal(reply.status, 201);
+    assert.equal((await reply.json()).conversation.mode, "staff");
+  });
+
+  await withApp({ firebase: fixture.firebase, user: { uid: "customer-1", role: "customer", name: "Juan" } }, async (baseUrl) => {
+    const assistant = await fetch(`${baseUrl}/api/assistant`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Where is my order?", sessionId: "customer-1" })
+    });
+    const body = await assistant.json();
+    assert.equal(assistant.status, 200);
+    assert.equal(body.status, "staff_handling");
+    assert.equal(body.source, "staff");
+  });
+
+  await withApp({ firebase: fixture.firebase, user: { uid: "rider-1", role: "rider", name: "Rider" } }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/support/conversations/customer-1`);
+    assert.equal(response.status, 403);
+  });
+});

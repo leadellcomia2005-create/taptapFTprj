@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
 import { createApp } from "../src/app.js";
-import { confirmPayMongoPayment } from "../src/application/payments.js";
+import { confirmPayMongoPayment, recordPayMongoCheckoutSession } from "../src/application/payments.js";
 import {
   checkoutPaymentFromEvent,
   createPayMongoCheckoutSession,
@@ -151,6 +151,35 @@ test("creates a test checkout on the server with a stable idempotency key", asyn
   assert.equal(first.checkoutUrl, "https://checkout.paymongo.com/cs_test123");
 });
 
+test("records checkout details when a Firebase transaction starts with an empty local cache", async () => {
+  const database = paymentDatabase();
+  const coldCacheDatabase = {
+    ref(path) {
+      const reference = database.ref(path);
+      return new Proxy(reference, {
+        get(target, property) {
+          if (property === "transaction") {
+            return async (updater) => {
+              updater(null);
+              return target.transaction(updater);
+            };
+          }
+          const value = target[property];
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+    }
+  };
+
+  await recordPayMongoCheckoutSession(coldCacheDatabase, "order-test123", {
+    id: "cs_test123",
+    livemode: false
+  }, "test");
+
+  assert.equal(database.read("orders/order-test123/providerSessionId"), "cs_test123");
+  assert.equal(database.read("orders/order-test123/paymentProvider"), "paymongo");
+});
+
 test("verifies the raw test webhook signature and extracts paid checkout data", () => {
   const event = checkoutPaidEvent();
   const body = JSON.stringify(event);
@@ -245,6 +274,14 @@ test("the public webhook route verifies the exact raw request body", async () =>
     });
     assert.equal(response.status, 200);
     assert.equal(database.read("orders/order-test123/paymentStatus"), "paid");
+
+    const checkout = await fetch(`http://127.0.0.1:${address.port}/api/payments/checkout/order-test123`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    assert.equal(checkout.status, 409);
+    assert.match((await checkout.json()).error, /already paid/i);
 
     const unsigned = await fetch(url, {
       method: "POST",

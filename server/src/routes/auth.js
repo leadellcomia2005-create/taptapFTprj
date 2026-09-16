@@ -39,6 +39,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
       req,
       sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
       appBaseUrl: config.appBaseUrl,
+      verificationTtlMs: config.registration?.verificationTtlMs,
       verifyHuman: config.turnstile?.bypass
         ? null
         : config.turnstile?.secret

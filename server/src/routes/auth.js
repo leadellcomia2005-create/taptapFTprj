@@ -6,7 +6,7 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "../passkeys.js";
-import { createCustomerRegistration, verifyTurnstileToken } from "../registration.js";
+import { checkRegistrationEmail, createCustomerRegistration, verifyTurnstileToken } from "../registration.js";
 import { requireVerifiedEmail } from "../security.js";
 import { sendCustomerVerificationEmail, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
 import {
@@ -19,6 +19,7 @@ import {
 } from "../twoFactor.js";
 import {
   registrationSchema,
+  registrationEmailPrecheckSchema,
   twoFactorChallengeSchema,
   twoFactorSendSchema,
   twoFactorVerifySchema
@@ -29,7 +30,12 @@ import { validateBody } from "../middleware/validation.js";
 export function createAuthRouter({ config, firebase, authentication }) {
   const router = Router();
   const registrationLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 12, standardHeaders: "draft-8" });
+  const emailPrecheckLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8" });
   const { authenticateBootstrap, requireFirebaseAdmin } = authentication;
+
+  router.post("/auth/registration-email", emailPrecheckLimiter, validateBody(registrationEmailPrecheckSchema), asyncRoute(async (req, res) => {
+    res.json(await checkRegistrationEmail(req.body.email));
+  }));
 
   router.post("/auth/register", registrationLimiter, requireFirebaseAdmin, validateBody(registrationSchema), asyncRoute(async (req, res) => {
     const result = await createCustomerRegistration({

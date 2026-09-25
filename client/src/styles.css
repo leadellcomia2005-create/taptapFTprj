@@ -1730,6 +1730,19 @@ button:not(:disabled),
   grid-template-columns: minmax(0,1.1fr) minmax(220px,.9fr);
   align-items: end;
 }
+.registration-email-status {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.registration-email-status.eligible { color: #14784a; }
+.registration-email-status.rejected,
+.registration-email-status.error { color: #b32a1c; }
 .registration-turnstile-widget .btn {
   min-height: 44px;
 }

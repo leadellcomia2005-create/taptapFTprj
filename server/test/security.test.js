@@ -10,7 +10,7 @@ import {
   validateLocation,
   validateOrderItems
 } from "../src/security.js";
-import { createCustomerRegistration, passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
+import { checkRegistrationEmail, createCustomerRegistration, passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
 
 const order = {
   customerId: "customer-1",
@@ -57,10 +57,58 @@ test("rejects unsafe customer registration inputs", () => {
 
   assert.throws(() => validateCustomerRegistration({ ...base, name: "Juan123" }), /full name/i);
   assert.throws(() => validateCustomerRegistration({ ...base, email: "not-an-email" }), /email/i);
+  assert.throws(() => validateCustomerRegistration({ ...base, email: "juan@@gmail.com" }), /email/i);
   assert.throws(() => validateCustomerRegistration({ ...base, password: "short", confirmPassword: "short" }), /stronger/i);
   assert.throws(() => validateCustomerRegistration({ ...base, confirmPassword: "Different2026!" }), /match/i);
   assert.throws(() => validateCustomerRegistration({ ...base, termsAccepted: false }), /Terms and Privacy/i);
   assert.throws(() => validateCustomerRegistration({ ...base, botField: "filled" }), /could not create/i);
+});
+
+test("checks registration email domains before CAPTCHA", async () => {
+  const accepted = await checkRegistrationEmail("juan@example.test", {
+    resolveMxImpl: async (domain) => {
+      assert.equal(domain, "example.test");
+      return [{ priority: 10, exchange: "mail.example.test" }];
+    },
+    now: 1
+  });
+  assert.equal(accepted.eligible, true);
+
+  const missing = await checkRegistrationEmail("juan@missing.test", {
+    resolveMxImpl: async () => {
+      const error = new Error("not found");
+      error.code = "ENOTFOUND";
+      throw error;
+    },
+    now: 1
+  });
+  assert.equal(missing.code, "no_mail_server");
+  assert.equal((await checkRegistrationEmail("juan@gmail.com.com")).code, "repeated_domain");
+  assert.equal((await checkRegistrationEmail("juan@gmial.com")).suggestion, "gmail.com");
+  assert.equal((await checkRegistrationEmail("juan@mailinator.com")).code, "disposable_domain");
+});
+
+test("falls back to domain-only HTTPS DNS when the local resolver is unavailable", async () => {
+  let requestedUrl = "";
+  const result = await checkRegistrationEmail("juan@fallback.test", {
+    resolveMxImpl: async () => {
+      const error = new Error("resolver unavailable");
+      error.code = "ECONNREFUSED";
+      throw error;
+    },
+    fetchImpl: async (url) => {
+      requestedUrl = String(url);
+      return new Response(JSON.stringify({
+        Status: 0,
+        Answer: [{ type: 15, data: "10 mail.fallback.test." }]
+      }), { status: 200, headers: { "Content-Type": "application/dns-json" } });
+    },
+    now: 1
+  });
+
+  assert.equal(result.eligible, true);
+  assert.match(requestedUrl, /name=fallback\.test/);
+  assert.doesNotMatch(requestedUrl, /juan/);
 });
 
 test("audits rate-limited customer registrations with safe identifiers", async () => {

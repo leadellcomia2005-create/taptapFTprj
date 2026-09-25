@@ -73,6 +73,21 @@ export function passwordChecklist(password = ""): PasswordChecklistItem[] {
   ];
 }
 
+export function isRegistrationEmailSyntaxValid(value = ""): boolean {
+  const email = String(value).trim().toLowerCase();
+  if (email.length < 6 || email.length > 254 || email.includes("..")) return false;
+  const at = email.indexOf("@");
+  if (at < 1 || at !== email.lastIndexOf("@")) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.startsWith(".") || local.endsWith(".") || local.length > 64 || domain.length > 253) return false;
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return false;
+  const labels = domain.split(".");
+  return labels.length >= 2
+    && labels.at(-1)!.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
+}
+
 export function validateCustomerRegistrationForm(values: CustomerRegistrationInput = {}): CustomerRegistrationValidationResult {
   const errors: Partial<Record<RegistrationField, string>> = {};
   const name = normalizeFullName(values.name);
@@ -84,7 +99,7 @@ export function validateCustomerRegistrationForm(values: CustomerRegistrationInp
   if (name.length < 2 || name.length > 80 || !/^[A-Za-z\u00d1\u00f1 .'-]+$/.test(name)) {
     errors.name = "Use a real full name. Letters, spaces, period, hyphen, apostrophe, and n with tilde are allowed.";
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!isRegistrationEmailSyntaxValid(email)) {
     errors.email = "Enter a valid email address.";
   }
   if (!passwordChecklist(password).every((item) => item.valid)) {

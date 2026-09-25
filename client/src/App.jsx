@@ -966,11 +966,20 @@ export default function App() {
     const url = new URL(window.location.href);
     const result = url.searchParams.get("payment");
     if (!["success", "cancelled"].includes(result)) return;
+    const orderId = url.searchParams.get("orderId");
     paymentReturnHandledRef.current = true;
     navigate("orders");
-    setNotice(result === "success"
-      ? "Payment submitted. PayMongo confirmation may take a moment; check your order status."
-      : "Online payment was cancelled. Your order is still pending and can be paid or cancelled from Orders.");
+    if (result === "success" && orderId) {
+      api.createPayment(orderId)
+        .then((payment) => setNotice(payment.paid
+          ? "GCash payment confirmed. Your order is now in the queue."
+          : "Payment submitted. PayMongo confirmation may take a moment; check your order status."))
+        .catch(() => setNotice("Payment submitted. PayMongo confirmation may take a moment; check your order status."));
+    } else {
+      setNotice(result === "success"
+        ? "Payment submitted. PayMongo confirmation may take a moment; check your order status."
+        : "Online payment was cancelled. Your order is still pending and can be paid or cancelled from Orders.");
+    }
     url.searchParams.delete("payment");
     url.searchParams.delete("orderId");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1024,6 +1033,11 @@ export default function App() {
     payingOrderRef.current = order.id;
     try {
       const result = await api.createPayment(order.id);
+      if (result.paid) {
+        setNotice("GCash payment confirmed. Your order is now in the queue.");
+        payingOrderRef.current = "";
+        return;
+      }
       if (!result.checkoutUrl) throw new Error("Online checkout is not available for this order.");
       window.location.assign(result.checkoutUrl);
     } catch (error) {

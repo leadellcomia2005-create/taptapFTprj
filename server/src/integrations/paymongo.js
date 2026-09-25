@@ -216,6 +216,36 @@ export async function retrievePayMongoCheckoutSession(sessionId, options = {}) {
   return checkoutResource(payload, configuration.mode);
 }
 
+export function checkoutPaymentFromSession(session) {
+  const payment = Array.isArray(session?.payments)
+    ? session.payments.find((entry) => entry?.attributes?.status === "paid")
+    : null;
+  const amount = Number(payment?.attributes?.amount);
+  if (
+    typeof session?.id !== "string" ||
+    typeof session?.referenceNumber !== "string" ||
+    typeof payment?.id !== "string" ||
+    !Number.isInteger(amount) || amount < 1
+  ) {
+    throw new PayMongoError("The paid checkout session is missing required payment details.", {
+      status: 409,
+      code: "PAYMONGO_SESSION_INVALID"
+    });
+  }
+  return {
+    eventId: `reconcile_${payment.id}`,
+    eventType: "checkout_session.payment.reconciled",
+    ignored: false,
+    livemode: Boolean(session.livemode),
+    orderId: session.referenceNumber,
+    sessionId: session.id,
+    paymentId: payment.id,
+    amount,
+    currency: payment.attributes.currency,
+    paidAt: Number(payment.attributes.paid_at || 0) * 1000
+  };
+}
+
 function signaturesFromHeader(header) {
   const parts = Object.fromEntries(String(header || "")
     .split(",")

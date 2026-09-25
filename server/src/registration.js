@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { resolveMx } from "node:dns/promises";
 import { HttpError } from "./security.js";
 
 const weakPasswords = new Set([
@@ -17,6 +18,29 @@ const weakPasswords = new Set([
 
 const rateWindowMs = 15 * 60 * 1000;
 const maxAttemptsPerWindow = 5;
+const emailDomainCache = new Map();
+const positiveEmailDomainCacheMs = 6 * 60 * 60 * 1000;
+const negativeEmailDomainCacheMs = 15 * 60 * 1000;
+const disposableEmailDomains = new Set([
+  "10minutemail.com",
+  "getnada.com",
+  "guerrillamail.com",
+  "mailinator.com",
+  "temp-mail.org",
+  "throwawaymail.com",
+  "yopmail.com"
+]);
+const commonEmailDomainTypos = new Map([
+  ["gamil.com", "gmail.com"],
+  ["gmail.co", "gmail.com"],
+  ["gmail.cm", "gmail.com"],
+  ["gmail.con", "gmail.com"],
+  ["gmial.com", "gmail.com"],
+  ["hotmial.com", "hotmail.com"],
+  ["outlok.com", "outlook.com"],
+  ["yaho.com", "yahoo.com"]
+]);
+const repeatedPublicSuffix = /\.(com|net|org|edu|gov)\.\1$/i;
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, maxLength) : "";
@@ -24,6 +48,112 @@ function cleanText(value, maxLength) {
 
 function hashValue(value = "") {
   return createHash("sha256").update(String(value)).digest("hex");
+}
+
+function registrationEmailParts(value = "") {
+  const email = cleanText(value, 254).toLowerCase();
+  if (email.length < 6 || email.includes("..")) return null;
+  const at = email.indexOf("@");
+  if (at < 1 || at !== email.lastIndexOf("@")) return null;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.startsWith(".") || local.endsWith(".") || local.length > 64 || domain.length > 253) return null;
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return null;
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) return null;
+  if (labels.at(-1).length < 2) return null;
+  return { email, domain };
+}
+
+function cachedEmailDomainResult(domain, now) {
+  const cached = emailDomainCache.get(domain);
+  if (!cached || cached.expiresAt <= now) {
+    emailDomainCache.delete(domain);
+    return null;
+  }
+  return cached.result;
+}
+
+function cacheEmailDomainResult(domain, result, now) {
+  const ttl = result.eligible ? positiveEmailDomainCacheMs : negativeEmailDomainCacheMs;
+  emailDomainCache.set(domain, { result, expiresAt: now + ttl });
+  return result;
+}
+
+async function resolveMxOverHttps(domain, fetchImpl) {
+  const url = new URL("https://cloudflare-dns.com/dns-query");
+  url.searchParams.set("name", domain);
+  url.searchParams.set("type", "MX");
+  const response = await fetchImpl(url, { headers: { Accept: "application/dns-json" } });
+  if (!response.ok) throw Object.assign(new Error("Email domain lookup failed."), { code: "EDOH" });
+  const payload = await response.json();
+  if (payload?.Status === 3) return [];
+  if (payload?.Status !== 0) throw Object.assign(new Error("Email domain lookup failed."), { code: "EDOH" });
+  return (Array.isArray(payload.Answer) ? payload.Answer : [])
+    .filter((answer) => answer?.type === 15 && typeof answer?.data === "string")
+    .map((answer) => {
+      const match = answer.data.trim().match(/^\d+\s+(.+?)\.?$/);
+      return match ? { exchange: match[1] } : null;
+    })
+    .filter(Boolean);
+}
+
+async function resolveRegistrationMx(domain, { resolveMxImpl, fetchImpl }) {
+  try {
+    return await resolveMxImpl(domain);
+  } catch (error) {
+    if (["ENODATA", "ENOTFOUND"].includes(error?.code)) return [];
+    return resolveMxOverHttps(domain, fetchImpl);
+  }
+}
+
+export async function checkRegistrationEmail(email, {
+  resolveMxImpl = resolveMx,
+  fetchImpl = fetch,
+  timeoutMs = 3500,
+  now = Date.now()
+} = {}) {
+  const parsed = registrationEmailParts(email);
+  if (!parsed) {
+    return { eligible: false, code: "invalid_format", message: "Enter a valid email address." };
+  }
+  const suggestion = commonEmailDomainTypos.get(parsed.domain);
+  if (suggestion) {
+    return {
+      eligible: false,
+      code: "domain_typo",
+      message: `Check the email domain. Did you mean ${suggestion}?`,
+      suggestion
+    };
+  }
+  if (repeatedPublicSuffix.test(parsed.domain)) {
+    return { eligible: false, code: "repeated_domain", message: "Check the email domain and remove the repeated ending." };
+  }
+  if (disposableEmailDomains.has(parsed.domain)) {
+    return { eligible: false, code: "disposable_domain", message: "Temporary email addresses are not allowed." };
+  }
+  const cached = cachedEmailDomainResult(parsed.domain, now);
+  if (cached) return cached;
+
+  try {
+    const records = await Promise.race([
+      resolveRegistrationMx(parsed.domain, { resolveMxImpl, fetchImpl }),
+      new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Email domain check timed out."), { code: "ETIMEOUT" })), timeoutMs))
+    ]);
+    const eligible = Array.isArray(records) && records.some((record) => typeof record?.exchange === "string" && record.exchange.trim());
+    return cacheEmailDomainResult(parsed.domain, eligible
+      ? { eligible: true, code: "deliverable_domain", message: "Email domain accepted." }
+      : { eligible: false, code: "no_mail_server", message: "This email domain cannot receive verification mail." }, now);
+  } catch (error) {
+    if (["ENODATA", "ENOTFOUND"].includes(error?.code)) {
+      return cacheEmailDomainResult(parsed.domain, {
+        eligible: false,
+        code: "no_mail_server",
+        message: "This email domain cannot receive verification mail."
+      }, now);
+    }
+    throw new HttpError(503, "The email domain could not be checked. Please try again.");
+  }
 }
 
 function clientIp(req = {}) {
@@ -79,7 +209,7 @@ export function validateCustomerRegistration(input = {}) {
   if (name.length < 2 || name.length > 80 || !/^[A-Za-z\u00d1\u00f1 .'-]+$/.test(name)) {
     throw new HttpError(400, "Enter a valid full name.");
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!registrationEmailParts(email)) {
     throw new HttpError(400, "Enter a valid email address.");
   }
   if (password !== confirmPassword) {
@@ -199,11 +329,22 @@ export async function createCustomerRegistration({
   sendVerificationEmail,
   appBaseUrl,
   verifyHuman,
+  verifyEmail = checkRegistrationEmail,
   verificationTtlMs = 3 * 60 * 1000
 }) {
   const values = validateCustomerRegistration(input);
   const source = registrationSource(req, values.email);
   await enforceRegistrationRateLimit(db, source);
+
+  const emailCheck = await verifyEmail(values.email);
+  if (!emailCheck?.eligible) {
+    await writeRegistrationAudit(db, "registration_email_rejected", {
+      emailHash: source.emailHash,
+      ipHash: source.ipHash,
+      reason: emailCheck?.code || "email_domain_rejected"
+    });
+    throw new HttpError(400, emailCheck?.message || "Enter an email address that can receive verification mail.");
+  }
 
   const humanCheck = verifyHuman ? await verifyHuman(values.turnstileToken, req) : { configured: false };
   if (humanCheck.configured) {

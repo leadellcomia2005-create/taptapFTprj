@@ -6,6 +6,7 @@ import { createApp } from "../src/app.js";
 import { confirmPayMongoPayment, recordPayMongoCheckoutSession } from "../src/application/payments.js";
 import {
   checkoutPaymentFromEvent,
+  checkoutPaymentFromSession,
   createPayMongoCheckoutSession,
   payMongoConfiguration,
   verifyPayMongoWebhook
@@ -206,6 +207,28 @@ test("verifies the raw test webhook signature and extracts paid checkout data", 
   }), /signature is invalid/i);
 });
 
+test("extracts trusted paid checkout data for reconciliation", () => {
+  const payment = checkoutPaymentFromSession({
+    id: "cs_test123",
+    referenceNumber: "order-test123",
+    livemode: false,
+    payments: [{
+      id: "pay_test123",
+      attributes: {
+        amount: 14_800,
+        currency: "PHP",
+        status: "paid",
+        paid_at: 1_750_000_000
+      }
+    }]
+  });
+
+  assert.equal(payment.eventId, "reconcile_pay_test123");
+  assert.equal(payment.orderId, "order-test123");
+  assert.equal(payment.sessionId, "cs_test123");
+  assert.equal(payment.amount, 14_800);
+});
+
 test("confirms a paid checkout once and updates the order ledger", async () => {
   const database = paymentDatabase();
   const payment = checkoutPaymentFromEvent(checkoutPaidEvent());
@@ -280,8 +303,8 @@ test("the public webhook route verifies the exact raw request body", async () =>
       headers: { "Content-Type": "application/json" },
       body: "{}"
     });
-    assert.equal(checkout.status, 409);
-    assert.match((await checkout.json()).error, /already paid/i);
+    assert.equal(checkout.status, 200);
+    assert.equal((await checkout.json()).paid, true);
 
     const unsigned = await fetch(url, {
       method: "POST",

@@ -24,6 +24,7 @@ test("new customer registrations receive the configured verification deadline", 
     },
     input: registrationInput,
     req: { headers: { "user-agent": "node-test" }, ip: "127.0.0.1" },
+    verifyEmail: async () => ({ eligible: true, code: "deliverable_domain" }),
     verificationTtlMs: 180_000
   });
 

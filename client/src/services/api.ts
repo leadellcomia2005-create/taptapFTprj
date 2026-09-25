@@ -50,6 +50,13 @@ export interface RegisterCustomerResponse extends ApiResult {
   verificationExpiresAt: number;
 }
 
+export interface RegistrationEmailPrecheckResponse extends ApiResult {
+  eligible: boolean;
+  code: string;
+  message: string;
+  suggestion?: string;
+}
+
 export interface TwoFactorStatusResponse extends ApiResult {
   role?: UserRole;
   name?: string;
@@ -82,8 +89,10 @@ export type HistoryCollection = "audit-logs" | "reports" | "complaints" | "revie
 
 export interface PaymentCheckoutResponse extends ApiResult {
   id: string;
-  checkoutUrl: string;
+  checkoutUrl: string | null;
   reused: boolean;
+  paid?: boolean;
+  reconciled?: boolean;
 }
 
 export interface PushNotificationStatusResponse extends ApiResult {
@@ -256,6 +265,11 @@ export const api = {
     publicRequest<RegisterCustomerResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify(values),
+    }),
+  precheckRegistrationEmail: (email: string) =>
+    publicRequest<RegistrationEmailPrecheckResponse>("/auth/registration-email", {
+      method: "POST",
+      body: JSON.stringify({ email }),
     }),
   twoFactorStatus: () => request<TwoFactorStatusResponse>("/2fa/status"),
   beginTotpSetup: () =>

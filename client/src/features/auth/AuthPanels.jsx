@@ -27,7 +27,7 @@ import { subscribeMenu } from "../../services/firebase/menu";
 import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey } from "../../services/passkeys";
 import { currency } from "../../utils/display";
 import { menuAvailability } from "../../utils/operations";
-import { normalizeFullName, passwordChecklist, validateCustomerRegistrationForm } from "../../utils/registrationValidation";
+import { isRegistrationEmailSyntaxValid, normalizeFullName, passwordChecklist, validateCustomerRegistrationForm } from "../../utils/registrationValidation";
 
 const loginRoleOptions = [
   { id: "customer", label: "Customer", detail: "Order meals" },
@@ -278,6 +278,7 @@ function LoginPanel({ onLoggedIn }) {
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileMessage, setTurnstileMessage] = useState("");
   const [turnstileResetKey, setTurnstileResetKey] = useState(0);
+  const [emailPrecheck, setEmailPrecheck] = useState({ status: "idle", message: "" });
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -427,6 +428,7 @@ function LoginPanel({ onLoggedIn }) {
     setTurnstileToken("");
     setTurnstileMessage("");
     setTurnstileResetKey((current) => current + 1);
+    setEmailPrecheck({ status: "idle", message: "" });
     setFieldErrors({});
     setError("");
     setRegistrationResult(null);
@@ -447,6 +449,7 @@ function LoginPanel({ onLoggedIn }) {
     setTurnstileToken("");
     setTurnstileMessage("");
     setTurnstileResetKey((current) => current + 1);
+    setEmailPrecheck({ status: "idle", message: "" });
     setFieldErrors({});
     setRegistering(false);
     setTeamAccessOpen(nextRole !== "customer");
@@ -497,6 +500,11 @@ function LoginPanel({ onLoggedIn }) {
           setFieldErrors(validation.errors);
           throw new Error(validation.errors.form || "Check the highlighted registration details.");
         }
+        if (emailPrecheck.status !== "eligible") {
+          const message = emailPrecheck.message || "Check the email address before completing the security check.";
+          setFieldErrors((current) => ({ ...current, email: message }));
+          throw new Error(message);
+        }
         const result = await registerCustomer(validation.values, updateRegistrationStep);
         setRegistrationResult(result);
         trackRegistrationComplete(demoModeEnabled ? "demo" : "firebase");
@@ -524,7 +532,7 @@ function LoginPanel({ onLoggedIn }) {
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
   const passwordItems = passwordChecklist(password);
-  const registrationDetailsReady = registering && validateCustomerRegistrationForm({
+  const registrationFormReady = registering && validateCustomerRegistrationForm({
     name,
     email,
     password,
@@ -534,6 +542,35 @@ function LoginPanel({ onLoggedIn }) {
     botField,
     turnstileRequired: false
   }).valid;
+  const registrationDetailsReady = registrationFormReady && emailPrecheck.status === "eligible";
+  useEffect(() => {
+    if (!registering) return undefined;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!isRegistrationEmailSyntaxValid(normalizedEmail)) {
+      setEmailPrecheck({ status: "idle", message: "" });
+      return undefined;
+    }
+    let active = true;
+    setEmailPrecheck({ status: "checking", message: "Checking whether this email domain can receive mail..." });
+    const timer = window.setTimeout(() => {
+      api.precheckRegistrationEmail(normalizedEmail)
+        .then((result) => {
+          if (!active) return;
+          setEmailPrecheck({
+            status: result.eligible ? "eligible" : "rejected",
+            message: result.message
+          });
+        })
+        .catch((precheckError) => {
+          if (!active) return;
+          setEmailPrecheck({ status: "error", message: precheckError.message || "The email domain could not be checked. Try again." });
+        });
+    }, 600);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [email, registering]);
   useEffect(() => {
     if (registrationDetailsReady || !turnstileToken) return;
     setTurnstileToken("");
@@ -617,9 +654,15 @@ function LoginPanel({ onLoggedIn }) {
           type="email"
           required
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (registering) setFieldErrors((current) => ({ ...current, email: undefined }));
+          }}
         />
         {fieldErrors.email && <small className="registration-field-error" id="registration-email-error">{fieldErrors.email}</small>}
+        {registering && !fieldErrors.email && emailPrecheck.message && (
+          <small className={`registration-email-status ${emailPrecheck.status}`} aria-live="polite">{emailPrecheck.message}</small>
+        )}
       </label>
       <label className="form-label">Password
         <span className="login-password-field">
@@ -692,7 +735,11 @@ function LoginPanel({ onLoggedIn }) {
                   onError={setTurnstileMessage}
                 />
               ) : (
-                <small>Complete the required account details and agreements to continue.</small>
+                <small>{registrationFormReady && emailPrecheck.status === "checking"
+                  ? "Checking the email domain before loading the security check."
+                  : emailPrecheck.status === "rejected" || emailPrecheck.status === "error"
+                    ? emailPrecheck.message
+                    : "Complete the required account details and agreements to continue."}</small>
               )}
               {(fieldErrors.turnstileToken || turnstileMessage) && (
                 <small className="registration-field-error">{turnstileMessage || fieldErrors.turnstileToken}</small>

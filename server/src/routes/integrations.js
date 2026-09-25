@@ -5,6 +5,7 @@ import { confirmPayMongoPayment, recordPayMongoCheckoutSession } from "../applic
 import { assistantRequestSchema, insightRequestSchema, orderIdBodySchema, recordIdParams } from "../contracts/schemas.js";
 import {
   assertPayMongoConfiguration,
+  checkoutPaymentFromSession,
   checkoutPaymentFromEvent,
   verifyPayMongoWebhook
 } from "../integrations/paymongo.js";
@@ -40,7 +41,14 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
     if (!order) throw new HttpError(404, "Order not found.");
     if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot create a payment for this order.");
     if (order.paymentMethod !== "gcash") throw new HttpError(409, "Only GCash orders use online checkout.");
-    if (order.paymentStatus === "paid") throw new HttpError(409, "This order is already paid.");
+    if (order.paymentStatus === "paid") {
+      return res.json({
+        id: order.providerSessionId || "",
+        checkoutUrl: null,
+        reused: true,
+        paid: true
+      });
+    }
     if (order.status === "cancelled") throw new HttpError(409, "A cancelled order cannot start payment.");
     if (order.providerSessionId) {
       const existing = await retrievePayMongoCheckout(order.providerSessionId);
@@ -48,7 +56,33 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
         throw new HttpError(409, "The stored PayMongo checkout does not match this order.");
       }
       if (existing.payments.some((payment) => payment?.attributes?.status === "paid")) {
-        throw new HttpError(409, "Payment was received and is waiting for webhook confirmation.");
+        const payment = checkoutPaymentFromSession(existing);
+        const result = await confirmPayMongoPayment(firebase.db(), payment);
+        if (!result.duplicate && !result.cancelled) {
+          const updatedOrder = (await firebase.db().ref(`orders/${orderId}`).once("value")).val();
+          await dispatchOrderPush({
+            firebase,
+            db: firebase.db(),
+            orderId,
+            order: updatedOrder,
+            changes: { status: "received" },
+            appBaseUrl: config.appBaseUrl,
+            logger
+          });
+        }
+        logger?.info("paymongo_payment_reconciled", {
+          orderId,
+          paymentId: payment.paymentId,
+          duplicate: result.duplicate,
+          livemode: payment.livemode
+        });
+        return res.json({
+          id: existing.id,
+          checkoutUrl: null,
+          reused: true,
+          paid: true,
+          reconciled: !result.duplicate
+        });
       }
       if (existing.status === "active" && existing.checkoutUrl) {
         return res.json({ id: existing.id, checkoutUrl: existing.checkoutUrl, reused: true });

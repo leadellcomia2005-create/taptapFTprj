@@ -153,6 +153,10 @@ export const registrationSchema = z.object({
   turnstileToken: optionalText(4096)
 }).passthrough();
 
+export const registrationEmailPrecheckSchema = z.object({
+  email: z.string().trim().min(3).max(254)
+}).passthrough();
+
 export const twoFactorSendSchema = z.object({
   purpose: z.enum(["setup", "challenge"]).optional()
 }).passthrough();

@@ -1,4 +1,5 @@
 import test from "node:test";
+import { FakeRealtimeDatabase } from "./helpers/fakeRealtimeDb.js";
 import assert from "node:assert/strict";
 import {
   authorizeOrderUpdate,
@@ -10,7 +11,14 @@ import {
   validateLocation,
   validateOrderItems
 } from "../src/security.js";
-import { checkRegistrationEmail, createCustomerRegistration, passwordChecklist, validateCustomerRegistration, verifyTurnstileToken } from "../src/registration.js";
+import {
+  checkRegistrationEmail,
+  createCustomerRegistration,
+  passwordChecklist,
+  resendCustomerRegistrationVerification,
+  validateCustomerRegistration,
+  verifyTurnstileToken
+} from "../src/registration.js";
 
 const order = {
   customerId: "customer-1",
@@ -86,6 +94,157 @@ test("checks registration email domains before CAPTCHA", async () => {
   assert.equal((await checkRegistrationEmail("juan@gmail.com.com")).code, "repeated_domain");
   assert.equal((await checkRegistrationEmail("juan@gmial.com")).suggestion, "gmail.com");
   assert.equal((await checkRegistrationEmail("juan@mailinator.com")).code, "disposable_domain");
+});
+
+test("prevents duplicate Firebase accounts without creating another profile", async () => {
+  const database = new FakeRealtimeDatabase();
+  let createCalls = 0;
+  await assert.rejects(
+    () => createCustomerRegistration({
+      db: database,
+      auth: {
+        getUserByEmail: async () => ({ uid: "existing-customer", emailVerified: true }),
+        createUser: async () => {
+          createCalls += 1;
+          return { uid: "must-not-exist" };
+        }
+      },
+      input: {
+        name: "Juan Dela Cruz",
+        email: " CUSTOMER@Example.COM ",
+        password: "TapTapFood2026!",
+        confirmPassword: "TapTapFood2026!",
+        termsAccepted: true,
+        privacyAccepted: true
+      },
+      req: { headers: { "user-agent": "node-test" }, ip: "127.0.0.1" },
+      verifyEmail: async () => ({ eligible: true, code: "deliverable_domain" })
+    }),
+    (error) => error instanceof HttpError
+      && error.status === 409
+      && error.code === "ACCOUNT_RECOVERY_REQUIRED"
+      && /may already use/i.test(error.message)
+  );
+  assert.equal(createCalls, 0);
+  assert.equal(database.read("users/must-not-exist"), undefined);
+});
+
+test("uses Firebase createUser as the final duplicate-email guard", async () => {
+  const database = new FakeRealtimeDatabase();
+  await assert.rejects(
+    () => createCustomerRegistration({
+      db: database,
+      auth: {
+        getUserByEmail: async () => {
+          const error = new Error("not found");
+          error.code = "auth/user-not-found";
+          throw error;
+        },
+        createUser: async () => {
+          const error = new Error("duplicate");
+          error.code = "auth/email-already-exists";
+          throw error;
+        }
+      },
+      input: {
+        name: "Juan Dela Cruz",
+        email: "customer@example.com",
+        password: "TapTapFood2026!",
+        confirmPassword: "TapTapFood2026!",
+        termsAccepted: true,
+        privacyAccepted: true
+      },
+      req: { headers: { "user-agent": "node-test" }, ip: "127.0.0.1" },
+      verifyEmail: async () => ({ eligible: true, code: "deliverable_domain" })
+    }),
+    (error) => error.code === "ACCOUNT_RECOVERY_REQUIRED"
+  );
+  assert.equal(database.read("users"), undefined);
+});
+
+test("resends verification only after cooldown and starts a new three-minute session", async () => {
+  const now = Date.parse("2026-09-26T01:00:00.000Z");
+  const database = new FakeRealtimeDatabase({
+    users: {
+      "customer-1": {
+        name: "Juan Dela Cruz",
+        role: "customer",
+        registration: {
+          cleanupEligibleAt: now + 60_000,
+          lastVerificationSentAt: now - 61_000,
+          verificationSendCount: 1,
+          verificationSendWindowStartedAt: now - 120_000
+        }
+      }
+    }
+  });
+  const sent = [];
+  const auth = {
+    getUser: async () => ({ uid: "customer-1", email: "juan@example.com", emailVerified: false }),
+    generateEmailVerificationLink: async () => "https://example.test/verify"
+  };
+
+  const result = await resendCustomerRegistrationVerification({
+    db: database,
+    auth,
+    user: { uid: "customer-1" },
+    sendVerificationEmail: async (...args) => sent.push(args),
+    appBaseUrl: "https://orders.example.test",
+    now
+  });
+
+  assert.equal(result.verificationExpiresAt, now + 180_000);
+  assert.equal(result.cooldownSeconds, 60);
+  assert.equal(sent.length, 1);
+  assert.equal(database.read("users/customer-1/registration/verificationSendCount"), 2);
+  assert.ok(database.read("users/customer-1/registration/cleanupEligibleAt") >= now + 24 * 60 * 60 * 1000);
+
+  await assert.rejects(
+    () => resendCustomerRegistrationVerification({
+      db: database,
+      auth,
+      user: { uid: "customer-1" },
+      sendVerificationEmail: async () => {},
+      now: now + 1_000
+    }),
+    (error) => error.code === "VERIFICATION_RESEND_COOLDOWN"
+  );
+});
+
+test("allows only one simultaneous verification resend claim", async () => {
+  const now = Date.parse("2026-09-26T02:00:00.000Z");
+  const database = new FakeRealtimeDatabase({
+    users: {
+      "customer-1": {
+        name: "Juan Dela Cruz",
+        role: "customer",
+        registration: {
+          cleanupEligibleAt: now + 60_000,
+          lastVerificationSentAt: now - 61_000,
+          verificationSendCount: 1,
+          verificationSendWindowStartedAt: now - 120_000
+        }
+      }
+    }
+  });
+  const auth = {
+    getUser: async () => ({ uid: "customer-1", email: "juan@example.com", emailVerified: false }),
+    generateEmailVerificationLink: async () => "https://example.test/verify"
+  };
+  let sent = 0;
+  const request = () => resendCustomerRegistrationVerification({
+    db: database,
+    auth,
+    user: { uid: "customer-1" },
+    sendVerificationEmail: async () => { sent += 1; },
+    now
+  });
+
+  const results = await Promise.allSettled([request(), request()]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(sent, 1);
+  assert.equal(database.read("users/customer-1/registration/verificationSendCount"), 2);
 });
 
 test("falls back to domain-only HTTPS DNS when the local resolver is unavailable", async () => {

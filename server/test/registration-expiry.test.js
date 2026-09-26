@@ -32,16 +32,24 @@ test("new customer registrations receive the configured verification deadline", 
   assert.equal(result.verificationExpiresAt, storedDeadline);
   assert.ok(storedDeadline >= before + 180_000);
   assert.ok(storedDeadline <= Date.now() + 180_000);
+  const cleanupEligibleAt = database.read("users/customer-new/registration/cleanupEligibleAt");
+  assert.ok(cleanupEligibleAt >= before + 24 * 60 * 60 * 1000);
+  assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
 });
 
-test("cleanup removes only expired unverified customer registrations", async () => {
+test("cleanup waits for the abandonment deadline and preserves protected registrations", async () => {
   const now = Date.now();
   const database = new FakeRealtimeDatabase({
     users: {
-      expired: { role: "customer", registration: { verificationExpiresAt: now - 1 } },
-      verified: { role: "customer", registration: { verificationExpiresAt: now - 1 } },
-      pending: { role: "customer", registration: { verificationExpiresAt: now + 60_000 } },
-      owner: { role: "owner", registration: { verificationExpiresAt: now - 1 } }
+      expired: { role: "customer", securitySetupRequired: true, registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now - 1 } },
+      sessionOnlyExpired: { role: "customer", securitySetupRequired: true, registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now + 60_000 } },
+      verified: { role: "customer", securitySetupRequired: true, registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now - 1 } },
+      withOrder: { role: "customer", securitySetupRequired: true, registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now - 1 } },
+      demo: { role: "customer", demoAccount: true, securitySetupRequired: true, registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now - 1 } },
+      owner: { role: "owner", registration: { verificationExpiresAt: now - 1, cleanupEligibleAt: now - 1 } }
+    },
+    orders: {
+      "order-1": { customerId: "withOrder", status: "delivered" }
     }
   });
   const deleted = [];
@@ -55,8 +63,11 @@ test("cleanup removes only expired unverified customer registrations", async () 
   assert.deepEqual(deleted, ["expired"]);
   assert.equal(database.read("users/expired"), undefined);
   assert.equal(database.read("users/verified/registration/verificationExpiresAt"), undefined);
+  assert.equal(database.read("users/verified/registration/cleanupEligibleAt"), undefined);
   assert.equal(database.read("users/verified/registration/emailVerifiedAt"), now);
-  assert.ok(database.read("users/pending"));
+  assert.ok(database.read("users/sessionOnlyExpired"));
+  assert.ok(database.read("users/withOrder"));
+  assert.ok(database.read("users/demo"));
   assert.ok(database.read("users/owner"));
-  assert.deepEqual(result, { checked: 2, deleted: 1, verified: 1, failed: 0 });
+  assert.deepEqual(result, { checked: 4, deleted: 1, verified: 1, preserved: 2, failed: 0 });
 });

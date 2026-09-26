@@ -41,6 +41,8 @@ const commonEmailDomainTypos = new Map([
   ["yaho.com", "yahoo.com"]
 ]);
 const repeatedPublicSuffix = /\.(com|net|org|edu|gov)\.\1$/i;
+const accountRecoveryMessage = "An account may already use this email. Try signing in, resetting your password, or continuing email verification.";
+const resendWindowMs = 24 * 60 * 60 * 1000;
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, maxLength) : "";
@@ -179,10 +181,20 @@ function auditPayload(action, details = {}) {
   };
 }
 
-async function writeRegistrationAudit(db, action, details = {}) {
+export async function writeRegistrationAudit(db, action, details = {}) {
   const now = Date.now();
   const key = `REG-${now}-${randomUUID().slice(0, 8)}`;
   await db.ref(`auditLogs/${key}`).set(auditPayload(action, { ...details, createdAt: now })).catch(() => {});
+}
+
+async function existingUserForEmail(auth, email) {
+  if (typeof auth?.getUserByEmail !== "function") return null;
+  try {
+    return await auth.getUserByEmail(email);
+  } catch (error) {
+    if (error?.code === "auth/user-not-found") return null;
+    throw error;
+  }
 }
 
 export function passwordChecklist(password = "") {
@@ -330,7 +342,8 @@ export async function createCustomerRegistration({
   appBaseUrl,
   verifyHuman,
   verifyEmail = checkRegistrationEmail,
-  verificationTtlMs = 3 * 60 * 1000
+  verificationTtlMs = 3 * 60 * 1000,
+  abandonedTtlMs = 24 * 60 * 60 * 1000
 }) {
   const values = validateCustomerRegistration(input);
   const source = registrationSource(req, values.email);
@@ -345,6 +358,11 @@ export async function createCustomerRegistration({
     });
     throw new HttpError(400, emailCheck?.message || "Enter an email address that can receive verification mail.");
   }
+  await writeRegistrationAudit(db, "registration_email_accepted", {
+    emailHash: source.emailHash,
+    ipHash: source.ipHash,
+    reason: emailCheck.code || "deliverable_domain"
+  });
 
   const humanCheck = verifyHuman ? await verifyHuman(values.turnstileToken, req) : { configured: false };
   if (humanCheck.configured) {
@@ -361,9 +379,20 @@ export async function createCustomerRegistration({
     ipHash: source.ipHash
   });
 
+  const existingUser = await existingUserForEmail(auth, values.email);
+  if (existingUser) {
+    await writeRegistrationAudit(db, "registration_duplicate_prevented", {
+      emailHash: source.emailHash,
+      ipHash: source.ipHash,
+      reason: existingUser.emailVerified ? "existing_verified_account" : "existing_unverified_account"
+    });
+    throw new HttpError(409, accountRecoveryMessage, { code: "ACCOUNT_RECOVERY_REQUIRED" });
+  }
+
   let userRecord;
   const now = Date.now();
   const verificationExpiresAt = now + verificationTtlMs;
+  const cleanupEligibleAt = now + abandonedTtlMs;
   try {
     userRecord = await auth.createUser({
       email: values.email,
@@ -400,10 +429,20 @@ export async function createCustomerRegistration({
         botProtection: humanCheck.configured ? "turnstile" : "honeypot-rate-limit",
         botProtectionVerified: humanCheck.configured === true,
         createdAt: now,
-        verificationExpiresAt
+        verificationExpiresAt,
+        verificationSessionExpiresAt: verificationExpiresAt,
+        cleanupEligibleAt,
+        verificationStatus: "pending",
+        verificationSendCount: 0,
+        verificationSendWindowStartedAt: now
       },
       createdAt: now,
       updatedAt: now
+    });
+    await writeRegistrationAudit(db, "registration_profile_created", {
+      uid: userRecord.uid,
+      emailHash: source.emailHash,
+      ipHash: source.ipHash
     });
 
     let verificationSent = false;
@@ -416,14 +455,28 @@ export async function createCustomerRegistration({
         });
         await sendVerificationEmail(values.email, verificationLink, values.name);
         verificationSent = true;
-      } catch {
+        await db.ref(`users/${userRecord.uid}/registration`).update({
+          lastVerificationSentAt: Date.now(),
+          verificationSendCount: 1
+        }).catch(() => {});
+        await writeRegistrationAudit(db, "registration_verification_sent", {
+          uid: userRecord.uid,
+          emailHash: source.emailHash,
+          ipHash: source.ipHash
+        });
+      } catch (error) {
         verificationSent = false;
+        await writeRegistrationAudit(db, "registration_verification_failed", {
+          uid: userRecord.uid,
+          emailHash: source.emailHash,
+          ipHash: source.ipHash,
+          reason: error?.code || "email_delivery_failed"
+        });
       }
     }
 
     await writeRegistrationAudit(db, "account_created", {
       uid: userRecord.uid,
-      name: values.name,
       emailHash: source.emailHash,
       ipHash: source.ipHash,
       verificationSent
@@ -434,7 +487,8 @@ export async function createCustomerRegistration({
       email: values.email,
       profilePath: `users/${userRecord.uid}`,
       verificationSent,
-      verificationExpiresAt
+      verificationExpiresAt,
+      cleanupEligibleAt
     };
   } catch (error) {
     if (userRecord?.uid) {
@@ -449,9 +503,114 @@ export async function createCustomerRegistration({
       reason: error?.code || error?.message || "registration_failed"
     });
     if (error?.code === "auth/email-already-exists") {
-      throw new HttpError(409, "This email already has a TapTap account. Sign in or reset the password.");
+      await writeRegistrationAudit(db, "registration_duplicate_prevented", {
+        emailHash: source.emailHash,
+        ipHash: source.ipHash,
+        reason: "firebase_duplicate_guard"
+      });
+      throw new HttpError(409, accountRecoveryMessage, { code: "ACCOUNT_RECOVERY_REQUIRED" });
     }
     if (error instanceof HttpError) throw error;
     throw new HttpError(500, "The account could not be created. Please try again.");
   }
+}
+
+export async function resendCustomerRegistrationVerification({
+  db,
+  auth,
+  user,
+  sendVerificationEmail,
+  appBaseUrl,
+  verificationTtlMs = 3 * 60 * 1000,
+  abandonedTtlMs = 24 * 60 * 60 * 1000,
+  cooldownMs = 60 * 1000,
+  dailyLimit = 5,
+  now = Date.now()
+}) {
+  if (!user?.uid) throw new HttpError(401, "Sign in again before requesting a verification email.");
+  if (typeof sendVerificationEmail !== "function") {
+    throw new HttpError(503, "Verification email is temporarily unavailable. Please try again later.");
+  }
+
+  const [userRecord, profileSnapshot] = await Promise.all([
+    auth.getUser(user.uid),
+    db.ref(`users/${user.uid}`).once("value")
+  ]);
+  const profile = profileSnapshot.val() || {};
+  if (userRecord.emailVerified) {
+    return { alreadyVerified: true, verificationExpiresAt: null };
+  }
+  if (profile.role !== "customer" || !userRecord.email) {
+    throw new HttpError(403, "This account cannot use customer email verification.");
+  }
+
+  let rejection = null;
+  let claimedSendCount = 0;
+  const verificationExpiresAt = now + verificationTtlMs;
+  const claim = await db.ref(`users/${user.uid}/registration`).transaction((current = {}) => {
+    const lastSentAt = Number(current.lastVerificationSentAt || 0);
+    const retryAfterMs = lastSentAt + cooldownMs - now;
+    if (retryAfterMs > 0) {
+      rejection = new HttpError(429, `Wait ${Math.ceil(retryAfterMs / 1000)} seconds before requesting another email.`, {
+        code: "VERIFICATION_RESEND_COOLDOWN"
+      });
+      return undefined;
+    }
+
+    const storedWindowStart = Number(current.verificationSendWindowStartedAt || 0);
+    const windowActive = storedWindowStart > 0 && now - storedWindowStart < resendWindowMs;
+    const sendCount = windowActive ? Number(current.verificationSendCount || 0) : 0;
+    if (sendCount >= dailyLimit) {
+      rejection = new HttpError(429, "The verification email limit was reached. Try again tomorrow.", {
+        code: "VERIFICATION_RESEND_LIMIT"
+      });
+      return undefined;
+    }
+
+    claimedSendCount = sendCount + 1;
+    return {
+      ...current,
+      verificationExpiresAt,
+      verificationSessionExpiresAt: verificationExpiresAt,
+      cleanupEligibleAt: Math.max(Number(current.cleanupEligibleAt || 0), now + abandonedTtlMs),
+      lastVerificationSentAt: now,
+      verificationSendCount: claimedSendCount,
+      verificationSendWindowStartedAt: windowActive ? storedWindowStart : now,
+      verificationStatus: "pending"
+    };
+  });
+  if (!claim.committed) {
+    throw rejection || new HttpError(409, "A verification email request is already being processed.", {
+      code: "VERIFICATION_RESEND_IN_PROGRESS"
+    });
+  }
+
+  const baseUrl = String(appBaseUrl || "http://localhost:5173").replace(/\/$/, "");
+  const verificationLink = await auth.generateEmailVerificationLink(userRecord.email, {
+    url: `${baseUrl}/?emailVerified=1`,
+    handleCodeInApp: false
+  });
+  const source = registrationSource({}, userRecord.email);
+  try {
+    await sendVerificationEmail(userRecord.email, verificationLink, profile.name || userRecord.displayName || "Customer");
+  } catch (error) {
+    await writeRegistrationAudit(db, "registration_verification_resend_failed", {
+      uid: user.uid,
+      emailHash: source.emailHash,
+      reason: error?.code || "email_delivery_failed"
+    });
+    throw new HttpError(503, "Verification email is temporarily unavailable. Please try again later.");
+  }
+  await writeRegistrationAudit(db, "registration_verification_resent", {
+    uid: user.uid,
+    emailHash: source.emailHash,
+    resendCount: claimedSendCount
+  });
+
+  return {
+    alreadyVerified: false,
+    sent: true,
+    verificationExpiresAt,
+    cooldownSeconds: Math.ceil(cooldownMs / 1000)
+  };
 }

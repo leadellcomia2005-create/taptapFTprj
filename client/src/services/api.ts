@@ -48,6 +48,7 @@ export interface RegisterCustomerResponse extends ApiResult {
   profilePath: string;
   verificationSent: boolean;
   verificationExpiresAt: number;
+  cleanupEligibleAt?: number;
 }
 
 export interface RegistrationEmailPrecheckResponse extends ApiResult {
@@ -55,6 +56,13 @@ export interface RegistrationEmailPrecheckResponse extends ApiResult {
   code: string;
   message: string;
   suggestion?: string;
+}
+
+export interface VerificationResendResponse extends ApiResult {
+  alreadyVerified: boolean;
+  sent?: boolean;
+  verificationExpiresAt: number | null;
+  cooldownSeconds?: number;
 }
 
 export interface TwoFactorStatusResponse extends ApiResult {
@@ -247,8 +255,12 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
   }
   const rawPayload: unknown = await response.json().catch(() => ({}));
   const payload = isRecord(rawPayload) ? rawPayload as ApiPayload : {};
-  if (!response.ok)
-    throw new Error(requestErrorForStatus(response.status, payload));
+  if (!response.ok) {
+    const error = new Error(requestErrorForStatus(response.status, payload)) as Error & { code?: string; status?: number };
+    error.code = typeof payload.code === "string" ? payload.code : undefined;
+    error.status = response.status;
+    throw error;
+  }
   return requireApiObject(rawPayload) as T;
 }
 
@@ -270,6 +282,11 @@ export const api = {
     publicRequest<RegistrationEmailPrecheckResponse>("/auth/registration-email", {
       method: "POST",
       body: JSON.stringify({ email }),
+    }),
+  resendRegistrationVerification: () =>
+    request<VerificationResendResponse>("/auth/verification-email/resend", {
+      method: "POST",
+      body: "{}",
     }),
   twoFactorStatus: () => request<TwoFactorStatusResponse>("/2fa/status"),
   beginTotpSetup: () =>

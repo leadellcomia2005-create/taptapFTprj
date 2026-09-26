@@ -18,7 +18,7 @@
       }
     },
     "users": {
-      ".indexOn": ["registration/verificationExpiresAt"],
+      ".indexOn": ["registration/verificationExpiresAt", "registration/cleanupEligibleAt"],
       "$uid": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')",
         ".write": "auth != null && ((!data.exists() && auth.uid == $uid && newData.child('role').val() == 'customer') || (auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $uid || auth.token.role == 'owner')))",

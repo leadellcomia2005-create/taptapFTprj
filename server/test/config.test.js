@@ -11,6 +11,10 @@ test("allows an explicit Turnstile bypass only outside production", () => {
 
   assert.equal(config.turnstile.bypass, true);
   assert.deepEqual(config.turnstile.allowedHostnames, ["localhost"]);
+  assert.equal(config.registration.verificationTtlMs, 180_000);
+  assert.equal(config.registration.abandonedTtlMs, 86_400_000);
+  assert.equal(config.registration.resendCooldownMs, 60_000);
+  assert.equal(config.registration.resendDailyLimit, 5);
 });
 
 test("rejects a Turnstile bypass in production", () => {

@@ -258,6 +258,20 @@ function verificationCountdownLabel(seconds) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function emailInboxLink(email = "") {
+  const domain = String(email).trim().toLowerCase().split("@").at(-1);
+  const providers = {
+    "gmail.com": { href: "https://mail.google.com/", label: "Open Gmail" },
+    "googlemail.com": { href: "https://mail.google.com/", label: "Open Gmail" },
+    "outlook.com": { href: "https://outlook.live.com/mail/", label: "Open Outlook" },
+    "hotmail.com": { href: "https://outlook.live.com/mail/", label: "Open Outlook" },
+    "live.com": { href: "https://outlook.live.com/mail/", label: "Open Outlook" },
+    "yahoo.com": { href: "https://mail.yahoo.com/", label: "Open Yahoo Mail" },
+    "icloud.com": { href: "https://www.icloud.com/mail/", label: "Open iCloud Mail" }
+  };
+  return providers[domain] || null;
+}
+
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
@@ -406,6 +420,18 @@ function LoginPanel({ onLoggedIn }) {
     )));
   };
 
+  const invalidateRegistrationSecurity = () => {
+    setError("");
+    setFieldErrors((current) => current.turnstileToken
+      ? { ...current, turnstileToken: undefined }
+      : current);
+    if (turnstileToken || turnstileMessage) {
+      setTurnstileToken("");
+      setTurnstileMessage("");
+      setTurnstileResetKey((current) => current + 1);
+    }
+  };
+
   const toggleRegistration = () => {
     setRegistering((current) => {
       const next = !current;
@@ -532,7 +558,7 @@ function LoginPanel({ onLoggedIn }) {
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
   const passwordItems = passwordChecklist(password);
-  const registrationFormReady = registering && validateCustomerRegistrationForm({
+  const registrationReadiness = validateCustomerRegistrationForm({
     name,
     email,
     password,
@@ -541,8 +567,20 @@ function LoginPanel({ onLoggedIn }) {
     privacyAccepted,
     botField,
     turnstileRequired: false
-  }).valid;
+  });
+  const registrationFormReady = registering && registrationReadiness.valid;
   const registrationDetailsReady = registrationFormReady && emailPrecheck.status === "eligible";
+  const incompleteRegistrationLabels = [
+    registrationReadiness.errors.name && "full name",
+    registrationReadiness.errors.email && "email",
+    registrationReadiness.errors.password && "password requirements",
+    registrationReadiness.errors.confirmPassword && "matching password confirmation",
+    registrationReadiness.errors.termsAccepted && "Terms agreement",
+    registrationReadiness.errors.privacyAccepted && "Privacy Notice agreement"
+  ].filter(Boolean);
+  const registrationReadinessMessage = incompleteRegistrationLabels.length
+    ? `Complete ${incompleteRegistrationLabels.join(", ")} to load the security check.`
+    : "Complete the required account details and agreements to continue.";
   useEffect(() => {
     if (!registering) return undefined;
     const normalizedEmail = email.trim().toLowerCase();
@@ -558,7 +596,8 @@ function LoginPanel({ onLoggedIn }) {
           if (!active) return;
           setEmailPrecheck({
             status: result.eligible ? "eligible" : "rejected",
-            message: result.message
+            message: result.message,
+            suggestion: result.suggestion || ""
           });
         })
         .catch((precheckError) => {
@@ -578,6 +617,7 @@ function LoginPanel({ onLoggedIn }) {
   }, [registrationDetailsReady, turnstileToken]);
   const registrationVerificationSeconds = useDeadlineSeconds(registrationResult?.verificationExpiresAt);
   const registrationVerificationExpired = registrationVerificationSeconds === 0;
+  const registrationInbox = emailInboxLink(registrationResult?.email);
   const orderingDetails = getOrderingDetails();
   const popularMeals = getPopularMeals(landingMenu);
   const menuCategories = getLandingMenuCategories(landingMenu);
@@ -640,7 +680,11 @@ function LoginPanel({ onLoggedIn }) {
             required
             value={name}
             onBlur={() => setName(normalizeFullName(name))}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              setFieldErrors((current) => ({ ...current, name: undefined }));
+              invalidateRegistrationSecurity();
+            }}
           />
           {fieldErrors.name && <small className="registration-field-error" id="registration-name-error">{fieldErrors.name}</small>}
         </label>
@@ -656,12 +700,30 @@ function LoginPanel({ onLoggedIn }) {
           value={email}
           onChange={(event) => {
             setEmail(event.target.value);
+            setEmailPrecheck({ status: "idle", message: "" });
+            invalidateRegistrationSecurity();
             if (registering) setFieldErrors((current) => ({ ...current, email: undefined }));
           }}
         />
         {fieldErrors.email && <small className="registration-field-error" id="registration-email-error">{fieldErrors.email}</small>}
         {registering && !fieldErrors.email && emailPrecheck.message && (
-          <small className={`registration-email-status ${emailPrecheck.status}`} aria-live="polite">{emailPrecheck.message}</small>
+          <div className={`registration-email-status ${emailPrecheck.status}`} aria-live="polite">
+            <small>{emailPrecheck.message}</small>
+            {emailPrecheck.suggestion && (
+              <button
+                type="button"
+                className="registration-email-suggestion"
+                onClick={() => {
+                  const local = email.trim().split("@")[0];
+                  setEmail(`${local}@${emailPrecheck.suggestion}`);
+                  setEmailPrecheck({ status: "checking", message: "Checking the corrected email domain..." });
+                  invalidateRegistrationSecurity();
+                }}
+              >
+                Use {emailPrecheck.suggestion}
+              </button>
+            )}
+          </div>
         )}
       </label>
       <label className="form-label">Password
@@ -675,7 +737,11 @@ function LoginPanel({ onLoggedIn }) {
             minLength={registering ? 12 : 8}
             required
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              setFieldErrors((current) => ({ ...current, password: undefined }));
+              invalidateRegistrationSecurity();
+            }}
           />
           <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((current) => !current)}>
             {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
@@ -695,7 +761,11 @@ function LoginPanel({ onLoggedIn }) {
               minLength="12"
               required
               value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
+              onChange={(event) => {
+                setConfirmPassword(event.target.value);
+                setFieldErrors((current) => ({ ...current, confirmPassword: undefined }));
+                invalidateRegistrationSecurity();
+              }}
             />
             {fieldErrors.confirmPassword && <small className="registration-field-error" id="registration-confirm-password-error">{fieldErrors.confirmPassword}</small>}
           </label>
@@ -706,11 +776,19 @@ function LoginPanel({ onLoggedIn }) {
           </div>
           <div className="registration-consent-panel">
             <label className={`registration-checkbox ${fieldErrors.termsAccepted ? "invalid" : ""}`}>
-              <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />
+              <input type="checkbox" checked={termsAccepted} onChange={(event) => {
+                setTermsAccepted(event.target.checked);
+                setFieldErrors((current) => ({ ...current, termsAccepted: undefined }));
+                invalidateRegistrationSecurity();
+              }} />
               <span><strong>I agree to the Terms</strong><small>I will use TapTap Foodtrip ordering responsibly.</small></span>
             </label>
             <label className={`registration-checkbox ${fieldErrors.privacyAccepted ? "invalid" : ""}`}>
-              <input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} />
+              <input type="checkbox" checked={privacyAccepted} onChange={(event) => {
+                setPrivacyAccepted(event.target.checked);
+                setFieldErrors((current) => ({ ...current, privacyAccepted: undefined }));
+                invalidateRegistrationSecurity();
+              }} />
               <span><strong>I agree to the Privacy Notice</strong><small>TapTap may save my account, contact, order, and delivery details for service use.</small></span>
             </label>
             {(fieldErrors.termsAccepted || fieldErrors.privacyAccepted) && (
@@ -739,7 +817,7 @@ function LoginPanel({ onLoggedIn }) {
                   ? "Checking the email domain before loading the security check."
                   : emailPrecheck.status === "rejected" || emailPrecheck.status === "error"
                     ? emailPrecheck.message
-                    : "Complete the required account details and agreements to continue."}</small>
+                    : registrationReadinessMessage}</small>
               )}
               {(fieldErrors.turnstileToken || turnstileMessage) && (
                 <small className="registration-field-error">{turnstileMessage || fieldErrors.turnstileToken}</small>
@@ -763,10 +841,10 @@ function LoginPanel({ onLoggedIn }) {
           {registrationResult && (
             <div className="registration-result">
               <div>
-                <strong>{registrationVerificationExpired ? "Registration expired" : "Customer account created"}</strong>
+                <strong>{registrationVerificationExpired ? "Registration session ended" : "Customer account created"}</strong>
                 <span>{registrationVerificationExpired
-                  ? "The unverified registration is being removed. Start again to create an account."
-                  : `Verify your email within ${verificationCountdownLabel(registrationVerificationSeconds)} to keep this account.`}</span>
+                  ? "Your account was not deleted. Sign in to request a new verification session."
+                  : `Verify your email within ${verificationCountdownLabel(registrationVerificationSeconds)} to continue this registration session.`}</span>
               </div>
               <ul>
                 <li><b>Account created</b><span>Your customer profile was saved.</span></li>
@@ -775,9 +853,11 @@ function LoginPanel({ onLoggedIn }) {
                 <li><b>Security setup required</b><span>After sign in, choose passkey, email code, or security app.</span></li>
               </ul>
               <div className="registration-result-actions">
-                {!registrationVerificationExpired && <a className="btn btn-outline-danger btn-sm" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>}
-                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>{registrationVerificationExpired ? "Start again" : "Back to sign in"}</button>
+                {!registrationVerificationExpired && registrationInbox && <a className="btn btn-outline-danger btn-sm" href={registrationInbox.href} target="_blank" rel="noreferrer">{registrationInbox.label}</a>}
+                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>Back to sign in</button>
               </div>
+              {!registrationInbox && !registrationVerificationExpired && <small>Open your email provider and check Inbox and Spam.</small>}
+              {registrationVerificationExpired && <small>The verification link may still exist, but the website session must be restarted after secure sign-in.</small>}
               {!registrationResult.verificationSent && <small>Use Resend verification after signing in if the email did not arrive.</small>}
             </div>
           )}
@@ -1181,8 +1261,12 @@ function EmailVerificationPanel({ user, onVerified }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const verificationSeconds = useDeadlineSeconds(user.twoFactor?.verificationExpiresAt);
+  const [verificationDeadline, setVerificationDeadline] = useState(user.twoFactor?.verificationExpiresAt || null);
+  const [resendAvailableAt, setResendAvailableAt] = useState(0);
+  const verificationSeconds = useDeadlineSeconds(verificationDeadline);
+  const resendSeconds = useDeadlineSeconds(resendAvailableAt);
   const verificationExpired = verificationSeconds === 0;
+  const inbox = emailInboxLink(user.email);
 
   const resend = async () => {
     setBusy("resend");
@@ -1190,6 +1274,13 @@ function EmailVerificationPanel({ user, onVerified }) {
     setError("");
     try {
       const result = await resendVerificationEmail();
+      if (result.alreadyVerified) {
+        const refreshed = await refreshEmailVerification();
+        if (refreshed.verified) onVerified(refreshed.status);
+        return;
+      }
+      if (result.verificationExpiresAt) setVerificationDeadline(result.verificationExpiresAt);
+      setResendAvailableAt(Date.now() + Number(result.cooldownSeconds || 60) * 1000);
       setMessage(result.alreadyVerified
         ? "Your email is verified. You can continue."
         : `A new verification link was sent to ${user.email}. Check Inbox and Spam.`);
@@ -1222,14 +1313,15 @@ function EmailVerificationPanel({ user, onVerified }) {
     <div className="security-screen">
       <div className="security-card">
         <p className="eyebrow text-danger">First login verification</p>
-        <h2>{verificationExpired ? "Registration expired" : "Verify your email"}</h2>
+        <h2>{verificationExpired ? "Registration session ended" : "Verify your email"}</h2>
         <p>{verificationExpired
-          ? "This unverified registration is being removed. Sign out, then register again."
-          : <>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>. You have <strong>{verificationCountdownLabel(verificationSeconds)}</strong> remaining.</>}</p>
+          ? "Your account was not deleted. Request a new verification email to begin another three-minute website session."
+          : <>Before setting up account security, open the verification link sent to <strong>{user.email}</strong>. Your website session has <strong>{verificationCountdownLabel(verificationSeconds)}</strong> remaining.</>}</p>
         <div className="email-verification-actions">
-          {!verificationExpired && <a className="btn btn-outline-danger w-100" href="https://mail.google.com/" target="_blank" rel="noreferrer">Open Gmail</a>}
-          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy) || verificationExpired} onClick={resend}>
-            {busy === "resend" ? "Sending..." : "Resend verification email"}
+          {!verificationExpired && inbox && <a className="btn btn-outline-danger w-100" href={inbox.href} target="_blank" rel="noreferrer">{inbox.label}</a>}
+          {!verificationExpired && !inbox && <p className="small text-secondary mb-0">Open your email provider and check Inbox and Spam.</p>}
+          <button className="btn btn-outline-secondary w-100" disabled={Boolean(busy) || Number(resendSeconds || 0) > 0} onClick={resend}>
+            {busy === "resend" ? "Sending..." : Number(resendSeconds || 0) > 0 ? `Resend available in ${verificationCountdownLabel(resendSeconds)}` : verificationExpired ? "Start a new verification session" : "Resend verification email"}
           </button>
           <button className="btn btn-danger w-100" disabled={Boolean(busy) || verificationExpired} onClick={check}>
             {busy === "check" ? "Checking your email..." : "I verified my email, check again"}

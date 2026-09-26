@@ -6,7 +6,12 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration
 } from "../passkeys.js";
-import { checkRegistrationEmail, createCustomerRegistration, verifyTurnstileToken } from "../registration.js";
+import {
+  checkRegistrationEmail,
+  createCustomerRegistration,
+  resendCustomerRegistrationVerification,
+  verifyTurnstileToken
+} from "../registration.js";
 import { requireVerifiedEmail } from "../security.js";
 import { sendCustomerVerificationEmail, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
 import {
@@ -31,6 +36,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
   const router = Router();
   const registrationLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 12, standardHeaders: "draft-8" });
   const emailPrecheckLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8" });
+  const verificationResendLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 8, standardHeaders: "draft-8" });
   const { authenticateBootstrap, requireFirebaseAdmin } = authentication;
 
   router.post("/auth/registration-email", emailPrecheckLimiter, validateBody(registrationEmailPrecheckSchema), asyncRoute(async (req, res) => {
@@ -46,6 +52,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
       sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
       appBaseUrl: config.appBaseUrl,
       verificationTtlMs: config.registration?.verificationTtlMs,
+      abandonedTtlMs: config.registration?.abandonedTtlMs,
       verifyHuman: config.turnstile?.bypass
         ? null
         : config.turnstile?.secret
@@ -59,6 +66,21 @@ export function createAuthRouter({ config, firebase, authentication }) {
         : null
     });
     res.status(201).json(result);
+  }));
+
+  router.post("/auth/verification-email/resend", verificationResendLimiter, authenticateBootstrap, requireFirebaseAdmin, asyncRoute(async (req, res) => {
+    const result = await resendCustomerRegistrationVerification({
+      db: firebase.db(),
+      auth: firebase.auth(),
+      user: req.user,
+      sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
+      appBaseUrl: config.appBaseUrl,
+      verificationTtlMs: config.registration?.verificationTtlMs,
+      abandonedTtlMs: config.registration?.abandonedTtlMs,
+      cooldownMs: config.registration?.resendCooldownMs,
+      dailyLimit: config.registration?.resendDailyLimit
+    });
+    res.json(result);
   }));
 
   router.get("/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {

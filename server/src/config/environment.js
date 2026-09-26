@@ -14,6 +14,9 @@ const environmentSchema = z.object({
   TURNSTILE_EXPECTED_ACTION: z.string().trim().min(1).max(80).default("customer_registration"),
   TURNSTILE_ALLOWED_HOSTNAMES: z.string().trim().optional(),
   REGISTRATION_VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(180),
+  REGISTRATION_ABANDONED_TTL_SECONDS: z.coerce.number().int().min(3600).max(604800).default(86400),
+  REGISTRATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(30).max(3600).default(60),
+  REGISTRATION_RESEND_DAILY_LIMIT: z.coerce.number().int().min(1).max(20).default(5),
   REGISTRATION_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(15),
   ENABLE_PAYMONGO: z.enum(["true", "false"]).default("false"),
   PAYMONGO_MODE: z.enum(["test", "live"]).default("test"),
@@ -100,6 +103,9 @@ export function loadServerConfig(environment = process.env) {
     },
     registration: {
       verificationTtlMs: env.REGISTRATION_VERIFICATION_TTL_SECONDS * 1000,
+      abandonedTtlMs: env.REGISTRATION_ABANDONED_TTL_SECONDS * 1000,
+      resendCooldownMs: env.REGISTRATION_RESEND_COOLDOWN_SECONDS * 1000,
+      resendDailyLimit: env.REGISTRATION_RESEND_DAILY_LIMIT,
       cleanupIntervalMs: env.REGISTRATION_CLEANUP_INTERVAL_SECONDS * 1000
     },
     firebase: {

@@ -5,7 +5,6 @@ import {
   getAuth,
   onAuthStateChanged,
   reload,
-  sendEmailVerification,
   sendPasswordResetEmail,
   setPersistence,
   signInWithCustomToken,
@@ -318,8 +317,7 @@ export async function resendVerificationEmail() {
   if (!firebaseEnabled || !auth.currentUser) throw new Error("Sign in again before requesting a verification email.");
   await reload(auth.currentUser);
   if (auth.currentUser.emailVerified) return { alreadyVerified: true };
-  await sendEmailVerification(auth.currentUser);
-  return { alreadyVerified: false };
+  return api.resendRegistrationVerification();
 }
 
 export async function refreshEmailVerification() {

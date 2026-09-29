@@ -215,6 +215,10 @@ test("sensitive records reject all direct browser writes", async () => {
   await assertFails(set(ref(owner, "paymentMovements/fake"), { amount: 1 }));
   await assertFails(set(ref(owner, "idempotency/fake"), { orderId: "fake" }));
   await assertFails(set(ref(owner, "paymongoWebhookEvents/fake"), { status: "complete" }));
+  await assertFails(set(ref(owner, "assistantFeedback/customer-1/message-1"), { rating: "helpful" }));
+  await assertFails(get(ref(owner, "assistantFeedback")));
+  await assertFails(set(ref(owner, "assistantResponses/customer-1/message-1"), { source: "local" }));
+  await assertFails(get(ref(owner, "assistantResponses")));
   await assertFails(set(ref(rider, "deliveryProofs/order-own"), { riderId: "rider-1" }));
   await assertFails(update(ref(staff, "supportConversations/customer-1"), { mode: "assistant" }));
   await assertFails(set(ref(staff, "messages/support/staff-direct"), { text: "Bypass", senderId: "staff-1", senderName: "Staff", senderRole: "staff", customerId: "customer-1", conversationId: "customer-1", createdAt: 2 }));

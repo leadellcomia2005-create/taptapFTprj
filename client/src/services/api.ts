@@ -111,10 +111,12 @@ export interface PushNotificationStatusResponse extends ApiResult {
 
 export interface AssistantResponse extends ApiResult {
   text: string;
+  messageId?: EntityId;
   source?: string;
   intent?: string;
-  status?: "staff_handling";
+  status?: "staff_handling" | "staff_waiting";
   assignedStaffName?: string | null;
+  sources?: Array<"Current menu" | "Store information" | "Your order" | "Ordering help" | "General support">;
 }
 
 export interface SupportReplyResponse extends ApiResult {
@@ -126,6 +128,7 @@ export interface InventoryInsightResponse extends ApiResult {
   text: string;
   provider?: "groq" | "openai";
   generatedAt?: number;
+  cached?: boolean;
   insight?: {
     summary: string;
     salesTrend: string;
@@ -134,6 +137,7 @@ export interface InventoryInsightResponse extends ApiResult {
     stockRisks: Array<{ product: string; currentStock: number; reorderPoint: number; severity: "low" | "medium" | "high"; reason: string }>;
     reorderRecommendations: Array<{ product: string; currentStock: number; suggestedQuantity: number; reason: string }>;
     wasteRisks: Array<{ product: string; risk: string; action: string }>;
+    dataQuality?: { confidence: "limited" | "moderate" | "strong"; label: string; warnings: string[] };
   };
 }
 
@@ -325,10 +329,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(credential),
     }),
-  assistant: (message: string, sessionId: string, context: JsonObject) =>
+  assistant: (message: string, sessionId: string, context: JsonObject, history: Array<{ role: "user" | "assistant"; text: string }> = []) =>
     request<AssistantResponse>("/assistant", {
       method: "POST",
-      body: JSON.stringify({ message, sessionId, context }),
+      body: JSON.stringify({ message, sessionId, context, history }),
+    }),
+  rateAssistantMessage: (messageId: EntityId, rating: "helpful" | "unhelpful", source: "local" | "groq" | "openai" | "assistant") =>
+    request<{ rating: "helpful" | "unhelpful" }>(`/assistant/feedback/${encodeURIComponent(messageId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ rating, source }),
+    }),
+  removeAssistantMessageRating: (messageId: EntityId) =>
+    request<{ removed: boolean }>(`/assistant/feedback/${encodeURIComponent(messageId)}`, { method: "DELETE" }),
+  requestSupportStaff: (customerId: EntityId, reason = "") =>
+    request<{ conversation: SupportConversation; duplicate: boolean }>(`/support/conversations/${encodeURIComponent(customerId)}/request-staff`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     }),
   replyToSupportConversation: (customerId: EntityId, text: string, customerName: string) =>
     request<SupportReplyResponse>(`/support/conversations/${encodeURIComponent(customerId)}/reply`, {
@@ -340,10 +356,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  insights: (sales: JsonValue, inventory: InventoryItem[]) =>
+  insights: (sales: JsonValue, inventory: InventoryItem[], period: "today" | "7d" | "30d" | "all" = "all", category = "all") =>
     request<InventoryInsightResponse>("/insights", {
       method: "POST",
-      body: JSON.stringify({ sales, inventory }),
+      body: JSON.stringify({ sales, inventory, period, category }),
     }),
   createPayment: (orderId: EntityId) =>
     request<PaymentCheckoutResponse>(`/payments/checkout/${encodeURIComponent(orderId)}`, {

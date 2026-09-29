@@ -15,6 +15,9 @@ test("allows an explicit Turnstile bypass only outside production", () => {
   assert.equal(config.registration.abandonedTtlMs, 86_400_000);
   assert.equal(config.registration.resendCooldownMs, 60_000);
   assert.equal(config.registration.resendDailyLimit, 5);
+  assert.equal(config.ai.insightLimit, 5);
+  assert.equal(config.ai.insightWindowMs, 300_000);
+  assert.equal(config.ai.insightCacheTtlMs, 300_000);
 });
 
 test("rejects a Turnstile bypass in production", () => {

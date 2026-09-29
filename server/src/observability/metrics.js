@@ -6,7 +6,17 @@ const counterNames = [
   "codDiscrepancies",
   "readinessFailures",
   "socketDisconnections",
-  "stockConflicts"
+  "stockConflicts",
+  "aiChatRequests",
+  "aiLocalAnswers",
+  "aiProviderAnswers",
+  "aiProviderFailures",
+  "aiSupportEscalations",
+  "aiHelpfulRatings",
+  "aiUnhelpfulRatings",
+  "aiInsightGenerations",
+  "aiInsightCacheHits",
+  "aiInsightRateLimits"
 ];
 
 function emptyCounters() {

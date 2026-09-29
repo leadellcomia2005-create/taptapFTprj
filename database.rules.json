@@ -92,8 +92,18 @@
       "$customerId": {
         ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.uid == $customerId || auth.token.role == 'owner' || auth.token.role == 'staff')",
         ".write": false,
-        ".validate": "newData.hasChildren(['customerId', 'mode', 'updatedAt']) && newData.child('customerId').val() == $customerId && (newData.child('mode').val() == 'assistant' || newData.child('mode').val() == 'staff')"
+        ".validate": "newData.hasChildren(['customerId', 'mode', 'updatedAt']) && newData.child('customerId').val() == $customerId && (newData.child('mode').val() == 'assistant' || newData.child('mode').val() == 'waiting' || newData.child('mode').val() == 'staff')"
       }
+    },
+    "assistantFeedback": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["customerId", "createdAt"]
+    },
+    "assistantResponses": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["customerId", "createdAt"]
     },
     "auditLogs": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner'",

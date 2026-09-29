@@ -18,6 +18,9 @@ const environmentSchema = z.object({
   REGISTRATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(30).max(3600).default(60),
   REGISTRATION_RESEND_DAILY_LIMIT: z.coerce.number().int().min(1).max(20).default(5),
   REGISTRATION_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(15),
+  AI_INSIGHT_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
+  AI_INSIGHT_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
+  AI_INSIGHT_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   ENABLE_PAYMONGO: z.enum(["true", "false"]).default("false"),
   PAYMONGO_MODE: z.enum(["test", "live"]).default("test"),
   PAYMONGO_SECRET_KEY: z.string().trim().optional(),
@@ -107,6 +110,11 @@ export function loadServerConfig(environment = process.env) {
       resendCooldownMs: env.REGISTRATION_RESEND_COOLDOWN_SECONDS * 1000,
       resendDailyLimit: env.REGISTRATION_RESEND_DAILY_LIMIT,
       cleanupIntervalMs: env.REGISTRATION_CLEANUP_INTERVAL_SECONDS * 1000
+    },
+    ai: {
+      insightLimit: env.AI_INSIGHT_RATE_LIMIT,
+      insightWindowMs: env.AI_INSIGHT_RATE_WINDOW_SECONDS * 1000,
+      insightCacheTtlMs: env.AI_INSIGHT_CACHE_TTL_SECONDS * 1000
     },
     firebase: {
       databaseUrl: env.FIREBASE_DATABASE_URL || "",

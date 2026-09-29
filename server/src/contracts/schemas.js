@@ -287,18 +287,34 @@ export const recoveryApplySchema = recoveryPreviewSchema.extend({
 export const assistantRequestSchema = z.object({
   message: z.string().trim().min(1).max(500).optional(),
   text: z.string().trim().min(1).max(500).optional(),
-  sessionId: optionalText(128)
+  sessionId: optionalText(128),
+  context: z.object({}).passthrough().optional(),
+  history: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    text: z.string().trim().min(1).max(500)
+  }).strict()).max(6).optional()
 }).passthrough().refine((input) => Boolean(input.message || input.text), "Enter an assistant message.");
+
+export const assistantFeedbackSchema = z.object({
+  rating: z.enum(["helpful", "unhelpful"]),
+  source: z.enum(["local", "groq", "openai", "assistant"]).default("assistant")
+}).strict();
 
 export const supportReplySchema = z.object({
   text: z.string().trim().min(1).max(500),
   customerName: optionalText(80)
 }).strict();
 
+export const supportRequestSchema = z.object({
+  reason: z.string().trim().max(160).optional()
+}).strict();
+
 const insightRecordSchema = z.object({}).passthrough();
 export const insightRequestSchema = z.object({
   sales: z.array(insightRecordSchema).max(500),
-  inventory: z.array(insightRecordSchema).max(250)
+  inventory: z.array(insightRecordSchema).max(250),
+  period: z.enum(["today", "7d", "30d", "all"]).default("all"),
+  category: z.string().trim().min(1).max(80).default("all")
 }).strict();
 
 export const recordIdParams = (name) => z.object({ [name]: recordIdSchema }).passthrough();

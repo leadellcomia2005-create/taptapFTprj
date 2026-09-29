@@ -156,7 +156,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     }
     setInsightStatus("loading");
     try {
-      const result = await api.insights(insightOrders, insightInventory);
+      const result = await api.insights(insightOrders, insightInventory, insightPeriod, insightCategory);
       setInsight(result);
       setInsightStatus("success");
     } catch (error) {
@@ -534,6 +534,12 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           {insightStatus === "loading" && <div className="owner-ai-empty loading" role="status"><span className="spinner-border spinner-border-sm" aria-hidden="true" /><div><strong>Analyzing sales and inventory...</strong><p>This normally takes only a few seconds.</p></div></div>}
           {insightError && <div className="owner-ai-error" role="alert"><strong>Groq analysis unavailable</strong><span>{insightError} The local analysis is shown below.</span></div>}
           {insight && <div className="owner-ai-result">
+            {insight.insight?.dataQuality && <section className={`owner-ai-quality ${insight.insight.dataQuality.confidence}`}>
+              <div><span>Data quality</span><strong>{insight.insight.dataQuality.label}</strong></div>
+              {insight.insight.dataQuality.warnings.length > 0
+                ? <ul>{insight.insight.dataQuality.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                : <p>The selected records are sufficient for cautious trend analysis.</p>}
+            </section>}
             <section className="owner-ai-summary"><span>Summary</span><p>{insight.insight?.summary || insight.text}</p></section>
             {insight.insight && <>
               <div className="owner-ai-counts"><span><strong>{insight.insight.stockRisks.length}</strong> stock risks</span><span><strong>{insight.insight.reorderRecommendations.length}</strong> reorder priorities</span><span><strong>{insight.insight.wasteRisks.length}</strong> waste risks</span></div>
@@ -545,7 +551,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
             </>}
           </div>}
           <div className="owner-ai-footer">
-            <small>{insight?.generatedAt ? `Last generated ${new Date(insight.generatedAt).toLocaleString("en-PH")}${insight.provider === "groq" ? " with Groq" : " using local analysis"}.` : "No analysis generated yet."}</small>
+            <small>{insight?.generatedAt ? `${insight.cached ? "Reused recent analysis from" : "Last generated"} ${new Date(insight.generatedAt).toLocaleString("en-PH")}${insight.provider === "groq" ? " with Groq" : " using local analysis"}.` : "No analysis generated yet."}</small>
             <button className="btn btn-warning" onClick={generateInsight} disabled={insightStatus === "loading"}><Sparkles size={16} aria-hidden="true" />{insightStatus === "loading" ? "Analyzing..." : insightStatus === "error" ? "Retry Groq" : aiReady ? "Generate analysis" : "Generate local analysis"}</button>
           </div>
         </div>

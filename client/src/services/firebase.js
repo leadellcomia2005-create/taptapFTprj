@@ -1260,11 +1260,44 @@ export async function replyToSupportConversation(text, actor, conversation) {
   return { conversation: next, message: { id, ...message } };
 }
 
+export async function requestSupportStaff(customerId, actor, reason = "") {
+  if (firebaseEnabled) return api.requestSupportStaff(customerId, reason);
+  if (actor.role !== "customer" || actor.uid !== customerId) throw new Error("You cannot request support for another customer.");
+  const data = readDemoData();
+  const current = data.supportConversations?.[customerId] || defaultSupportConversation(customerId);
+  if (["waiting", "staff"].includes(current.mode)) return { conversation: current, duplicate: true };
+  const now = Date.now();
+  const conversation = {
+    customerId,
+    mode: "waiting",
+    assignedStaffId: null,
+    assignedStaffName: null,
+    requestedAt: now,
+    requestReason: String(reason || "").trim().slice(0, 160),
+    updatedAt: now
+  };
+  data.supportConversations ||= {};
+  data.supportConversations[customerId] = conversation;
+  data.auditLogs[`AUD-${now}-${Math.random().toString(16).slice(2, 7)}`] = {
+    action: "support_staff_requested",
+    customerId,
+    actorId: actor.uid,
+    actorName: "Customer",
+    actorRole: "customer",
+    mode: "waiting",
+    createdAt: now
+  };
+  writeDemoData(data);
+  await createNotification({ targetUserId: "demo-staff", title: "Customer requested support", message: "A customer is waiting for a support reply.", type: "chat" });
+  return { conversation, duplicate: false };
+}
+
 export async function resumeSupportAssistant(customerId, actor) {
   if (firebaseEnabled) return api.resumeSupportAssistant(customerId);
   const data = readDemoData();
   const current = data.supportConversations?.[customerId] || defaultSupportConversation(customerId);
-  if (current.mode !== "staff" || (current.assignedStaffId !== actor.uid && actor.role !== "owner")) {
+  if (!["staff", "waiting"].includes(current.mode)
+    || (current.mode === "staff" && current.assignedStaffId !== actor.uid && actor.role !== "owner")) {
     throw new Error("Only the assigned staff member or an owner can return this conversation to the assistant.");
   }
   const now = Date.now();

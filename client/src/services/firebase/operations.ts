@@ -1,6 +1,7 @@
 import {
   sendSupportMessage as sendSupportMessageCompatibility,
   replyToSupportConversation as replyToSupportConversationCompatibility,
+  requestSupportStaff as requestSupportStaffCompatibility,
   resumeSupportAssistant as resumeSupportAssistantCompatibility,
   subscribeSupportConversation as subscribeSupportConversationCompatibility,
   subscribeSupportMessages as subscribeSupportMessagesCompatibility
@@ -49,3 +50,9 @@ export const resumeSupportAssistant = (
   customerId: EntityId,
   actor: Pick<AppUser, "uid" | "name" | "role">
 ) => resumeSupportAssistantCompatibility(customerId, actor);
+
+export const requestSupportStaff = (
+  customerId: EntityId,
+  actor: Pick<AppUser, "uid" | "name" | "role">,
+  reason = ""
+) => requestSupportStaffCompatibility(customerId, actor, reason);

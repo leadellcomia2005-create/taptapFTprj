@@ -5208,6 +5208,25 @@ button:not(:disabled),
 }
 .assistant-mode-status { padding: 8px 12px; color: #246546; background: #edf8f1; border-bottom: 1px solid var(--ops-border); font-size: 10px; font-weight: 800; }
 .assistant-mode-status.staff { color: #7d2c21; background: #fff1ee; }
+.assistant-mode-status.waiting { color: #72520a; background: #fff7dc; }
+.support-mode-badge.waiting { color: #72520a; border-color: #e6c56f; background: #fff7dc; }
+.assistant-human-action { display: flex; justify-content: flex-end; padding: 10px 11px 0; background: white; }
+.assistant-human-action button { min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; color: var(--ink); border: 1px solid var(--line); background: white; border-radius: 7px; font-size: 10px; font-weight: 800; }
+.assistant-human-action button:hover:not(:disabled),.assistant-human-action button:focus-visible { color: var(--red); border-color: var(--red); }
+.assistant-sources { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.assistant-sources span { padding: 3px 6px; color: #4f5f58; border: 1px solid #d8e5df; background: #f4faf7; border-radius: 4px; font-size: 8px; font-weight: 800; }
+.assistant-feedback { display: flex; align-items: center; gap: 5px; margin-top: 7px; }
+.assistant-feedback button { width: 44px; height: 44px; display: inline-grid; place-items: center; padding: 0; color: var(--muted); border: 1px solid var(--line); background: white; border-radius: 7px; }
+.assistant-feedback button.active { color: white; border-color: var(--red); background: var(--red); }
+.assistant-feedback small { margin: 0 0 0 3px; font-size: 8px; }
+.owner-ai-quality { padding: 14px; border: 1px solid var(--line); border-left: 4px solid #b5a99d; background: #faf9f7; }
+.owner-ai-quality.moderate { border-left-color: #c88a18; background: #fff9ea; }
+.owner-ai-quality.strong { border-left-color: #2d8b60; background: #f0faf5; }
+.owner-ai-quality > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.owner-ai-quality span { color: var(--muted); font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.owner-ai-quality strong { font-size: 12px; }
+.owner-ai-quality p,.owner-ai-quality ul { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.owner-ai-quality ul { padding-left: 18px; }
 
 .lazy-load-failure {
   min-height: calc(100dvh - 76px);

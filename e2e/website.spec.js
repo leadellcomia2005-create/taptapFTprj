@@ -592,10 +592,18 @@ test("375px landing and customer workspace have no horizontal overflow", async (
   const supportButton = page.getByRole("button", { name: /Open customer support/i });
   await expectMinimumTouchTarget(supportButton);
   await expect(page.locator(".assistant-launcher")).toHaveCount(0);
-  await page.route("**/api/assistant", (route) => route.fulfill({
+  const assistantBodies = [];
+  await page.route("**/api/assistant/feedback/**", (route) => route.fulfill({
     contentType: "application/json",
-    body: JSON.stringify({ text: "Available choices include Bangus Meal (PHP 99).", source: "local" })
+    body: JSON.stringify(route.request().method() === "DELETE" ? { removed: true } : { rating: "helpful" })
   }));
+  await page.route("**/api/assistant", async (route) => {
+    assistantBodies.push(route.request().postDataJSON());
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ messageId: `reply-${assistantBodies.length}`, text: assistantBodies.length === 1 ? "Available choices include Bangus Meal (PHP 99)." : "Yes, Bangus Meal is available.", source: "local", sources: ["Current menu"] })
+    });
+  });
   await supportButton.click();
   const supportPanel = page.getByRole("dialog", { name: /TapTap customer support/i });
   await expect(supportPanel).toBeVisible();
@@ -603,6 +611,21 @@ test("375px landing and customer workspace have no horizontal overflow", async (
   await expectMinimumTouchTarget(availableSuggestion);
   await availableSuggestion.click();
   await expect(supportPanel.getByText("Available choices include Bangus Meal (PHP 99).", { exact: true })).toBeVisible();
+  await expect(supportPanel.getByText("Current menu", { exact: true })).toBeVisible();
+  const helpful = supportPanel.getByRole("button", { name: "Helpful answer", exact: true });
+  await expectMinimumTouchTarget(helpful);
+  await helpful.click();
+  await expect(helpful).toHaveAttribute("aria-pressed", "true");
+  await expect(supportPanel.getByText("Feedback saved", { exact: true })).toBeVisible();
+  await helpful.click();
+  await expect(helpful).toHaveAttribute("aria-pressed", "false");
+  await supportPanel.getByLabel("Message customer support").fill("Is it available now?");
+  await supportPanel.getByRole("button", { name: /^Send$/ }).click();
+  await expect(supportPanel.getByText("Yes, Bangus Meal is available.", { exact: true })).toBeVisible();
+  expect(assistantBodies[1].history.some((entry) => entry.role === "assistant" && entry.text.includes("Bangus Meal"))).toBe(true);
+  await supportPanel.getByRole("button", { name: /Talk to staff/i }).click();
+  await expect(supportPanel.getByText(/support team has been notified/i)).toBeVisible();
+  await expect(supportPanel.getByRole("button", { name: /Talk to staff/i })).toHaveCount(0);
   await expect(supportPanel.locator(".assistant-messages time")).not.toHaveCount(0);
   const [supportBox, navigationBox] = await Promise.all([supportPanel.boundingBox(), mobileNavigation.boundingBox()]);
   expect((supportBox?.y || 0) + (supportBox?.height || 0)).toBeLessThanOrEqual((navigationBox?.y || 0) + 1);

@@ -3,11 +3,17 @@ import test from "node:test";
 import {
   getSupportConversation,
   replyToSupportConversation,
+  requestSupportStaff,
   resumeSupportAssistant
 } from "../src/application/support.js";
 import { FakeRealtimeDatabase } from "./helpers/fakeRealtimeDb.js";
 
 const initialData = () => ({
+  users: {
+    "staff-1": { role: "staff", name: "Mika" },
+    "owner-1": { role: "owner", name: "Owner" },
+    "customer-1": { role: "customer", name: "Juan" }
+  },
   messages: {
     support: {
       first: {
@@ -21,6 +27,29 @@ const initialData = () => ({
       }
     }
   }
+});
+
+test("customer staff requests pause the assistant and notify support once", async () => {
+  const db = new FakeRealtimeDatabase(initialData());
+  const first = await requestSupportStaff(db, { uid: "customer-1", role: "customer", name: "Juan" }, "customer-1", { reason: "Need help" });
+  const second = await requestSupportStaff(db, { uid: "customer-1", role: "customer", name: "Juan" }, "customer-1", { reason: "Again" });
+  assert.equal(first.conversation.mode, "waiting");
+  assert.equal(first.duplicate, false);
+  assert.equal(second.duplicate, true);
+  assert.equal(Object.values(db.read("notifications")).length, 2);
+  assert.equal(Object.values(db.read("auditLogs")).length, 1);
+  await assert.rejects(
+    requestSupportStaff(db, { uid: "customer-2", role: "customer" }, "customer-1"),
+    (error) => error.status === 403
+  );
+});
+
+test("first staff reply claims a waiting conversation", async () => {
+  const db = new FakeRealtimeDatabase(initialData());
+  await requestSupportStaff(db, { uid: "customer-1", role: "customer" }, "customer-1");
+  const result = await replyToSupportConversation(db, { uid: "staff-1", role: "staff", name: "Mika" }, "customer-1", { text: "I can help" });
+  assert.equal(result.conversation.mode, "staff");
+  assert.equal(result.conversation.assignedStaffId, "staff-1");
 });
 
 test("the first staff reply claims the conversation and records the handoff", async () => {

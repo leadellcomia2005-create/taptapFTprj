@@ -463,7 +463,7 @@ export interface SupportMessage {
   createdAt: TimestampMs;
 }
 
-export type SupportConversationMode = "assistant" | "staff";
+export type SupportConversationMode = "assistant" | "waiting" | "staff";
 
 export interface SupportConversation {
   customerId: EntityId;
@@ -472,6 +472,8 @@ export interface SupportConversation {
   assignedStaffName: string | null;
   assignedStaffRole?: "owner" | "staff" | null;
   takenOverAt?: TimestampMs;
+  requestedAt?: TimestampMs;
+  requestReason?: string;
   lastStaffReplyAt?: TimestampMs;
   resumedAt?: TimestampMs;
   updatedAt: TimestampMs;

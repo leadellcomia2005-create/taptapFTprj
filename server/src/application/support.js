@@ -1,4 +1,4 @@
-import { notificationUpdates } from "../notifications.js";
+import { notificationUpdates, userIdsForRoles } from "../notifications.js";
 import { HttpError, validRecordId } from "../security.js";
 
 const defaultConversation = (customerId) => ({
@@ -13,6 +13,53 @@ export async function getSupportConversation(db, customerId) {
   if (!validRecordId(customerId)) throw new HttpError(400, "Invalid customer ID.");
   const value = (await db.ref(`supportConversations/${customerId}`).once("value")).val();
   return value ? { ...defaultConversation(customerId), ...value, customerId } : defaultConversation(customerId);
+}
+
+export async function requestSupportStaff(db, actor, customerId, input = {}) {
+  if (actor.role !== "customer" || actor.uid !== customerId) {
+    throw new HttpError(403, "You cannot request support for another customer.");
+  }
+  const now = Date.now();
+  const stateRef = db.ref(`supportConversations/${customerId}`);
+  const transaction = await stateRef.transaction((current) => {
+    const previous = current || defaultConversation(customerId);
+    if (["waiting", "staff"].includes(previous.mode)) return previous;
+    return {
+      customerId,
+      mode: "waiting",
+      assignedStaffId: null,
+      assignedStaffName: null,
+      requestedAt: now,
+      requestReason: String(input.reason || "").trim().slice(0, 160),
+      updatedAt: now
+    };
+  });
+  const conversation = transaction.snapshot.val();
+  if (conversation.mode !== "waiting" || Number(conversation.requestedAt || 0) !== now) {
+    return { conversation, duplicate: true };
+  }
+  const recipients = await userIdsForRoles(db, ["owner", "staff"]);
+  const auditId = db.ref("auditLogs").push().key;
+  await db.ref().update({
+    [`auditLogs/${auditId}`]: {
+      action: "support_staff_requested",
+      customerId,
+      actorId: actor.uid,
+      actorName: "Customer",
+      actorRole: "customer",
+      mode: "waiting",
+      createdAt: now
+    },
+    ...notificationUpdates(db, recipients, {
+      title: "Customer requested support",
+      message: "A customer is waiting for a support reply.",
+      type: "chat",
+      entityType: "chat",
+      entityId: customerId,
+      actionView: "staff-chat"
+    })
+  });
+  return { conversation, duplicate: false };
 }
 
 export async function replyToSupportConversation(db, actor, customerId, input) {
@@ -107,8 +154,8 @@ export async function resumeSupportAssistant(db, actor, customerId) {
   const stateRef = db.ref(`supportConversations/${customerId}`);
   const transaction = await stateRef.transaction((current) => {
     previous = current || defaultConversation(customerId);
-    if (previous.mode !== "staff") return undefined;
-    if (previous.assignedStaffId !== actor.uid && actor.role !== "owner") return undefined;
+    if (!["staff", "waiting"].includes(previous.mode)) return undefined;
+    if (previous.mode === "staff" && previous.assignedStaffId !== actor.uid && actor.role !== "owner") return undefined;
     return {
       customerId,
       mode: "assistant",
@@ -133,7 +180,7 @@ export async function resumeSupportAssistant(db, actor, customerId) {
       actorId: actor.uid,
       actorName: actor.name || "Support team",
       actorRole: actor.role,
-      previousMode: "staff",
+      previousMode: previous?.mode || "staff",
       mode: "assistant",
       createdAt: now
     }

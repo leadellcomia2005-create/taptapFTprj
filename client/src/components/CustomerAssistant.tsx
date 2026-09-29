@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { X } from "lucide-react";
+import { Headphones, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { websiteStoreConfig } from "../config/appConfig";
 import { api } from "../services/api";
-import { sendSupportMessage, subscribeSupportConversation, subscribeSupportMessages } from "../services/firebase/operations";
+import { requestSupportStaff, sendSupportMessage, subscribeSupportConversation, subscribeSupportMessages } from "../services/firebase/operations";
 import type { AppUser, MenuItem, SupportConversation } from "../types/domain";
 import { assistantSourceLabel } from "../utils/display";
 
@@ -11,6 +11,8 @@ type AssistantMessage = {
   from: "bot" | "user";
   text: string;
   source?: string;
+  sources?: string[];
+  rating?: "helpful" | "unhelpful";
   createdAt: number;
 };
 
@@ -58,7 +60,7 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
     return subscribeSupportConversation((nextConversation) => {
       conversationRef.current = nextConversation;
       setConversation(nextConversation);
-      if (nextConversation.mode === "staff") setRequestStatus("idle");
+      if (["waiting", "staff"].includes(nextConversation.mode)) setRequestStatus("idle");
     }, user.uid);
   }, [open, user.uid]);
 
@@ -119,12 +121,16 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       }
     }
 
-    if (conversationRef.current.mode === "staff") {
+    if (conversationRef.current.mode !== "assistant") {
       setRequestStatus("idle");
       return;
     }
 
     try {
+      const history = messages
+        .filter((entry) => entry.id !== "welcome" && !String(entry.source || "").startsWith("Staff support"))
+        .slice(-6)
+        .map((entry) => ({ role: entry.from === "user" ? "user" as const : "assistant" as const, text: entry.text.slice(0, 500) }));
       const response = await api.assistant(message, user.uid, {
         menu: menu.map(({ name, description, allergens, category, price, stock, unavailable }) => ({
           name,
@@ -142,13 +148,14 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
           paymentMethods: websiteStoreConfig.paymentMethods,
           prepTime: `${websiteStoreConfig.prepTimeMinutes.min}-${websiteStoreConfig.prepTimeMinutes.max} minutes`
         }
-      });
-      if (response.status !== "staff_handling") {
+      }, history);
+      if (!response.status) {
         setMessages((current) => [...current, {
-          id: messageId("reply"),
+          id: response.messageId || messageId("reply"),
           from: "bot",
           text: response.text,
           source: response.source,
+          sources: response.sources,
           createdAt: Date.now()
         }]);
       }
@@ -156,6 +163,33 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
     } catch {
       setFailedMessage(message);
       setRequestStatus("error");
+    }
+  };
+
+  const askForStaff = async () => {
+    if (conversationRef.current.mode !== "assistant" || requestStatus === "sending") return;
+    setRequestStatus("sending");
+    try {
+      const result = await requestSupportStaff(user.uid, { ...user, role: "customer" }, "Customer requested human support");
+      conversationRef.current = result.conversation;
+      setConversation(result.conversation);
+      setRequestStatus("idle");
+    } catch {
+      setFailedMessage("");
+      setRequestStatus("error");
+    }
+  };
+
+  const rateMessage = async (message: AssistantMessage, rating: "helpful" | "unhelpful") => {
+    const previous = message.rating;
+    setMessages((current) => current.map((entry) => entry.id === message.id
+      ? { ...entry, rating: previous === rating ? undefined : rating }
+      : entry));
+    try {
+      if (previous === rating) await api.removeAssistantMessageRating(message.id);
+      else await api.rateAssistantMessage(message.id, rating, ["local", "groq", "openai"].includes(String(message.source)) ? message.source as "local" | "groq" | "openai" : "assistant");
+    } catch {
+      setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: previous } : entry));
     }
   };
 
@@ -177,7 +211,9 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       <div className={`assistant-mode-status ${conversation.mode}`} role="status">
         {conversation.mode === "staff"
           ? `${conversation.assignedStaffName || "A support team member"} is handling your conversation. The assistant is paused.`
-          : "Assistant replies are active."}
+          : conversation.mode === "waiting"
+            ? "The support team has been notified. The assistant is paused while you wait."
+            : "Assistant replies are active."}
       </div>
       <div className="assistant-messages" aria-live="polite">
         {messages.map((message) => {
@@ -186,7 +222,15 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
             <div key={message.id} className={message.from}>
               <span>{message.text}</span>
               {sourceLabel && <small>{sourceLabel}</small>}
+              {message.sources?.length ? <div className="assistant-sources" aria-label="Answer sources">{message.sources.map((source) => <span key={source}>{source}</span>)}</div> : null}
               <time>{new Date(message.createdAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</time>
+              {message.from === "bot" && message.id !== "welcome" && !String(message.source || "").startsWith("Staff support") && (
+                <div className="assistant-feedback" aria-label="Rate this answer">
+                  <button type="button" className={message.rating === "helpful" ? "active" : ""} aria-label="Helpful answer" aria-pressed={message.rating === "helpful"} onClick={() => void rateMessage(message, "helpful")}><ThumbsUp size={15} aria-hidden="true" /></button>
+                  <button type="button" className={message.rating === "unhelpful" ? "active" : ""} aria-label="Unhelpful answer" aria-pressed={message.rating === "unhelpful"} onClick={() => void rateMessage(message, "unhelpful")}><ThumbsDown size={15} aria-hidden="true" /></button>
+                  {message.rating && <small>Feedback saved</small>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -194,11 +238,12 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
         {requestStatus === "error" && (
           <div className="bot assistant-error" role="alert">
             <span>I could not retrieve an answer. Please retry or try again later.</span>
-            <button type="button" onClick={() => void requestAnswer(failedMessage, { saveSupportMessage: false })}>Retry</button>
+            {failedMessage && <button type="button" onClick={() => void requestAnswer(failedMessage, { saveSupportMessage: false })}>Retry</button>}
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
+      {conversation.mode === "assistant" && <div className="assistant-human-action"><button type="button" onClick={() => void askForStaff()} disabled={requestStatus === "sending"}><Headphones size={16} aria-hidden="true" />Talk to staff</button></div>}
       {conversation.mode === "assistant" && <div className="assistant-suggestions" aria-label="Suggested questions">
         {suggestions.map((suggestion) => (
           <button type="button" key={suggestion} disabled={requestStatus === "sending"} onClick={() => void requestAnswer(suggestion)}>{suggestion}</button>
@@ -206,7 +251,7 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       </div>}
       <form onSubmit={send}>
         <label className="visually-hidden" htmlFor="assistant-message">Message customer support</label>
-        <input id="assistant-message" maxLength={500} disabled={requestStatus === "sending"} value={input} onChange={(event) => setInput(event.target.value)} placeholder={conversation.mode === "staff" ? "Message the support team..." : "Ask a question..."} />
+        <input id="assistant-message" maxLength={500} disabled={requestStatus === "sending"} value={input} onChange={(event) => setInput(event.target.value)} placeholder={conversation.mode === "assistant" ? "Ask a question..." : "Message the support team..."} />
         <button type="submit" disabled={!input.trim() || requestStatus === "sending"}>{requestStatus === "sending" ? "Sending" : "Send"}</button>
       </form>
     </aside>

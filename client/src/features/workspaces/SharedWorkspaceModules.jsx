@@ -502,8 +502,8 @@ export function SupportChat({ messages, user, notify }) {
   const assignedElsewhere = conversationState?.mode === "staff"
     && conversationState.assignedStaffId !== user.uid
     && user.role !== "owner";
-  const canResumeAssistant = conversationState?.mode === "staff"
-    && (conversationState.assignedStaffId === user.uid || user.role === "owner");
+  const canResumeAssistant = conversationState?.mode === "waiting"
+    || (conversationState?.mode === "staff" && (conversationState.assignedStaffId === user.uid || user.role === "owner"));
 
   const send = async (event) => {
     event.preventDefault();
@@ -551,8 +551,8 @@ export function SupportChat({ messages, user, notify }) {
           <header className="support-thread-header">
             <div><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer conversation" : "Messages will appear here"}</small></div>
             {selectedConversation && <div className="support-mode-actions">
-              <span className={`support-mode-badge ${conversationState?.mode === "staff" ? "staff" : "assistant"}`}>
-                {conversationState?.mode === "staff" ? `Handled by ${conversationState.assignedStaffName || "support team"}` : "Assistant active"}
+              <span className={`support-mode-badge ${conversationState?.mode || "assistant"}`}>
+                {conversationState?.mode === "staff" ? `Handled by ${conversationState.assignedStaffName || "support team"}` : conversationState?.mode === "waiting" ? "Waiting for staff" : "Assistant active"}
               </span>
               {canResumeAssistant && <button className="btn btn-outline-dark btn-sm" type="button" disabled={submitting} onClick={resumeAssistant}>Return to assistant</button>}
             </div>}

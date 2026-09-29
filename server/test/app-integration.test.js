@@ -422,3 +422,50 @@ test("staff takeover pauses customer assistant responses and rider access is den
     assert.equal(response.status, 403);
   });
 });
+
+test("customer can request staff once and rate only their own assistant messages", async () => {
+  const metrics = createOperationalMetrics();
+  const fixture = firebaseFixture({
+    users: {
+      "customer-1": { role: "customer", name: "Juan" },
+      "staff-1": { role: "staff", name: "Mika" },
+      "owner-1": { role: "owner", name: "Owner" }
+    },
+    assistantResponses: {
+      "customer-1": {
+        "reply-123": { customerId: "customer-1", source: "local", sources: ["Current menu"], createdAt: 1 }
+      }
+    }
+  });
+  await withApp({ firebase: fixture.firebase, user: { uid: "customer-1", role: "customer", name: "Juan" }, metrics }, async (baseUrl) => {
+    const request = await fetch(`${baseUrl}/api/support/conversations/customer-1/request-staff`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "I need help" })
+    });
+    assert.equal(request.status, 201);
+    assert.equal((await request.json()).conversation.mode, "waiting");
+
+    const duplicate = await fetch(`${baseUrl}/api/support/conversations/customer-1/request-staff`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal((await duplicate.json()).duplicate, true);
+
+    const rating = await fetch(`${baseUrl}/api/assistant/feedback/reply-123`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: "helpful", source: "local" })
+    });
+    assert.equal(rating.status, 200);
+    assert.equal(fixture.database.read("assistantFeedback/customer-1/reply-123/rating"), "helpful");
+    assert.equal(metrics.snapshot().counters.aiSupportEscalations, 1);
+    assert.equal(metrics.snapshot().counters.aiHelpfulRatings, 1);
+
+    const removed = await fetch(`${baseUrl}/api/assistant/feedback/reply-123`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+    assert.equal(fixture.database.read("assistantFeedback/customer-1/reply-123"), undefined);
+  });
+});

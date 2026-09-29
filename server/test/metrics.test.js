@@ -17,6 +17,9 @@ test("records bounded aggregate metrics without request or customer data", () =>
   metrics.increment("socketDisconnections", 20);
   metrics.increment("stockConflicts", Number.NaN);
   metrics.recordRecoverySummary({ incomplete_cancellation: 1, unresolved_cod_handoff: 2 });
+  metrics.increment("aiChatRequests");
+  metrics.increment("aiHelpfulRatings", 2);
+  metrics.increment("aiProviderFailures");
 
   const snapshot = metrics.snapshot();
   assert.equal(snapshot.requests.total, 2);
@@ -26,6 +29,9 @@ test("records bounded aggregate metrics without request or customer data", () =>
   assert.equal(snapshot.counters.stockConflicts, 3);
   assert.equal(snapshot.counters.cancellationDiscrepancies, 1);
   assert.equal(snapshot.counters.codDiscrepancies, 2);
+  assert.equal(snapshot.counters.aiChatRequests, 1);
+  assert.equal(snapshot.counters.aiHelpfulRatings, 2);
+  assert.equal(snapshot.counters.aiProviderFailures, 1);
   assert.equal(snapshot.latency.buckets.le250Ms, 1);
   assert.equal(snapshot.latency.buckets.over5000Ms, 1);
   assert.equal(snapshot.alerts.stockConflicts, true);

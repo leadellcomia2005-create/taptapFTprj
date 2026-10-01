@@ -43,6 +43,8 @@ const commonEmailDomainTypos = new Map([
 const repeatedPublicSuffix = /\.(com|net|org|edu|gov)\.\1$/i;
 const accountRecoveryMessage = "An account may already use this email. Try signing in, resetting your password, or continuing email verification.";
 const resendWindowMs = 24 * 60 * 60 * 1000;
+const customerTermsVersion = "2026-10-01";
+const customerPrivacyVersion = "2026-10-01";
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, maxLength) : "";
@@ -418,8 +420,10 @@ export async function createCustomerRegistration({
       consent: {
         termsAccepted: true,
         termsAcceptedAt: now,
+        termsVersion: customerTermsVersion,
         privacyAccepted: true,
-        privacyAcceptedAt: now
+        privacyAcceptedAt: now,
+        privacyVersion: customerPrivacyVersion
       },
       registration: {
         source: "server",

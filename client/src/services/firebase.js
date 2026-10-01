@@ -213,6 +213,7 @@ function addDemoStockHistory(data, itemId, entry) {
 }
 
 const handoffOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+let pendingRoleValidation = null;
 
 export function observeAuth(callback) {
   if (firebaseEnabled) {
@@ -222,10 +223,18 @@ export function observeAuth(callback) {
       if (!active) return;
       unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) return callback(null);
+        if (auth.currentUser?.uid !== user.uid) return;
+        const roleValidation = pendingRoleValidation;
+        if (roleValidation) {
+          const accepted = await roleValidation.promise;
+          if (!accepted || !active || auth.currentUser?.uid !== user.uid) return;
+        }
         const token = await user.getIdTokenResult(true);
+        if (!active || auth.currentUser?.uid !== user.uid) return;
         if (token.claims.mfaSession !== true || token.claims.email_verified !== true) {
           try {
             const status = await api.twoFactorStatus();
+            if (!active || auth.currentUser?.uid !== user.uid) return;
             return callback({
               uid: user.uid,
               email: user.email,
@@ -242,6 +251,7 @@ export function observeAuth(callback) {
           }
         }
         const profile = await get(ref(db, `users/${user.uid}`));
+        if (!active || auth.currentUser?.uid !== user.uid) return;
         callback({
           uid: user.uid,
           email: user.email,
@@ -267,17 +277,39 @@ export function observeAuth(callback) {
 export async function login(email, password, requestedRole, demoAccounts) {
   if (firebaseEnabled) {
     await authPersistenceReady;
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    const status = await api.twoFactorStatus();
-    const role = status.role || "customer";
-    if (requestedRole && requestedRole !== role) {
-      await signOut(auth);
-      throw new Error(`This account is registered as ${role}, not ${requestedRole}.`);
+    let settleRoleValidation;
+    const roleValidation = {
+      promise: new Promise((resolve) => { settleRoleValidation = resolve; })
+    };
+    pendingRoleValidation = roleValidation;
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      const status = await api.twoFactorStatus(requestedRole);
+      const role = status.role || "customer";
+      if (requestedRole && requestedRole !== role) {
+        throw new Error(roleLoginMismatchMessage(role, requestedRole));
+      }
+      settleRoleValidation(true);
+      return credential.user;
+    } catch (error) {
+      try {
+        if (auth.currentUser) await signOut(auth);
+      } finally {
+        settleRoleValidation(false);
+      }
+      throw error;
+    } finally {
+      if (pendingRoleValidation === roleValidation) pendingRoleValidation = null;
     }
-    return credential.user;
   }
 
   if (!demoModeEnabled) throw new Error("Preview accounts are disabled. Configure Firebase or explicitly enable demo mode.");
+  const credentialMatch = Object.entries(demoAccounts).find(
+    ([, account]) => account.email === email && account.password === password
+  );
+  if (credentialMatch && credentialMatch[0] !== requestedRole) {
+    throw new Error(roleLoginMismatchMessage(credentialMatch[0], requestedRole));
+  }
   const match = Object.entries(demoAccounts).find(
     ([role, account]) => role === requestedRole && account.email === email && account.password === password
   );
@@ -294,6 +326,14 @@ export async function login(email, password, requestedRole, demoAccounts) {
   demoUser = user;
   window.dispatchEvent(new Event("taptap-demo-auth"));
   return user;
+}
+
+function roleLoginMismatchMessage(actualRole, requestedRole) {
+  if (actualRole === "customer" && requestedRole !== "customer") {
+    return "Customer accounts can only sign in through Customer ordering. Choose Customer ordering and try again.";
+  }
+  const roleLabel = requestedRole ? `${requestedRole} ` : "selected ";
+  return `This account cannot use the ${roleLabel}sign-in. Choose the matching account type and try again.`;
 }
 
 export async function completeTwoFactorSession(customToken) {

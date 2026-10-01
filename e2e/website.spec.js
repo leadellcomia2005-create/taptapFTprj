@@ -120,10 +120,55 @@ test("landing page, registration entry, and accessibility are operational", asyn
   const panel = page.locator("[data-login-modal-panel]");
   await panel.getByRole("button", { name: /Customer registration/i }).click();
   await expect(panel.getByRole("heading", { name: /Create customer account/i })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
+  await expect(panel.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
 
   await page.keyboard.press("Escape");
   await expect(navOrderButton).toBeFocused();
   await expectAccessible(page);
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("customer credentials cannot sign in through team portals", async ({ page }) => {
+  const runtime = watchRuntime(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Order now/i }).first().click();
+  const panel = page.locator("[data-login-modal-panel]");
+  await panel.getByRole("button", { name: /Team access/i }).click();
+
+  for (const role of ["owner", "staff", "rider"]) {
+    await panel.getByRole("button", { name: new RegExp(`^${roleLabels[role]}`, "i") }).click();
+    await panel.getByLabel(/Email/i).fill("customer@demo.ph");
+    await panel.locator('input[type="password"]').fill("Customer123!");
+    await panel.getByRole("button", { name: new RegExp(`Sign in as ${role}`, "i") }).click();
+    await expect(panel.getByText(/Customer accounts can only sign in through Customer ordering/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Log out/i })).toHaveCount(0);
+  }
+
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("public legal documents are readable without signing in", async ({ page }) => {
+  const runtime = watchRuntime(page);
+  await page.goto("/#terms");
+  await expect(page.getByRole("heading", { level: 1, name: "Terms and Conditions" })).toBeVisible();
+  await expect(page.getByText("Version 2026-10-01")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "5. Payments" })).toBeVisible();
+  await expectAccessible(page, ".legal-page-shell");
+
+  await page.getByRole("link", { name: "Privacy Notice" }).first().click();
+  await expect(page.getByRole("heading", { level: 1, name: "Privacy Notice" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "5. Your privacy rights" })).toBeVisible();
+
+  await loginAs(page, "customer");
+  await page.getByRole("button", { name: "Open navigation menu" }).click();
+  await page.getByRole("navigation", { name: "Customer navigation" }).getByRole("button", { name: "Personal Info" }).click();
+  await page.getByRole("tab", { name: "Legal" }).click();
+  await expect(page.getByRole("heading", { name: "Your information and agreements" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Terms and Conditions/i })).toHaveAttribute("href", "/#terms");
+  await expect(page.getByRole("link", { name: /Privacy Notice/i })).toHaveAttribute("href", "/#privacy");
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
 });
@@ -189,6 +234,9 @@ test("customer can add a meal, confirm a pin, and complete a COD pickup", async 
   await page.getByRole("button", { name: /^Pickup/i }).click();
   await page.getByLabel(/Mobile number/i).fill("09171234567");
   await expect(page.getByText("Ready to place order.")).toBeVisible();
+  await expect(page.getByText("By placing this order")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
+  await expect(page.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
   await expectAccessible(page, ".checkout-modal");
   await page.getByRole("button", { name: /Place order/i }).click();
   await expect(page.getByRole("heading", { name: /Order history/i })).toBeVisible();

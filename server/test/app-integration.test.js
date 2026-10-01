@@ -127,6 +127,33 @@ test("rejects an unauthenticated API request", async () => {
   });
 });
 
+test("rejects customer credentials from owner, staff, and rider login portals", async () => {
+  const customer = {
+    uid: "customer-1",
+    role: "customer",
+    name: "Customer",
+    email: "customer@example.test",
+    email_verified: true
+  };
+  const { firebase } = firebaseFixture({
+    users: { "customer-1": { role: "customer", name: "Customer" } }
+  });
+  await withApp({ firebase, user: customer }, async (baseUrl) => {
+    for (const role of ["owner", "staff", "rider"]) {
+      const response = await fetch(`${baseUrl}/api/2fa/status?expectedRole=${role}`);
+      const body = await response.json();
+      assert.equal(response.status, 403);
+      assert.equal(body.code, "ROLE_LOGIN_MISMATCH");
+      assert.match(body.error, /Customer accounts can only sign in through Customer ordering/i);
+    }
+
+    const matchingResponse = await fetch(`${baseUrl}/api/2fa/status?expectedRole=customer`);
+    const matchingBody = await matchingResponse.json();
+    assert.equal(matchingResponse.status, 200);
+    assert.equal(matchingBody.role, "customer");
+  });
+});
+
 test("notification read endpoints are user scoped and clear only read records", async () => {
   const now = Date.now();
   const { firebase, database } = firebaseFixture({

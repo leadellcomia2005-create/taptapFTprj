@@ -28,6 +28,7 @@ import { currency, statusLabel } from "./utils/display";
 
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
 const CustomerAssistant = lazy(() => import("./components/CustomerAssistant"));
+const LegalPage = lazy(() => import("./features/legal/LegalPages").then((module) => ({ default: module.LegalPage })));
 const Checkout = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.Checkout })));
 const OrdersView = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.OrdersView })));
 const CustomerProfile = lazy(() => import("./features/customer/CustomerScreens").then((module) => ({ default: module.CustomerProfile })));
@@ -36,6 +37,10 @@ const ReviewsView = lazy(() => import("./features/customer/CustomerScreens").the
 const OwnerWorkspace = lazy(() => import("./features/workspaces/OwnerWorkspace"));
 const StaffWorkspace = lazy(() => import("./features/workspaces/StaffWorkspace"));
 const RiderWorkspace = lazy(() => import("./features/workspaces/RiderWorkspace"));
+const legalDocumentFromHash = (hash = window.location.hash) => {
+  const value = hash.replace(/^#/, "").toLowerCase();
+  return value === "terms" || value === "privacy" ? value : null;
+};
 
 const dayMs = 24 * 60 * 60 * 1000;
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -757,6 +762,7 @@ function TrackingView({ order, onClose }) {
 }
 
 export default function App() {
+  const [legalDocument, setLegalDocument] = useState(() => legalDocumentFromHash());
   const { user, setUser, profile, activeUser, currentUser } = useAuthSession();
   const { view, navigate } = useRoleNavigation(currentUser);
   const [menu, setMenu] = useState(fallbackMenu);
@@ -781,6 +787,12 @@ export default function App() {
   const payingOrderRef = useRef("");
   const activeUserId = activeUser?.uid;
   const activeUserRole = activeUser?.role;
+
+  useEffect(() => {
+    const updateLegalDocument = () => setLegalDocument(legalDocumentFromHash());
+    window.addEventListener("hashchange", updateLegalDocument);
+    return () => window.removeEventListener("hashchange", updateLegalDocument);
+  }, []);
 
   useEffect(() => {
     const updateOnlineState = () => setOnline(navigator.onLine);
@@ -1009,6 +1021,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  if (legalDocument) return <Suspense fallback={<PageLoader />}><LegalPage documentId={legalDocument} /></Suspense>;
   if (user === undefined) return <PageLoader />;
   if (!user) return <LoginPanel />;
   if (user.emailVerified !== true) {

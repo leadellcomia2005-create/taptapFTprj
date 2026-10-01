@@ -292,7 +292,9 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  twoFactorStatus: () => request<TwoFactorStatusResponse>("/2fa/status"),
+  twoFactorStatus: (expectedRole?: UserRole) => request<TwoFactorStatusResponse>(
+    expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status"
+  ),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),
   sendTwoFactorSms: (purpose: TwoFactorPurpose) =>

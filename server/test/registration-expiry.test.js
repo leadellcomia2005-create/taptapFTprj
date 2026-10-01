@@ -35,6 +35,10 @@ test("new customer registrations receive the configured verification deadline", 
   const cleanupEligibleAt = database.read("users/customer-new/registration/cleanupEligibleAt");
   assert.ok(cleanupEligibleAt >= before + 24 * 60 * 60 * 1000);
   assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
+  assert.equal(database.read("users/customer-new/consent/termsVersion"), "2026-10-01");
+  assert.equal(database.read("users/customer-new/consent/privacyVersion"), "2026-10-01");
+  assert.equal(database.read("users/customer-new/consent/termsAccepted"), true);
+  assert.equal(database.read("users/customer-new/consent/privacyAccepted"), true);
 });
 
 test("cleanup waits for the abandonment deadline and preserves protected registrations", async () => {

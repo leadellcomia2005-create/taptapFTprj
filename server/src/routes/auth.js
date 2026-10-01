@@ -12,7 +12,7 @@ import {
   resendCustomerRegistrationVerification,
   verifyTurnstileToken
 } from "../registration.js";
-import { requireVerifiedEmail } from "../security.js";
+import { HttpError, requireVerifiedEmail } from "../security.js";
 import { sendCustomerVerificationEmail, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
 import {
   beginTotpSetup,
@@ -84,6 +84,17 @@ export function createAuthRouter({ config, firebase, authentication }) {
   }));
 
   router.get("/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {
+    const expectedRole = typeof req.query.expectedRole === "string" ? req.query.expectedRole.trim().toLowerCase() : "";
+    const supportedRoles = new Set(["customer", "owner", "staff", "rider"]);
+    if (expectedRole && !supportedRoles.has(expectedRole)) {
+      throw new HttpError(400, "Choose a valid account type.", { code: "INVALID_LOGIN_ROLE" });
+    }
+    if (expectedRole && req.user.role !== expectedRole) {
+      const message = req.user.role === "customer" && expectedRole !== "customer"
+        ? "Customer accounts can only sign in through Customer ordering. Choose Customer ordering and try again."
+        : `This account cannot use the ${expectedRole} sign-in. Choose the matching account type and try again.`;
+      throw new HttpError(403, message, { code: "ROLE_LOGIN_MISMATCH" });
+    }
     const status = serviceStatus();
     res.json(await twoFactorStatus(firebase.db(), req.user, status.twilio, status.emailOtp, req.authToken));
   }));

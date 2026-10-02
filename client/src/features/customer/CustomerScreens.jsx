@@ -465,7 +465,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
             </section>
           </div>
           <div className="modal-footer checkout-footer">
-            <p className="checkout-legal-note">By placing this order, you agree to the <a href="/#terms" target="_blank" rel="noreferrer">Terms and Conditions</a> and acknowledge the <a href="/#privacy" target="_blank" rel="noreferrer">Privacy Notice</a>.</p>
+            <p className="checkout-legal-note">By placing this order, you agree to the <a href="/#terms">Terms and Conditions</a> and acknowledge the <a href="/#privacy">Privacy Notice</a>.</p>
             <div ref={validationSummaryRef} className={`checkout-validation-summary ${checkoutReady ? "ready" : ""}`} role="status" aria-live="polite" tabIndex="-1">{checkoutReady ? "Ready to place order." : checkoutBlockReason}</div>
             <div className="checkout-footer-actions"><button className="btn btn-outline-secondary" type="button" onClick={onClose}>Cancel</button><button className="btn btn-danger" type="submit" disabled={busy}>{busy ? "Processing..." : <>Place order <span aria-hidden="true">·</span> {currency(total)}</>}</button></div>
           </div>
@@ -784,8 +784,8 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
           <section className="profile-tab-panel" role="tabpanel">
             <div className="profile-panel-heading"><p className="eyebrow text-danger">Legal and privacy</p><h3>Your information and agreements</h3><span>Review the customer agreement and how TapTap Foodtrip handles personal information.</span></div>
             <div className="profile-legal-links">
-              <a href="/#terms" target="_blank" rel="noreferrer"><strong>Terms and Conditions</strong><small>Ordering, payments, delivery, cancellations, reviews, and customer responsibilities.</small></a>
-              <a href="/#privacy" target="_blank" rel="noreferrer"><strong>Privacy Notice</strong><small>Information collection, use, service providers, retention, security, and privacy rights.</small></a>
+              <a href="/#terms"><strong>Terms and Conditions</strong><small>Ordering, payments, delivery, cancellations, reviews, and customer responsibilities.</small></a>
+              <a href="/#privacy"><strong>Privacy Notice</strong><small>Information collection, use, service providers, retention, security, and privacy rights.</small></a>
             </div>
             <div className="security-recovery-panel"><strong>Privacy or account request</strong><p>Use Chat Support to ask about your information, request a correction, or begin an account or data-deletion review. Some payment, order, audit, or accounting records may need to be retained.</p></div>
           </section>

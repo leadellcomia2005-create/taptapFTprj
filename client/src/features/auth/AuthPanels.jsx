@@ -781,7 +781,7 @@ function LoginPanel({ onLoggedIn }) {
                 setFieldErrors((current) => ({ ...current, termsAccepted: undefined }));
                 invalidateRegistrationSecurity();
               }} />
-              <span><strong><label htmlFor="registration-terms">I have read and agree to the </label><a href="/#terms" target="_blank" rel="noreferrer">Terms and Conditions</a>.</strong><small>Covers ordering, payment, delivery, cancellation, and responsible website use.</small></span>
+              <span><strong><label htmlFor="registration-terms">I have read and agree to the </label><a href="/#terms">Terms and Conditions</a>.</strong><small>Covers ordering, payment, delivery, cancellation, and responsible website use.</small></span>
             </div>
             <div className={`registration-checkbox ${fieldErrors.privacyAccepted ? "invalid" : ""}`}>
               <input id="registration-privacy" type="checkbox" checked={privacyAccepted} onChange={(event) => {
@@ -789,7 +789,7 @@ function LoginPanel({ onLoggedIn }) {
                 setFieldErrors((current) => ({ ...current, privacyAccepted: undefined }));
                 invalidateRegistrationSecurity();
               }} />
-              <span><strong><label htmlFor="registration-privacy">I acknowledge the </label><a href="/#privacy" target="_blank" rel="noreferrer">Privacy Notice</a>.</strong><small>Explains how account, contact, order, delivery, and support information is used.</small></span>
+              <span><strong><label htmlFor="registration-privacy">I acknowledge the </label><a href="/#privacy">Privacy Notice</a>.</strong><small>Explains how account, contact, order, delivery, and support information is used.</small></span>
             </div>
             {(fieldErrors.termsAccepted || fieldErrors.privacyAccepted) && (
               <small className="registration-field-error">Accept both items before creating an account.</small>
@@ -1183,7 +1183,7 @@ function LoginPanel({ onLoggedIn }) {
         </div>
         <div className="login-footer-bottom">
           <span>&copy; {new Date().getFullYear()} TapTap Foodtrip</span>
-          <div className="login-footer-legal"><a href="/#terms" target="_blank" rel="noreferrer">Terms</a><a href="/#privacy" target="_blank" rel="noreferrer">Privacy</a><button type="button" onClick={() => openLoginModal("customer", "footer_sign_in")}>Customer sign in</button></div>
+          <div className="login-footer-legal"><a href="/#terms">Terms</a><a href="/#privacy">Privacy</a><button type="button" onClick={() => openLoginModal("customer", "footer_sign_in")}>Customer sign in</button></div>
         </div>
       </footer>
 

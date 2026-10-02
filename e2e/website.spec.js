@@ -121,7 +121,9 @@ test("landing page, registration entry, and accessibility are operational", asyn
   await panel.getByRole("button", { name: /Customer registration/i }).click();
   await expect(panel.getByRole("heading", { name: /Create customer account/i })).toBeVisible();
   await expect(panel.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
+  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).not.toHaveAttribute("target", "_blank");
   await expect(panel.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
+  await expect(panel.getByRole("link", { name: "Privacy Notice" })).not.toHaveAttribute("target", "_blank");
 
   await page.keyboard.press("Escape");
   await expect(navOrderButton).toBeFocused();
@@ -148,6 +150,20 @@ test("customer credentials cannot sign in through team portals", async ({ page }
 
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("legal links stay in the current browser tab", async ({ page, context }) => {
+  await page.goto("/");
+  const initialPageCount = context.pages().length;
+  await page.locator(".login-footer-legal").getByRole("link", { name: "Terms", exact: true }).click();
+  await expect(page).toHaveURL(/#terms$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Terms and Conditions" })).toBeVisible();
+  expect(context.pages()).toHaveLength(initialPageCount);
+
+  await page.getByRole("link", { name: "Privacy Notice" }).first().click();
+  await expect(page).toHaveURL(/#privacy$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Privacy Notice" })).toBeVisible();
+  expect(context.pages()).toHaveLength(initialPageCount);
 });
 
 test("public legal documents are readable without signing in", async ({ page }) => {
@@ -236,7 +252,9 @@ test("customer can add a meal, confirm a pin, and complete a COD pickup", async 
   await expect(page.getByText("Ready to place order.")).toBeVisible();
   await expect(page.getByText("By placing this order")).toBeVisible();
   await expect(page.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
+  await expect(page.getByRole("link", { name: "Terms and Conditions" })).not.toHaveAttribute("target", "_blank");
   await expect(page.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
+  await expect(page.getByRole("link", { name: "Privacy Notice" })).not.toHaveAttribute("target", "_blank");
   await expectAccessible(page, ".checkout-modal");
   await page.getByRole("button", { name: /Place order/i }).click();
   await expect(page.getByRole("heading", { name: /Order history/i })).toBeVisible();

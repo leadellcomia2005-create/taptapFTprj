@@ -34,9 +34,11 @@ test("rejects a Turnstile bypass in production", () => {
 test("keeps hosted Firebase credentials separate from local credential paths", () => {
   const config = loadServerConfig({
     CLIENT_ORIGIN: "https://orders.example.com",
+    FIREBASE_WEB_API_KEY: "public-web-api-key",
     FIREBASE_SERVICE_ACCOUNT_JSON_BASE64: "encoded-service-account"
   });
 
+  assert.equal(config.firebase.webApiKey, "public-web-api-key");
   assert.equal(config.firebase.credentialsPath, "");
   assert.equal(config.firebase.serviceAccountJsonBase64, "encoded-service-account");
 });

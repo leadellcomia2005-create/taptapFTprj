@@ -14,6 +14,7 @@ import {
 } from "../registration.js";
 import { HttpError, requireVerifiedEmail } from "../security.js";
 import { sendCustomerVerificationEmail, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
+import { sendFirebaseVerificationEmail } from "../integrations/firebaseVerificationEmail.js";
 import {
   beginTotpSetup,
   finishEnrollment,
@@ -38,6 +39,16 @@ export function createAuthRouter({ config, firebase, authentication }) {
   const emailPrecheckLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8" });
   const verificationResendLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 8, standardHeaders: "draft-8" });
   const { authenticateBootstrap, requireFirebaseAdmin } = authentication;
+  const registrationEmailSender = serviceStatus().emailOtp
+    ? sendCustomerVerificationEmail
+    : config.firebase?.webApiKey
+      ? (_email, _verificationLink, _name, context) => sendFirebaseVerificationEmail({
+        auth: firebase.auth(),
+        uid: context?.uid,
+        webApiKey: config.firebase?.webApiKey,
+        continueUrl: context?.continueUrl
+      })
+      : null;
 
   router.post("/auth/registration-email", emailPrecheckLimiter, validateBody(registrationEmailPrecheckSchema), asyncRoute(async (req, res) => {
     res.json(await checkRegistrationEmail(req.body.email));
@@ -49,7 +60,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
       auth: firebase.auth(),
       input: req.body,
       req,
-      sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
+      sendVerificationEmail: registrationEmailSender,
       appBaseUrl: config.appBaseUrl,
       verificationTtlMs: config.registration?.verificationTtlMs,
       abandonedTtlMs: config.registration?.abandonedTtlMs,
@@ -73,7 +84,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
       db: firebase.db(),
       auth: firebase.auth(),
       user: req.user,
-      sendVerificationEmail: serviceStatus().emailOtp ? sendCustomerVerificationEmail : null,
+      sendVerificationEmail: registrationEmailSender,
       appBaseUrl: config.appBaseUrl,
       verificationTtlMs: config.registration?.verificationTtlMs,
       abandonedTtlMs: config.registration?.abandonedTtlMs,

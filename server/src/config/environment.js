@@ -6,6 +6,7 @@ const environmentSchema = z.object({
   APP_VERSION: z.string().trim().min(1).optional(),
   FIREBASE_DATABASE_URL: z.string().trim().optional(),
   FIREBASE_STORAGE_BUCKET: z.string().trim().optional(),
+  FIREBASE_WEB_API_KEY: z.string().trim().optional(),
   VITE_FIREBASE_STORAGE_BUCKET: z.string().trim().optional(),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().trim().optional(),
   FIREBASE_SERVICE_ACCOUNT_JSON_BASE64: z.string().trim().optional(),
@@ -120,6 +121,7 @@ export function loadServerConfig(environment = process.env) {
     firebase: {
       databaseUrl: env.FIREBASE_DATABASE_URL || "",
       storageBucket: (env.FIREBASE_STORAGE_BUCKET || env.VITE_FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, ""),
+      webApiKey: env.FIREBASE_WEB_API_KEY || "",
       credentialsPath: env.GOOGLE_APPLICATION_CREDENTIALS || "",
       serviceAccountJsonBase64: env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 || ""
     }

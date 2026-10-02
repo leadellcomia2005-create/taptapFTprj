@@ -457,7 +457,10 @@ export async function createCustomerRegistration({
           url: `${baseUrl}/?emailVerified=1`,
           handleCodeInApp: false
         });
-        await sendVerificationEmail(values.email, verificationLink, values.name);
+        await sendVerificationEmail(values.email, verificationLink, values.name, {
+          uid: userRecord.uid,
+          continueUrl: `${baseUrl}/?emailVerified=1`
+        });
         verificationSent = true;
         await db.ref(`users/${userRecord.uid}/registration`).update({
           lastVerificationSentAt: Date.now(),
@@ -596,7 +599,10 @@ export async function resendCustomerRegistrationVerification({
   });
   const source = registrationSource({}, userRecord.email);
   try {
-    await sendVerificationEmail(userRecord.email, verificationLink, profile.name || userRecord.displayName || "Customer");
+    await sendVerificationEmail(userRecord.email, verificationLink, profile.name || userRecord.displayName || "Customer", {
+      uid: user.uid,
+      continueUrl: `${baseUrl}/?emailVerified=1`
+    });
   } catch (error) {
     await writeRegistrationAudit(db, "registration_verification_resend_failed", {
       uid: user.uid,

@@ -6,6 +6,16 @@ import { getMessaging } from "firebase-admin/messaging";
 
 const publicUnavailableMessage = "Account service is unavailable.";
 
+export function decodeServiceAccount(value) {
+  if (!value) return null;
+  const decoded = Buffer.from(value, "base64").toString("utf8");
+  const serviceAccount = JSON.parse(decoded);
+  if (!serviceAccount?.project_id || !serviceAccount?.client_email || !serviceAccount?.private_key) {
+    throw new Error("Firebase service account is incomplete.");
+  }
+  return serviceAccount;
+}
+
 export async function initializeFirebaseAdmin(config, logger) {
   if (!config.databaseUrl) {
     return {
@@ -18,9 +28,12 @@ export async function initializeFirebaseAdmin(config, logger) {
   }
 
   try {
-    const credential = config.credentialsPath
-      ? cert(JSON.parse(readFileSync(config.credentialsPath, "utf8")))
-      : applicationDefault();
+    const inlineServiceAccount = decodeServiceAccount(config.serviceAccountJsonBase64);
+    const credential = inlineServiceAccount
+      ? cert(inlineServiceAccount)
+      : config.credentialsPath
+        ? cert(JSON.parse(readFileSync(config.credentialsPath, "utf8")))
+        : applicationDefault();
     await credential.getAccessToken();
     const app = initializeApp({
       credential,

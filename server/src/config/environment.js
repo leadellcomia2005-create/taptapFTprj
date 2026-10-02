@@ -8,6 +8,7 @@ const environmentSchema = z.object({
   FIREBASE_STORAGE_BUCKET: z.string().trim().optional(),
   VITE_FIREBASE_STORAGE_BUCKET: z.string().trim().optional(),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().trim().optional(),
+  FIREBASE_SERVICE_ACCOUNT_JSON_BASE64: z.string().trim().optional(),
   NODE_ENV: z.string().trim().default("development"),
   TURNSTILE_SECRET_KEY: z.string().trim().optional(),
   TURNSTILE_BYPASS: z.enum(["true", "false"]).default("false"),
@@ -119,7 +120,8 @@ export function loadServerConfig(environment = process.env) {
     firebase: {
       databaseUrl: env.FIREBASE_DATABASE_URL || "",
       storageBucket: (env.FIREBASE_STORAGE_BUCKET || env.VITE_FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, ""),
-      credentialsPath: env.GOOGLE_APPLICATION_CREDENTIALS || ""
+      credentialsPath: env.GOOGLE_APPLICATION_CREDENTIALS || "",
+      serviceAccountJsonBase64: env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 || ""
     }
   };
 }

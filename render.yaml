@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: taptap-foodtrip-api
+    runtime: docker
+    plan: free
+    region: singapore
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_ORIGIN
+        value: https://taptapfoodtrip.xyz,https://www.taptapfoodtrip.xyz,https://taptapftprj-leadell-2026.web.app
+      - key: TRUST_PROXY
+        value: "true"
+      - key: FIREBASE_DATABASE_URL
+        value: https://taptapftprj-leadell-2026-default-rtdb.asia-southeast1.firebasedatabase.app
+      - key: FIREBASE_STORAGE_BUCKET
+        value: taptapftprj-leadell-2026.firebasestorage.app
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON_BASE64
+        sync: false
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: TWO_FACTOR_ENCRYPTION_KEY
+        generateValue: true
+      - key: ENABLE_OPENAI
+        value: "false"
+      - key: ENABLE_GROQ
+        value: "true"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: ENABLE_TWILIO
+        value: "false"
+      - key: ENABLE_PAYMONGO
+        value: "false"
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      - key: TURNSTILE_BYPASS
+        value: "false"
+      - key: TURNSTILE_EXPECTED_ACTION
+        value: customer_registration
+      - key: TURNSTILE_ALLOWED_HOSTNAMES
+        value: taptapfoodtrip.xyz,www.taptapfoodtrip.xyz,taptapftprj-leadell-2026.web.app
+      - key: REGISTRATION_VERIFICATION_TTL_SECONDS
+        value: "180"

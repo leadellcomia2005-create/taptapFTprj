@@ -319,7 +319,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">User access</p><h2>Users & Roles</h2></div></div>
       <div className="row g-3">
-        <div className="col-12"><div className="dashboard-card account-control-note"><p className="eyebrow text-danger">Account control</p><h3>Team access is owner-managed</h3><p>Customers register from the public sign-in page. Owner, staff, and rider accounts are created here, then the user verifies email and sets up account security on first sign-in.</p></div></div>
+        <div className="col-12"><div className="dashboard-card account-control-note"><p className="eyebrow text-danger">Account control</p><h3>Team access is owner-managed</h3><p>Customers register publicly. Owner, staff, and rider accounts are created here, then use the same sign-in form. Their verified account role opens the correct workspace automatically.</p></div></div>
 
         <div className="col-xl-5">
           <form className="dashboard-card owner-create-user-card" onSubmit={createManagedUser}>

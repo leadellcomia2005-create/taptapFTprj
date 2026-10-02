@@ -307,13 +307,15 @@ export async function login(email, password, requestedRole, demoAccounts) {
   const credentialMatch = Object.entries(demoAccounts).find(
     ([, account]) => account.email === email && account.password === password
   );
-  if (credentialMatch && credentialMatch[0] !== requestedRole) {
+  if (requestedRole && credentialMatch && credentialMatch[0] !== requestedRole) {
     throw new Error(roleLoginMismatchMessage(credentialMatch[0], requestedRole));
   }
-  const match = Object.entries(demoAccounts).find(
-    ([role, account]) => role === requestedRole && account.email === email && account.password === password
-  );
-  if (!match) throw new Error("Invalid preview account or role.");
+  const match = requestedRole
+    ? Object.entries(demoAccounts).find(
+      ([role, account]) => role === requestedRole && account.email === email && account.password === password
+    )
+    : credentialMatch;
+  if (!match) throw new Error("Invalid preview email or password.");
   const [role, account] = match;
   const user = {
     uid: `demo-${role}`,

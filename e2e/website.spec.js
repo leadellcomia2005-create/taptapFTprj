@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-const roleLabels = {
-  customer: "Customer",
-  owner: "Owner",
-  staff: "Staff",
-  rider: "Rider"
+const demoCredentials = {
+  customer: { email: "customer@demo.ph", password: "Customer123!" },
+  owner: { email: "owner@taptap.ph", password: "Owner123!" },
+  staff: { email: "staff@taptap.ph", password: "Staff123!" },
+  rider: { email: "rider@taptap.ph", password: "Rider123!" }
 };
 
 const roleHeadings = {
@@ -34,12 +34,9 @@ async function loginAs(page, role) {
   await page.getByRole("button", { name: /Order now/i }).first().click();
   const panel = page.locator("[data-login-modal-panel]");
   await expect(panel).toBeVisible();
-  if (role !== "customer") {
-    await panel.getByRole("button", { name: /Team access/i }).click();
-    await panel.getByRole("button", { name: new RegExp(`^${roleLabels[role]}`, "i") }).click();
-  }
-  const submitName = role === "customer" ? /Sign in and order/i : new RegExp(`Sign in as ${role}`, "i");
-  await panel.getByRole("button", { name: submitName }).click();
+  await panel.getByLabel("Email").fill(demoCredentials[role].email);
+  await panel.getByLabel("Password", { exact: true }).fill(demoCredentials[role].password);
+  await panel.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("button", { name: /Log out/i })).toBeVisible();
 }
 
@@ -103,6 +100,9 @@ test("landing page, registration entry, and accessibility are operational", asyn
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
   await expect(page.locator("#popular-meals .login-meal-card")).toHaveCount(4);
+  const publicFooter = page.locator(".login-home-footer");
+  await expect(publicFooter).not.toContainText("Team access");
+  await expect(publicFooter.getByRole("button", { name: /Owner|Staff|Rider/i })).toHaveCount(0);
 
   const skipLink = page.getByRole("link", { name: /Skip to menu/i });
   await page.keyboard.press("Tab");
@@ -119,11 +119,12 @@ test("landing page, registration entry, and accessibility are operational", asyn
   await navOrderButton.click();
   const panel = page.locator("[data-login-modal-panel]");
   await panel.getByRole("button", { name: /Customer registration/i }).click();
-  await expect(panel.getByRole("heading", { name: /Create customer account/i })).toBeVisible();
-  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
-  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).not.toHaveAttribute("target", "_blank");
-  await expect(panel.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
-  await expect(panel.getByRole("link", { name: "Privacy Notice" })).not.toHaveAttribute("target", "_blank");
+  await expect(page.getByRole("heading", { name: /Create your account/i })).toBeVisible();
+  await expect(panel).toHaveClass(/registration-card-minimal/);
+  await expect(panel.locator(".firebase-registration-flow")).toHaveCount(0);
+  await expect(panel).toContainText("Step 1 of 3");
+  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).toHaveCount(0);
+  await expect(panel.getByRole("link", { name: "Privacy Notice" })).toHaveCount(0);
 
   await page.keyboard.press("Escape");
   await expect(navOrderButton).toBeFocused();
@@ -132,24 +133,42 @@ test("landing page, registration entry, and accessibility are operational", asyn
   expect(runtime.deferredRequests).toEqual([]);
 });
 
-test("customer credentials cannot sign in through team portals", async ({ page }) => {
+test("one sign-in form routes accounts by their trusted role", async ({ page }) => {
   const runtime = watchRuntime(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Order now/i }).first().click();
   const panel = page.locator("[data-login-modal-panel]");
-  await panel.getByRole("button", { name: /Team access/i }).click();
-
-  for (const role of ["owner", "staff", "rider"]) {
-    await panel.getByRole("button", { name: new RegExp(`^${roleLabels[role]}`, "i") }).click();
-    await panel.getByLabel(/Email/i).fill("customer@demo.ph");
-    await panel.locator('input[type="password"]').fill("Customer123!");
-    await panel.getByRole("button", { name: new RegExp(`Sign in as ${role}`, "i") }).click();
-    await expect(panel.getByText(/Customer accounts can only sign in through Customer ordering/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Log out/i })).toHaveCount(0);
-  }
+  await expect(panel.getByRole("button", { name: /Team access|Owner|Staff|Rider/i })).toHaveCount(0);
+  await panel.getByLabel("Email").fill(demoCredentials.owner.email);
+  await panel.getByLabel("Password", { exact: true }).fill(demoCredentials.owner.password);
+  await panel.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: roleHeadings.owner })).toBeVisible();
 
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("registration separates account details from security consent", async ({ page }) => {
+  await page.goto("/?register=true");
+  const panel = page.locator("[data-login-modal-panel]");
+  await panel.getByLabel("Full name").fill("Minimal Flow Tester");
+  await panel.getByLabel("Email").fill("minimal.flow.taptap@gmail.com");
+  await panel.getByLabel("Password", { exact: true }).fill("TapTapPhase9!Zx");
+  await panel.getByLabel("Confirm password").fill("TapTapPhase9!Zx");
+  await expect(panel.locator(".registration-email-status.eligible")).toBeVisible();
+  await panel.getByRole("button", { name: "Continue", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "Secure your account" })).toBeVisible();
+  await expect(panel).toContainText("Step 2 of 3");
+  await expect(panel.getByLabel("Full name")).toHaveCount(0);
+  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).toHaveAttribute("href", "/#terms");
+  await expect(panel.getByRole("link", { name: "Terms and Conditions" })).not.toHaveAttribute("target", "_blank");
+  await expect(panel.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/#privacy");
+  await expect(panel.getByRole("link", { name: "Privacy Notice" })).not.toHaveAttribute("target", "_blank");
+
+  await panel.getByRole("button", { name: "Back to account details" }).click();
+  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+  await expect(panel.getByLabel("Full name")).toHaveValue("Minimal Flow Tester");
 });
 
 test("legal links stay in the current browser tab", async ({ page, context }) => {

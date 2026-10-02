@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronDown, Clock, CreditCard, Eye, EyeOff, MapPin, ShieldCheck, Star, Store, Truck, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Clock, CreditCard, Eye, EyeOff, MailCheck, MapPin, ShieldCheck, Star, Store, Truck, X } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { formatStoreHoursLabel, getWebsiteOpenStatus, paymentMethodLabels, serviceAvailabilityLabels, websiteStoreConfig } from "../../config/appConfig";
 import { demoAccounts, fallbackMenu } from "../../data/menu";
@@ -28,13 +28,6 @@ import { authenticateCustomerPasskey, passkeysSupported, registerCustomerPasskey
 import { currency } from "../../utils/display";
 import { menuAvailability } from "../../utils/operations";
 import { isRegistrationEmailSyntaxValid, normalizeFullName, passwordChecklist, validateCustomerRegistrationForm } from "../../utils/registrationValidation";
-
-const loginRoleOptions = [
-  { id: "customer", label: "Customer", detail: "Order meals" },
-  { id: "owner", label: "Owner", detail: "Run the store" },
-  { id: "staff", label: "Staff", detail: "Serve orders" },
-  { id: "rider", label: "Rider", detail: "Deliver food" }
-];
 
 const popularMealPriority = ["porkchop-meal", "tapa-meal", "sisig-meal", "chicken-wings-meal", "boneless-chicken-meal", "lechon-kawali-meal"];
 const popularMealDetails = {
@@ -280,7 +273,6 @@ function LoginPanel({ onLoggedIn }) {
     { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
     { id: "session", label: "Security setup", detail: "Required after your first sign in.", status: "pending" }
   ];
-  const [role, setRole] = useState("customer");
   const [registering, setRegistering] = useState(registrationRequested);
   const [name, setName] = useState("");
   const [email, setEmail] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer.email);
@@ -299,8 +291,8 @@ function LoginPanel({ onLoggedIn }) {
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
   const [registrationResult, setRegistrationResult] = useState(null);
+  const [registrationPhase, setRegistrationPhase] = useState("account");
   const [loginModalOpen, setLoginModalOpen] = useState(registrationRequested);
-  const [teamAccessOpen, setTeamAccessOpen] = useState(false);
   const [openStatus, setOpenStatus] = useState(() => getWebsiteOpenStatus());
   const [landingMenu, setLandingMenu] = useState(fallbackMenu);
   const [activeMenuCategory, setActiveMenuCategory] = useState("all");
@@ -442,8 +434,6 @@ function LoginPanel({ onLoggedIn }) {
       if (next) trackRegistrationStart(demoModeEnabled ? "demo" : "firebase");
       return next;
     });
-    setRole("customer");
-    setTeamAccessOpen(false);
     setName("");
     setEmail("");
     setPassword("");
@@ -459,35 +449,12 @@ function LoginPanel({ onLoggedIn }) {
     setError("");
     setRegistrationResult(null);
     setRegistrationSteps(registrationStepDefaults);
-  };
-
-  const selectRole = (nextRole) => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("register");
-    window.history.replaceState({}, "", url);
-    setRole(nextRole);
-    setEmail(demoModeEnabled ? demoAccounts[nextRole].email : "");
-    setPassword(demoModeEnabled ? demoAccounts[nextRole].password : "");
-    setConfirmPassword("");
-    setTermsAccepted(false);
-    setPrivacyAccepted(false);
-    setBotField("");
-    setTurnstileToken("");
-    setTurnstileMessage("");
-    setTurnstileResetKey((current) => current + 1);
-    setEmailPrecheck({ status: "idle", message: "" });
-    setFieldErrors({});
-    setRegistering(false);
-    setTeamAccessOpen(nextRole !== "customer");
-    setRegistrationResult(null);
-    setRegistrationSteps(registrationStepDefaults);
+    setRegistrationPhase("account");
   };
 
   const openLoginModal = (preferredRole, source = "landing") => {
-    trackLandingOrderEntry(source, preferredRole || role);
+    trackLandingOrderEntry(source, preferredRole || "customer");
     lastFocusedElementRef.current = document.activeElement;
-    if (preferredRole && !registering) selectRole(preferredRole);
-    if (!preferredRole && role === "customer") setTeamAccessOpen(false);
     setLoginModalOpen(true);
   };
 
@@ -533,14 +500,15 @@ function LoginPanel({ onLoggedIn }) {
         }
         const result = await registerCustomer(validation.values, updateRegistrationStep);
         setRegistrationResult(result);
+        setRegistrationPhase("verify");
         trackRegistrationComplete(demoModeEnabled ? "demo" : "firebase");
         setPassword("");
         setConfirmPassword("");
         setTurnstileToken("");
         setTurnstileResetKey((current) => current + 1);
       } else {
-        await login(email, password, role, demoAccounts);
-        trackLogin(demoModeEnabled ? "demo" : "firebase", role);
+        const signedInUser = await login(email, password, undefined, demoAccounts);
+        trackLogin(demoModeEnabled ? "demo" : "firebase", signedInUser?.role || "customer");
         onLoggedIn?.();
       }
     } catch (authError) {
@@ -556,7 +524,7 @@ function LoginPanel({ onLoggedIn }) {
 
   const submitLabel = busy
     ? registering ? "Creating your account..." : "Signing in..."
-    : registering ? "Create account" : role === "customer" ? "Sign in and order" : `Sign in as ${role}`;
+    : registering ? "Create account" : "Sign in";
   const passwordItems = passwordChecklist(password);
   const registrationReadiness = validateCustomerRegistrationForm({
     name,
@@ -581,6 +549,35 @@ function LoginPanel({ onLoggedIn }) {
   const registrationReadinessMessage = incompleteRegistrationLabels.length
     ? `Complete ${incompleteRegistrationLabels.join(", ")} to load the security check.`
     : "Complete the required account details and agreements to continue.";
+  const continueRegistration = () => {
+    const validation = validateCustomerRegistrationForm({
+      name,
+      email,
+      password,
+      confirmPassword,
+      termsAccepted: true,
+      privacyAccepted: true,
+      botField: "",
+      turnstileRequired: false
+    });
+    const accountErrors = ["name", "email", "password", "confirmPassword"].reduce((errors, key) => {
+      if (validation.errors[key]) errors[key] = validation.errors[key];
+      return errors;
+    }, {});
+    if (!accountErrors.email && emailPrecheck.status !== "eligible") {
+      accountErrors.email = emailPrecheck.status === "checking"
+        ? "Wait while the email domain is checked."
+        : emailPrecheck.message || "Enter an email address that can receive verification messages.";
+    }
+    if (Object.keys(accountErrors).length) {
+      setFieldErrors(accountErrors);
+      setError("Check the highlighted account details.");
+      return;
+    }
+    setFieldErrors({});
+    setError("");
+    setRegistrationPhase("security");
+  };
   useEffect(() => {
     if (!registering) return undefined;
     const normalizedEmail = email.trim().toLowerCase();
@@ -635,42 +632,35 @@ function LoginPanel({ onLoggedIn }) {
     { question: "Can I track or cancel an order?", answer: "Signed-in customers can follow status updates. Eligible orders can be cancelled while they are still pending or newly received." }
   ];
 
+  const registrationProgressVisible = busy || Boolean(registrationResult) || registrationSteps.some((step) => step.status !== "pending");
   const loginCard = (
-    <form className="login-card" onSubmit={submit} data-login-modal-panel>
-      <div className="login-card-header">
-        <div className="brand-lockup"><BrandMark /><div><strong>TapTap</strong><small>FOODTRIP</small></div></div>
-        <span>{registering ? "Customer signup" : loginRoleOptions.find((item) => item.id === role)?.label}</span>
-      </div>
-      <p className="eyebrow text-danger">TapTap account</p>
-      <h2>{registering ? "Create customer account" : "Welcome back"}</h2>
-      <p className="login-card-copy">{firebaseEnabled ? "Sign in to continue your foodtrip." : demoModeEnabled ? "Sample accounts are ready for this preview." : "Connect Firebase to sign in."}</p>
+    <form
+      className={`login-card ${registering ? "registration-card-minimal" : ""}`}
+      onSubmit={registering && registrationPhase === "account" ? (event) => { event.preventDefault(); continueRegistration(); } : submit}
+      data-login-modal-panel
+    >
       {!registering && (
-        <div className="login-access-choice">
-          <button type="button" className={`login-customer-choice ${role === "customer" ? "active" : ""}`} aria-pressed={role === "customer"} onClick={() => selectRole("customer")}>
-            <span>
-              <strong>Customer ordering</strong>
-              <small>Browse meals, checkout, and track orders.</small>
-            </span>
-          </button>
-          <button type="button" className={`login-team-toggle ${teamAccessOpen ? "active" : ""}`} aria-expanded={teamAccessOpen} aria-controls="team-role-options" onClick={() => setTeamAccessOpen((current) => !current)}>
-            <span>
-              <strong>Team access</strong>
-              <small>Owner, staff, and rider sign-in.</small>
-            </span>
-          </button>
-        </div>
-      )}
-      {!registering && (teamAccessOpen || role !== "customer") && (
-        <div className="role-tabs team-role-tabs" id="team-role-options" aria-label="Choose team account role">
-          {loginRoleOptions.filter((item) => item.id !== "customer").map((item) => (
-            <button type="button" key={item.id} className={role === item.id ? "active" : ""} aria-pressed={role === item.id} onClick={() => selectRole(item.id)}>
-              <strong>{item.label}</strong>
-              <small>{item.detail}</small>
-            </button>
-          ))}
-        </div>
+        <p className="login-card-copy login-unified-copy">{firebaseEnabled
+          ? "Use your TapTap account. Your access opens automatically."
+          : demoModeEnabled
+            ? "Use any available preview account. Its workspace opens automatically."
+            : "Connect Firebase to sign in."}</p>
       )}
       {registering && (
+        <div className="registration-phase-header" aria-label={`Registration step ${registrationPhase === "account" ? 1 : registrationPhase === "security" ? 2 : 3} of 3`}>
+          <div className="registration-phase-track" aria-hidden="true">
+            {["account", "security", "verify"].map((phase, index) => (
+              <span className={registrationPhase === phase || (["security", "verify"].includes(registrationPhase) && index === 0) || (registrationPhase === "verify" && index === 1) ? "active" : ""} key={phase} />
+            ))}
+          </div>
+          <p className="registration-minimal-intro">
+            {registrationPhase === "account" && "Step 1 of 3 · Enter your account details."}
+            {registrationPhase === "security" && "Step 2 of 3 · Review consent and complete the security check."}
+            {registrationPhase === "verify" && "Step 3 of 3 · Verify your email to finish."}
+          </p>
+        </div>
+      )}
+      {registering && registrationPhase === "account" && (
         <label className="form-label">Full name
           <input
             aria-describedby={fieldErrors.name ? "registration-name-error" : undefined}
@@ -689,7 +679,7 @@ function LoginPanel({ onLoggedIn }) {
           {fieldErrors.name && <small className="registration-field-error" id="registration-name-error">{fieldErrors.name}</small>}
         </label>
       )}
-      <label className="form-label">Email
+      {(!registering || registrationPhase === "account") && <label className="form-label">Email
         <input
           aria-describedby={fieldErrors.email ? "registration-email-error" : undefined}
           aria-invalid={Boolean(fieldErrors.email)}
@@ -725,8 +715,8 @@ function LoginPanel({ onLoggedIn }) {
             )}
           </div>
         )}
-      </label>
-      <label className="form-label">Password
+      </label>}
+      {(!registering || registrationPhase === "account") && <label className="form-label">Password
         <span className="login-password-field">
           <input
             aria-describedby={fieldErrors.password ? "registration-password-error" : undefined}
@@ -748,8 +738,8 @@ function LoginPanel({ onLoggedIn }) {
           </button>
         </span>
         {fieldErrors.password && <small className="registration-field-error" id="registration-password-error">{fieldErrors.password}</small>}
-      </label>
-      {registering && (
+      </label>}
+      {registering && registrationPhase === "account" && (
         <>
           <label className="form-label">Confirm password
             <input
@@ -774,6 +764,10 @@ function LoginPanel({ onLoggedIn }) {
               <span className={item.valid ? "valid" : ""} key={item.id}>{item.label}</span>
             ))}
           </div>
+        </>
+      )}
+      {registering && registrationPhase === "security" && (
+        <>
           <div className="registration-consent-panel">
             <div className={`registration-checkbox ${fieldErrors.termsAccepted ? "invalid" : ""}`}>
               <input id="registration-terms" type="checkbox" checked={termsAccepted} onChange={(event) => {
@@ -826,7 +820,7 @@ function LoginPanel({ onLoggedIn }) {
           )}
         </>
       )}
-      {registering && (
+      {registering && registrationPhase === "security" && registrationProgressVisible && (
         <div className="firebase-registration-flow" aria-live="polite">
           <div className="registration-flow-heading">
             <div><strong>Creating your account</strong><small>Setting up your secure customer profile.</small></div>
@@ -838,41 +832,50 @@ function LoginPanel({ onLoggedIn }) {
               <div><strong>{step.label}</strong><small>{step.detail}</small></div>
             </div>
           ))}
-          {registrationResult && (
-            <div className="registration-result">
-              <div>
-                <strong>{registrationVerificationExpired ? "Registration session ended" : "Customer account created"}</strong>
-                <span>{registrationVerificationExpired
-                  ? "Your account was not deleted. Sign in to request a new verification session."
-                  : `Verify your email within ${verificationCountdownLabel(registrationVerificationSeconds)} to continue this registration session.`}</span>
-              </div>
-              <ul>
-                <li><b>Account created</b><span>Your customer profile was saved.</span></li>
-                <li><b>Email verification required</b><span>{registrationResult.verificationSent ? "A verification email was sent." : "Sign in later to resend the verification email."}</span></li>
-                <li><b>Time remaining</b><span>{registrationVerificationExpired ? "Expired" : verificationCountdownLabel(registrationVerificationSeconds)}</span></li>
-                <li><b>Security setup required</b><span>After sign in, choose passkey, email code, or security app.</span></li>
-              </ul>
-              <div className="registration-result-actions">
-                {!registrationVerificationExpired && registrationInbox && <a className="btn btn-outline-danger btn-sm" href={registrationInbox.href} target="_blank" rel="noreferrer">{registrationInbox.label}</a>}
-                <button type="button" className="btn btn-danger btn-sm" onClick={toggleRegistration}>Back to sign in</button>
-              </div>
-              {!registrationInbox && !registrationVerificationExpired && <small>Open your email provider and check Inbox and Spam.</small>}
-              {registrationVerificationExpired && <small>The verification link may still exist, but the website session must be restarted after secure sign-in.</small>}
-              {!registrationResult.verificationSent && <small>Use Resend verification after signing in if the email did not arrive.</small>}
-            </div>
-          )}
+        </div>
+      )}
+      {registering && registrationPhase === "verify" && registrationResult && (
+        <div className="registration-verification" aria-live="polite">
+          <span className="registration-verification-icon" aria-hidden="true"><MailCheck size={28} /></span>
+          <div>
+            <strong>{registrationVerificationExpired ? "Verification time ended" : "Check your email"}</strong>
+            <p>{registrationVerificationExpired
+              ? "Your account is saved. Sign in to start a new verification session."
+              : <>We sent a verification link to <b>{registrationResult.email}</b>.</>}</p>
+          </div>
+          <div className={`registration-verification-timer ${registrationVerificationExpired ? "expired" : ""}`}>
+            <small>{registrationVerificationExpired ? "Session expired" : "Time remaining"}</small>
+            <strong>{registrationVerificationExpired ? "00:00" : verificationCountdownLabel(registrationVerificationSeconds)}</strong>
+          </div>
+          <p className="registration-verification-help">
+            {registrationResult.verificationSent
+              ? "Open the message and select the verification link. Check Spam if it does not appear in your inbox."
+              : "The email could not be sent. Sign in and use Resend verification."}
+          </p>
+          <div className="registration-verification-actions">
+            {!registrationVerificationExpired && registrationInbox && <a className="btn btn-danger" href={registrationInbox.href} target="_blank" rel="noreferrer">{registrationInbox.label}</a>}
+            <button type="button" className="btn btn-outline-danger" onClick={toggleRegistration}>Back to sign in</button>
+          </div>
         </div>
       )}
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
-      <button className="btn btn-danger w-100 login-submit-button" disabled={busy || Boolean(registering && registrationResult)}>
-        {submitLabel}
-      </button>
-      <div className="login-secondary-actions">
-        <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>
-          {registering ? "Back to sign in" : "Customer registration"}
+      {(!registering || registrationPhase !== "verify") && (
+        <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
+          {registering && registrationPhase === "account" ? "Continue" : submitLabel}
         </button>
-        {!registering && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>}
-      </div>
+      )}
+      {!registering && (
+        <div className="login-secondary-actions">
+          <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>Customer registration</button>
+          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>
+        </div>
+      )}
+      {registering && registrationPhase === "account" && (
+        <button type="button" className="registration-text-action" onClick={toggleRegistration}>Back to sign in</button>
+      )}
+      {registering && registrationPhase === "security" && !busy && (
+        <button type="button" className="registration-text-action" onClick={() => { setError(""); setFieldErrors({}); setRegistrationPhase("account"); }}>Back to account details</button>
+      )}
     </form>
   );
 
@@ -1171,19 +1174,10 @@ function LoginPanel({ onLoggedIn }) {
             <div><Truck aria-hidden="true" size={18} /><span><strong>{availableServiceLabel()}</strong><small>{websiteStoreConfig.serviceAreaLabel}</small></span></div>
             <div><CreditCard aria-hidden="true" size={18} /><span><strong>{paymentLabel()}</strong><small>Payment options</small></span></div>
           </div>
-          <div className="login-footer-team">
-            <strong>Team access</strong>
-            <span>Secure sign-in for store operations.</span>
-            <div>
-              {loginRoleOptions.filter((item) => item.id !== "customer").map((item) => (
-                <button type="button" key={item.id} onClick={() => openLoginModal(item.id, "footer_team")}>{item.label}</button>
-              ))}
-            </div>
-          </div>
         </div>
         <div className="login-footer-bottom">
           <span>&copy; {new Date().getFullYear()} TapTap Foodtrip</span>
-          <div className="login-footer-legal"><a href="/#terms">Terms</a><a href="/#privacy">Privacy</a><button type="button" onClick={() => openLoginModal("customer", "footer_sign_in")}>Customer sign in</button></div>
+          <div className="login-footer-legal"><a href="/#terms">Terms</a><a href="/#privacy">Privacy</a><button type="button" onClick={() => openLoginModal("customer", "footer_sign_in")}>Sign in</button></div>
         </div>
       </footer>
 
@@ -1206,10 +1200,12 @@ function LoginPanel({ onLoggedIn }) {
           role="dialog"
         >
           <div className="login-modal-scrim" data-login-modal-scrim onMouseDown={closeLoginModal} />
-          <div className="login-modal-panel">
-            <button type="button" className="login-modal-close" aria-label="Close sign in" onClick={closeLoginModal}><X aria-hidden="true" size={20} /></button>
-            <span className="login-modal-kicker">{role === "customer" ? "Customer order access" : "Team access"}</span>
-            <h2 id="login-modal-title">{registering ? "Create your TapTap account" : role === "customer" ? "Sign in to order" : "Team sign in"}</h2>
+          <div className={`login-modal-panel ${registering ? "registration-modal-panel" : ""}`}>
+            <button type="button" className="login-modal-close" aria-label={registering ? "Close registration" : "Close sign in"} onClick={closeLoginModal}><X aria-hidden="true" size={20} /></button>
+            <span className="login-modal-kicker">{registering ? "Customer registration" : "Account access"}</span>
+            <h2 id="login-modal-title">{registering
+              ? registrationPhase === "account" ? "Create your account" : registrationPhase === "security" ? "Secure your account" : "Verify your email"
+              : "Sign in"}</h2>
             {loginCard}
           </div>
         </div>

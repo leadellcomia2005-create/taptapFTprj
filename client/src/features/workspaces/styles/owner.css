@@ -26,7 +26,7 @@
 @media (max-width: 1180px) {
   .owner-chart-card { min-height: 320px; }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .owner-stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .owner-listing-orders { order: 3; }
 }
@@ -194,7 +194,7 @@
 .owner-kpi-grid {
   margin-bottom: 14px;
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .owner-hero-actions {
     width: 100%;
     min-width: 0;

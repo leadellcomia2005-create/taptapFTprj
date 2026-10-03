@@ -1148,6 +1148,34 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("980px desktop-mode mobile viewport uses compact navigation without page overflow", async ({ page }) => {
+  const runtime = watchRuntime(page);
+  await page.setViewportSize({ width: 980, height: 720 });
+  await page.goto("/");
+  await expectNoHorizontalOverflow(page);
+
+  for (const role of ["customer", "owner", "staff", "rider"]) {
+    await loginAs(page, role);
+    await expectNoHorizontalOverflow(page);
+
+    if (role === "customer") {
+      await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
+    } else if (["owner", "staff"].includes(role)) {
+      await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
+      await expect(page.getByRole("navigation", { name: new RegExp(`${role} navigation`, "i") })).toBeHidden();
+    } else {
+      const riderNavigation = page.getByRole("navigation", { name: /rider navigation/i });
+      await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /Assigned Orders/i }));
+    }
+
+    await page.getByRole("button", { name: /Log out/i }).click();
+    await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
+  }
+
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
 test("a failed role chunk shows a safe reload action instead of a blank workspace", async ({ page }) => {
   await page.route(/\/src\/features\/workspaces\/OwnerWorkspace\.jsx(?:\?|$)/, (route) => route.abort("failed"));
   await loginAs(page, "owner");

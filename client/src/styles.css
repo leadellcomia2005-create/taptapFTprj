@@ -1171,7 +1171,7 @@ button { font: inherit; }
   .order-summary-panel { position: static; grid-template-columns: repeat(4,1fr); }
   .order-summary-panel h3 { grid-column: 1 / -1; }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .login-home-header { grid-template-columns: auto auto; justify-content: space-between; gap: 10px 14px; }
   .login-home-nav { grid-column: 1 / -1; justify-content: flex-start; }
   .login-screen { grid-template-columns: 1fr; gap: 0; padding: 0 0 22px; background: linear-gradient(180deg,#fff4df 0%,#fbf4e8 100%); }
@@ -1404,7 +1404,7 @@ button { font: inherit; }
   .staff-pos-layout { grid-template-columns: 1fr; }
   .pos-shift-banner { grid-template-columns: 1fr; }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .app-header.workspace-header { min-height: 76px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; padding: 12px 16px; }
   .workspace-header .workspace-menu-toggle { display: grid; }
   .workspace-header .role-navigation { display: none; }
@@ -1907,7 +1907,7 @@ button:not(:disabled),
 .pos-cart-item { grid-template-columns: minmax(0,1fr) auto auto; }
 .pos-quantity button { min-height: 34px; }
 /* Rider delivery companion polish */
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .dashboard-page.container-fluid,
   .owner-listing-page,
   .staff-pos-page,
@@ -2814,7 +2814,7 @@ button:not(:disabled),
     max-width: 760px;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .login-home-panel {
     width: min(680px,calc(100% - 44px));
     margin-left: auto;
@@ -2917,7 +2917,7 @@ button:not(:disabled),
 .login-modal-close {
   touch-action: manipulation;
 }
-@media (min-width: 901px) {
+@media (min-width: 1025px) {
   .login-screen {
     align-items: stretch;
   }
@@ -2925,7 +2925,7 @@ button:not(:disabled),
     justify-items: start;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .login-screen {
     gap: 14px;
     padding-bottom: 22px;
@@ -3179,7 +3179,7 @@ button:not(:disabled),
 }
 .mobile-cart-backdrop,
 .mobile-cart-sheet { display: none; }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .store-cart-column { display: none; }
   .floating-checkout { display: block; }
   .mobile-cart-backdrop {
@@ -3283,7 +3283,7 @@ button:not(:disabled),
   .pos-quantity button,
   .rider-job-card button { min-height: 44px; }
 }
-@media (min-width: 561px) and (max-width: 900px) {
+@media (min-width: 561px) and (max-width: 1024px) {
   .floating-checkout { right: 16px; bottom: 16px; }
 }
 @media (max-height: 480px) and (orientation: landscape) {
@@ -4812,7 +4812,7 @@ button:not(:disabled),
     gap: 28px;
   }
 }
-@media (min-width: 621px) and (max-width: 900px) {
+@media (min-width: 621px) and (max-width: 1024px) {
   .login-home-header {
     grid-template-columns: auto minmax(0,1fr) auto;
   }
@@ -5324,7 +5324,7 @@ button:not(:disabled),
 .assistant-messages {
   overflow-y: auto;
 }
-@media (min-width: 901px) {
+@media (min-width: 1025px) {
   .workspace-menu-drawer,
   .workspace-menu-backdrop {
     display: none !important;
@@ -5338,7 +5338,7 @@ button:not(:disabled),
     display: block;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .workspace-menu-drawer .role-nav-group,
   .workspace-menu-drawer .role-nav-group + .role-nav-group {
     width: 100%;

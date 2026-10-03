@@ -60,7 +60,7 @@
 .rider-action:disabled { color: #aaa096; border-color: var(--line); background: var(--paper); cursor: not-allowed; }
 .rider-ledger-list { display: grid; gap: 8px; margin-top: 18px; }
 .rider-ledger-row { grid-template-columns: 42px minmax(0,1fr) minmax(110px,auto); margin-top: 0; }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .rider-page { padding: 16px 12px calc(92px + env(safe-area-inset-bottom, 0px)); }
   .rider-hero { padding: 20px; border-radius: 14px; }
   .rider-hero-top { grid-template-columns: 52px minmax(0,1fr); }
@@ -121,7 +121,7 @@
 .rider-action.primary,
 .rider-action.success { box-shadow: 0 12px 24px rgba(40,117,81,.16); }
 .rider-action.warning { box-shadow: 0 12px 24px rgba(160,111,15,.14); }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .rider-active-panel { order: -1; }
   .rider-action-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
@@ -269,7 +269,7 @@
     grid-column: 1 / -1;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .rider-workspace-header {
     grid-template-columns: 1fr;
   }

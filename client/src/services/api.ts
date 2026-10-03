@@ -254,7 +254,10 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
         ...options.headers,
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The email verification service took too long to respond. Please retry.");
+    }
     throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
   }
   const rawPayload: unknown = await response.json().catch(() => ({}));
@@ -282,10 +285,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(values),
     }),
-  precheckRegistrationEmail: (email: string) =>
+  precheckRegistrationEmail: (email: string, signal?: AbortSignal) =>
     publicRequest<RegistrationEmailPrecheckResponse>("/auth/registration-email", {
       method: "POST",
       body: JSON.stringify({ email }),
+      signal,
     }),
   resendRegistrationVerification: () =>
     request<VerificationResendResponse>("/auth/verification-email/resend", {

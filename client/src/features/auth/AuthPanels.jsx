@@ -285,6 +285,7 @@ function LoginPanel({ onLoggedIn }) {
   const [turnstileMessage, setTurnstileMessage] = useState("");
   const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [emailPrecheck, setEmailPrecheck] = useState({ status: "idle", message: "" });
+  const [emailPrecheckAttempt, setEmailPrecheckAttempt] = useState(0);
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -586,11 +587,20 @@ function LoginPanel({ onLoggedIn }) {
       return undefined;
     }
     let active = true;
-    setEmailPrecheck({ status: "checking", message: "Checking whether this email domain can receive mail..." });
+    const controller = new AbortController();
+    setEmailPrecheck({ status: "checking", message: "Checking whether this email provider can receive verification messages..." });
+    const slowConnectionTimer = window.setTimeout(() => {
+      if (active) {
+        setEmailPrecheck({ status: "checking", message: "Connecting to the email verification service..." });
+      }
+    }, 2500);
+    const requestTimeout = window.setTimeout(() => controller.abort(), 10000);
     const timer = window.setTimeout(() => {
-      api.precheckRegistrationEmail(normalizedEmail)
+      api.precheckRegistrationEmail(normalizedEmail, controller.signal)
         .then((result) => {
           if (!active) return;
+          window.clearTimeout(slowConnectionTimer);
+          window.clearTimeout(requestTimeout);
           setEmailPrecheck({
             status: result.eligible ? "eligible" : "rejected",
             message: result.message,
@@ -599,14 +609,19 @@ function LoginPanel({ onLoggedIn }) {
         })
         .catch((precheckError) => {
           if (!active) return;
+          window.clearTimeout(slowConnectionTimer);
+          window.clearTimeout(requestTimeout);
           setEmailPrecheck({ status: "error", message: precheckError.message || "The email domain could not be checked. Try again." });
         });
     }, 600);
     return () => {
       active = false;
+      controller.abort();
       window.clearTimeout(timer);
+      window.clearTimeout(slowConnectionTimer);
+      window.clearTimeout(requestTimeout);
     };
-  }, [email, registering]);
+  }, [email, emailPrecheckAttempt, registering]);
   useEffect(() => {
     if (registrationDetailsReady || !turnstileToken) return;
     setTurnstileToken("");
@@ -711,6 +726,19 @@ function LoginPanel({ onLoggedIn }) {
                 }}
               >
                 Use {emailPrecheck.suggestion}
+              </button>
+            )}
+            {emailPrecheck.status === "error" && (
+              <button
+                type="button"
+                className="registration-email-suggestion"
+                onClick={() => {
+                  setFieldErrors((current) => ({ ...current, email: undefined }));
+                  setEmailPrecheck({ status: "checking", message: "Retrying the email provider check..." });
+                  setEmailPrecheckAttempt((current) => current + 1);
+                }}
+              >
+                Retry check
               </button>
             )}
           </div>

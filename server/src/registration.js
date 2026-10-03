@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { resolveMx } from "node:dns/promises";
 import { HttpError } from "./security.js";
 
@@ -199,6 +199,42 @@ async function existingUserForEmail(auth, email) {
   }
 }
 
+function secureHashMatches(actualHash, expectedHash) {
+  const actual = Buffer.from(String(actualHash || ""), "hex");
+  const expected = Buffer.from(String(expectedHash || ""), "hex");
+  return actual.length > 0 && actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+export async function checkCustomerRegistrationVerification({ db, auth, uid, statusToken, now = Date.now() }) {
+  const cleanUid = cleanText(uid, 128);
+  const cleanToken = cleanText(statusToken, 256);
+  if (!cleanUid || cleanToken.length < 32) throw new HttpError(400, "The verification session is invalid.");
+
+  const profileRef = db.ref(`users/${cleanUid}`);
+  const profile = (await profileRef.once("value")).val() || {};
+  const expectedHash = profile?.registration?.statusTokenHash;
+  if (profile.role !== "customer" || !secureHashMatches(hashValue(cleanToken), expectedHash)) {
+    throw new HttpError(404, "The verification session could not be found.");
+  }
+
+  const userRecord = await auth.getUser(cleanUid);
+  if (userRecord.emailVerified) {
+    await db.ref(`users/${cleanUid}/registration`).update({
+      verificationExpiresAt: null,
+      verificationSessionExpiresAt: null,
+      cleanupEligibleAt: null,
+      verificationStatus: "verified",
+      emailVerifiedAt: now,
+      statusTokenHash: null
+    });
+  }
+
+  return {
+    verified: userRecord.emailVerified === true,
+    checkedAt: now
+  };
+}
+
 export function passwordChecklist(password = "") {
   const value = String(password);
   return {
@@ -395,6 +431,7 @@ export async function createCustomerRegistration({
   const now = Date.now();
   const verificationExpiresAt = now + verificationTtlMs;
   const cleanupEligibleAt = now + abandonedTtlMs;
+  const statusToken = randomBytes(32).toString("base64url");
   try {
     userRecord = await auth.createUser({
       email: values.email,
@@ -437,6 +474,7 @@ export async function createCustomerRegistration({
         verificationSessionExpiresAt: verificationExpiresAt,
         cleanupEligibleAt,
         verificationStatus: "pending",
+        statusTokenHash: hashValue(statusToken),
         verificationSendCount: 0,
         verificationSendWindowStartedAt: now
       },
@@ -495,7 +533,8 @@ export async function createCustomerRegistration({
       profilePath: `users/${userRecord.uid}`,
       verificationSent,
       verificationExpiresAt,
-      cleanupEligibleAt
+      cleanupEligibleAt,
+      statusToken
     };
   } catch (error) {
     if (userRecord?.uid) {

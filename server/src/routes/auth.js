@@ -8,6 +8,7 @@ import {
 } from "../passkeys.js";
 import {
   checkRegistrationEmail,
+  checkCustomerRegistrationVerification,
   createCustomerRegistration,
   resendCustomerRegistrationVerification,
   verifyTurnstileToken
@@ -26,6 +27,7 @@ import {
 import {
   registrationSchema,
   registrationEmailPrecheckSchema,
+  registrationVerificationStatusSchema,
   twoFactorChallengeSchema,
   twoFactorSendSchema,
   twoFactorVerifySchema
@@ -38,6 +40,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
   const registrationLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 12, standardHeaders: "draft-8" });
   const emailPrecheckLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8" });
   const verificationResendLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 8, standardHeaders: "draft-8" });
+  const verificationStatusLimiter = rateLimit({ windowMs: 5 * 60_000, limit: 120, standardHeaders: "draft-8" });
   const { authenticateBootstrap, requireFirebaseAdmin } = authentication;
   const registrationEmailSender = serviceStatus().emailOtp
     ? sendCustomerVerificationEmail
@@ -77,6 +80,15 @@ export function createAuthRouter({ config, firebase, authentication }) {
         : null
     });
     res.status(201).json(result);
+  }));
+
+  router.post("/auth/registration-verification/status", verificationStatusLimiter, requireFirebaseAdmin, validateBody(registrationVerificationStatusSchema), asyncRoute(async (req, res) => {
+    res.json(await checkCustomerRegistrationVerification({
+      db: firebase.db(),
+      auth: firebase.auth(),
+      uid: req.body.uid,
+      statusToken: req.body.statusToken
+    }));
   }));
 
   router.post("/auth/verification-email/resend", verificationResendLimiter, authenticateBootstrap, requireFirebaseAdmin, asyncRoute(async (req, res) => {

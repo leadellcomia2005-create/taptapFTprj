@@ -298,6 +298,7 @@ function LoginPanel({ onLoggedIn }) {
   const [emailPrecheckAttempt, setEmailPrecheckAttempt] = useState(0);
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+  const [loginNotice, setLoginNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
@@ -459,6 +460,7 @@ function LoginPanel({ onLoggedIn }) {
     setEmailPrecheck({ status: "idle", message: "" });
     setFieldErrors({});
     setError("");
+    setLoginNotice("");
     setRegistrationResult(null);
     setRegistrationRecoveryRequired(false);
     setRegistrationSteps(registrationStepDefaults);
@@ -483,6 +485,7 @@ function LoginPanel({ onLoggedIn }) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setLoginNotice("");
     setFieldErrors({});
     setTurnstileMessage("");
     if (registering) {
@@ -657,6 +660,44 @@ function LoginPanel({ onLoggedIn }) {
   const registrationVerificationSeconds = useDeadlineSeconds(registrationResult?.verificationExpiresAt);
   const registrationVerificationExpired = registrationVerificationSeconds === 0;
   const registrationInbox = emailInboxLink(registrationResult?.email);
+  useEffect(() => {
+    if (!registering || registrationPhase !== "verify" || registrationVerificationExpired
+      || !registrationResult?.uid || !registrationResult?.statusToken) return undefined;
+
+    let active = true;
+    let requestRunning = false;
+    const checkVerification = async () => {
+      if (!active || requestRunning) return;
+      requestRunning = true;
+      try {
+        const status = await api.registrationVerificationStatus(registrationResult.uid, registrationResult.statusToken);
+        if (!active || !status.verified) return;
+        const verifiedEmail = registrationResult.email;
+        const url = new URL(window.location.href);
+        url.searchParams.delete("register");
+        window.history.replaceState({}, "", url);
+        setRegistering(false);
+        setEmail(verifiedEmail);
+        setPassword("");
+        setConfirmPassword("");
+        setRegistrationResult(null);
+        setRegistrationPhase("account");
+        setLoginNotice("Email verified successfully. Sign in to continue.");
+        setError("");
+      } catch {
+        // A temporary status-check failure should not interrupt the verification screen.
+      } finally {
+        requestRunning = false;
+      }
+    };
+
+    checkVerification();
+    const timer = window.setInterval(checkVerification, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [registering, registrationPhase, registrationResult, registrationVerificationExpired]);
   const orderingDetails = getOrderingDetails();
   const popularMeals = getPopularMeals(landingMenu);
   const menuCategories = getLandingMenuCategories(landingMenu);
@@ -913,6 +954,7 @@ function LoginPanel({ onLoggedIn }) {
           </div>
         </div>
       )}
+      {!registering && loginNotice && <div className="alert alert-success py-2 small" role="status">{loginNotice}</div>}
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
       {(!registering || registrationPhase !== "verify") && !registrationRecoveryRequired && (
         <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>

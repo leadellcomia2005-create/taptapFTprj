@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cleanupExpiredCustomerRegistrations } from "../src/application/registrationCleanup.js";
-import { createCustomerRegistration } from "../src/registration.js";
+import { checkCustomerRegistrationVerification, createCustomerRegistration } from "../src/registration.js";
 import { FakeRealtimeDatabase } from "./helpers/fakeRealtimeDb.js";
 
 const registrationInput = {
@@ -39,6 +39,36 @@ test("new customer registrations receive the configured verification deadline", 
   assert.equal(database.read("users/customer-new/consent/privacyVersion"), "2026-10-01");
   assert.equal(database.read("users/customer-new/consent/termsAccepted"), true);
   assert.equal(database.read("users/customer-new/consent/privacyAccepted"), true);
+  assert.ok(result.statusToken.length >= 32);
+  assert.notEqual(database.read("users/customer-new/registration/statusTokenHash"), result.statusToken);
+});
+
+test("registration status token detects verification and closes the pending session", async () => {
+  const database = new FakeRealtimeDatabase();
+  const result = await createCustomerRegistration({
+    db: database,
+    auth: {
+      createUser: async () => ({ uid: "customer-verified" }),
+      deleteUser: async () => {}
+    },
+    input: registrationInput,
+    req: { headers: { "user-agent": "node-test" }, ip: "127.0.0.1" },
+    verifyEmail: async () => ({ eligible: true, code: "deliverable_domain" })
+  });
+
+  const status = await checkCustomerRegistrationVerification({
+    db: database,
+    auth: { getUser: async () => ({ uid: result.uid, emailVerified: true }) },
+    uid: result.uid,
+    statusToken: result.statusToken,
+    now: 1234
+  });
+
+  assert.equal(status.verified, true);
+  assert.equal(database.read("users/customer-verified/registration/verificationStatus"), "verified");
+  assert.equal(database.read("users/customer-verified/registration/emailVerifiedAt"), 1234);
+  assert.equal(database.read("users/customer-verified/registration/verificationExpiresAt"), undefined);
+  assert.equal(database.read("users/customer-verified/registration/statusTokenHash"), undefined);
 });
 
 test("cleanup waits for the abandonment deadline and preserves protected registrations", async () => {

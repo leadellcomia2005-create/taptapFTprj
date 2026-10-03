@@ -157,6 +157,11 @@ export const registrationEmailPrecheckSchema = z.object({
   email: z.string().trim().min(3).max(254)
 }).passthrough();
 
+export const registrationVerificationStatusSchema = z.object({
+  uid: recordIdSchema,
+  statusToken: z.string().trim().min(32).max(256)
+}).passthrough();
+
 export const twoFactorSendSchema = z.object({
   purpose: z.enum(["setup", "challenge"]).optional()
 }).passthrough();

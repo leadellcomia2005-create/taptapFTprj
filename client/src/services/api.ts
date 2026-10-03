@@ -49,6 +49,12 @@ export interface RegisterCustomerResponse extends ApiResult {
   verificationSent: boolean;
   verificationExpiresAt: number;
   cleanupEligibleAt?: number;
+  statusToken: string;
+}
+
+export interface RegistrationVerificationStatusResponse extends ApiResult {
+  verified: boolean;
+  checkedAt: number;
 }
 
 export interface RegistrationEmailPrecheckResponse extends ApiResult {
@@ -284,6 +290,11 @@ export const api = {
     publicRequest<RegisterCustomerResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify(values),
+    }),
+  registrationVerificationStatus: (uid: EntityId, statusToken: string) =>
+    publicRequest<RegistrationVerificationStatusResponse>("/auth/registration-verification/status", {
+      method: "POST",
+      body: JSON.stringify({ uid, statusToken }),
     }),
   precheckRegistrationEmail: (email: string, signal?: AbortSignal) =>
     publicRequest<RegistrationEmailPrecheckResponse>("/auth/registration-email", {

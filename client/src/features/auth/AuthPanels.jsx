@@ -119,6 +119,16 @@ const getOrderingDetails = () => [
 ];
 
 const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
+const trustedRegistrationEmailProviders = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "hotmail.com",
+  "icloud.com",
+  "live.com",
+  "outlook.com",
+  "yahoo.com",
+  "yahoo.com.ph"
+]);
 let turnstileScriptPromise;
 
 function loadTurnstileScript() {
@@ -566,9 +576,14 @@ function LoginPanel({ onLoggedIn }) {
       return errors;
     }, {});
     if (!accountErrors.email && emailPrecheck.status !== "eligible") {
-      accountErrors.email = emailPrecheck.status === "checking"
-        ? "Wait while the email domain is checked."
-        : emailPrecheck.message || "Enter an email address that can receive verification messages.";
+      if (["checking", "error"].includes(emailPrecheck.status)) {
+        setFieldErrors(accountErrors);
+        setError(emailPrecheck.status === "checking"
+          ? "Wait while the email provider is checked."
+          : "The verification service could not be reached. Retry the check before continuing.");
+        return;
+      }
+      accountErrors.email = emailPrecheck.message || "Enter an email address that can receive verification messages.";
     }
     if (Object.keys(accountErrors).length) {
       setFieldErrors(accountErrors);
@@ -586,6 +601,14 @@ function LoginPanel({ onLoggedIn }) {
       setEmailPrecheck({ status: "idle", message: "" });
       return undefined;
     }
+    const emailDomain = normalizedEmail.slice(normalizedEmail.lastIndexOf("@") + 1);
+    if (trustedRegistrationEmailProviders.has(emailDomain)) {
+      setEmailPrecheck({
+        status: "eligible",
+        message: "Email provider accepted. You will verify ownership through your inbox."
+      });
+      return undefined;
+    }
     let active = true;
     const controller = new AbortController();
     setEmailPrecheck({ status: "checking", message: "Checking whether this email provider can receive verification messages..." });
@@ -594,7 +617,7 @@ function LoginPanel({ onLoggedIn }) {
         setEmailPrecheck({ status: "checking", message: "Connecting to the email verification service..." });
       }
     }, 2500);
-    const requestTimeout = window.setTimeout(() => controller.abort(), 10000);
+    const requestTimeout = window.setTimeout(() => controller.abort(), 45000);
     const timer = window.setTimeout(() => {
       api.precheckRegistrationEmail(normalizedEmail, controller.signal)
         .then((result) => {
@@ -711,7 +734,7 @@ function LoginPanel({ onLoggedIn }) {
           }}
         />
         {fieldErrors.email && <small className="registration-field-error" id="registration-email-error">{fieldErrors.email}</small>}
-        {registering && !fieldErrors.email && emailPrecheck.message && (
+        {registering && emailPrecheck.message && (!fieldErrors.email || emailPrecheck.status !== "rejected") && (
           <div className={`registration-email-status ${emailPrecheck.status}`} aria-live="polite">
             <small>{emailPrecheck.message}</small>
             {emailPrecheck.suggestion && (

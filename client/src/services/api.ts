@@ -256,7 +256,7 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The email verification service took too long to respond. Please retry.");
+      throw new Error("The email verification service took too long to respond. Retry the check.");
     }
     throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
   }

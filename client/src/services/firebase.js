@@ -399,6 +399,7 @@ export async function registerCustomer(values, onProgress = () => {}) {
 
 export function friendlyAuthError(error) {
   const messages = {
+    "ACCOUNT_RECOVERY_REQUIRED": "No new account was created. This email already belongs to an account. Go to sign in or reset its password.",
     "auth/email-already-in-use": "This email already has an account. Use sign in or reset the password.",
     "auth/invalid-email": "Enter a valid email address.",
     "auth/weak-password": "Use a stronger password with at least 12 characters, uppercase, lowercase, number, and symbol.",

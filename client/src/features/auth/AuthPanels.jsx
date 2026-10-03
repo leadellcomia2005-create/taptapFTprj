@@ -278,7 +278,7 @@ function emailInboxLink(email = "") {
 function LoginPanel({ onLoggedIn }) {
   const registrationRequested = new URLSearchParams(window.location.search).get("register") === "true";
   const registrationStepDefaults = [
-    { id: "auth", label: "Account created", detail: "Waiting to create your secure login.", status: "pending" },
+    { id: "auth", label: "Secure login", detail: "Waiting to create your secure login.", status: "pending" },
     { id: "profile", label: "Customer profile", detail: "Waiting to save your profile.", status: "pending" },
     { id: "verification", label: "Verification email", detail: "Waiting to request your verification email.", status: "pending" },
     { id: "session", label: "Security setup", detail: "Required after your first sign in.", status: "pending" }
@@ -302,6 +302,7 @@ function LoginPanel({ onLoggedIn }) {
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
   const [registrationResult, setRegistrationResult] = useState(null);
+  const [registrationRecoveryRequired, setRegistrationRecoveryRequired] = useState(false);
   const [registrationPhase, setRegistrationPhase] = useState("account");
   const [loginModalOpen, setLoginModalOpen] = useState(registrationRequested);
   const [openStatus, setOpenStatus] = useState(() => getWebsiteOpenStatus());
@@ -459,6 +460,7 @@ function LoginPanel({ onLoggedIn }) {
     setFieldErrors({});
     setError("");
     setRegistrationResult(null);
+    setRegistrationRecoveryRequired(false);
     setRegistrationSteps(registrationStepDefaults);
     setRegistrationPhase("account");
   };
@@ -485,6 +487,7 @@ function LoginPanel({ onLoggedIn }) {
     setTurnstileMessage("");
     if (registering) {
       setRegistrationResult(null);
+      setRegistrationRecoveryRequired(false);
       setRegistrationSteps(registrationStepDefaults);
     }
     try {
@@ -523,6 +526,7 @@ function LoginPanel({ onLoggedIn }) {
         onLoggedIn?.();
       }
     } catch (authError) {
+      setRegistrationRecoveryRequired(registering && authError?.code === "ACCOUNT_RECOVERY_REQUIRED");
       if (registering && turnstileSiteKey) {
         setTurnstileToken("");
         setTurnstileResetKey((current) => current + 1);
@@ -910,7 +914,7 @@ function LoginPanel({ onLoggedIn }) {
         </div>
       )}
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
-      {(!registering || registrationPhase !== "verify") && (
+      {(!registering || registrationPhase !== "verify") && !registrationRecoveryRequired && (
         <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>
           {registering && registrationPhase === "account" ? "Continue" : submitLabel}
         </button>
@@ -925,7 +929,9 @@ function LoginPanel({ onLoggedIn }) {
         <button type="button" className="registration-text-action" onClick={toggleRegistration}>Back to sign in</button>
       )}
       {registering && registrationPhase === "security" && !busy && (
-        <button type="button" className="registration-text-action" onClick={() => { setError(""); setFieldErrors({}); setRegistrationPhase("account"); }}>Back to account details</button>
+        registrationRecoveryRequired
+          ? <button type="button" className="btn btn-danger w-100 login-submit-button" onClick={toggleRegistration}>Go to sign in</button>
+          : <button type="button" className="registration-text-action" onClick={() => { setError(""); setFieldErrors({}); setRegistrationPhase("account"); }}>Back to account details</button>
       )}
     </form>
   );

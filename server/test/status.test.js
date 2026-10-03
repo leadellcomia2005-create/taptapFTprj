@@ -21,7 +21,10 @@ test("deferred providers require explicit opt-in even when credentials exist", (
     "PAYMONGO_MODE",
     "TWILIO_ACCOUNT_SID",
     "TWILIO_AUTH_TOKEN",
-    "TWILIO_FROM_NUMBER"
+    "TWILIO_FROM_NUMBER",
+    "ENABLE_RESEND",
+    "RESEND_API_KEY",
+    "RESEND_FROM_EMAIL"
   ];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
@@ -33,22 +36,26 @@ test("deferred providers require explicit opt-in even when credentials exist", (
     process.env.TWILIO_ACCOUNT_SID = "test-sid";
     process.env.TWILIO_AUTH_TOKEN = "test-token";
     process.env.TWILIO_FROM_NUMBER = "+630000000000";
+    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.RESEND_FROM_EMAIL = "TapTap Foodtrip <security@mail.example.com>";
     delete process.env.ENABLE_OPENAI;
     delete process.env.ENABLE_GROQ;
     delete process.env.ENABLE_PAYMONGO;
     delete process.env.ENABLE_TWILIO;
+    delete process.env.ENABLE_RESEND;
     assert.deepEqual(
-      { groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
-      { groq: false, openai: false, paymongo: false, twilio: false }
+      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
+      { emailOtp: false, groq: false, openai: false, paymongo: false, twilio: false }
     );
 
     process.env.ENABLE_OPENAI = "true";
     process.env.ENABLE_GROQ = "true";
     process.env.ENABLE_PAYMONGO = "true";
     process.env.ENABLE_TWILIO = "true";
+    process.env.ENABLE_RESEND = "true";
     assert.deepEqual(
-      { groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
-      { groq: true, openai: true, paymongo: true, twilio: true }
+      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
+      { emailOtp: true, groq: true, openai: true, paymongo: true, twilio: true }
     );
   } finally {
     for (const [name, value] of Object.entries(previous)) {

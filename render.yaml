@@ -35,6 +35,12 @@ services:
         value: openai/gpt-oss-20b
       - key: ENABLE_TWILIO
         value: "false"
+      - key: ENABLE_RESEND
+        value: "false"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: TapTap Foodtrip <security@mail.taptapfoodtrip.xyz>
       - key: ENABLE_PAYMONGO
         value: "false"
       - key: TURNSTILE_SECRET_KEY

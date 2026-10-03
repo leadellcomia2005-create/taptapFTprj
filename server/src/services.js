@@ -9,6 +9,7 @@ import {
   payMongoConfiguration,
   retrievePayMongoCheckoutSession
 } from "./integrations/paymongo.js";
+import { resendConfiguration, sendResendEmail } from "./integrations/resend.js";
 
 const has = (name) => Boolean(process.env[name]);
 const enabled = (name) => process.env[name] === "true";
@@ -23,7 +24,7 @@ export function serviceStatus() {
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: payMongoConfiguration().enabled,
     twilio: enabled("ENABLE_TWILIO") && has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
-    emailOtp: has("GMAIL_USER") && has("GMAIL_APP_PASSWORD"),
+    emailOtp: resendConfiguration().enabled || (has("GMAIL_USER") && has("GMAIL_APP_PASSWORD")),
     turnstile: has("TURNSTILE_SECRET_KEY")
   };
 }
@@ -480,6 +481,19 @@ function gmailClient() {
   return gmailTransport;
 }
 
+function sendTransactionalEmail({ to, subject, text, html }) {
+  if (resendConfiguration().enabled) {
+    return sendResendEmail({ to, subject, text, html });
+  }
+  return gmailClient().sendMail({
+    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+    to,
+    subject,
+    text,
+    html
+  });
+}
+
 function money(value) {
   return `PHP ${Number(value || 0).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
@@ -513,8 +527,7 @@ export async function sendTwoFactorEmail(to, code) {
   if (!serviceStatus().emailOtp || !to) {
     throw new Error("Email code is not ready yet.");
   }
-  return gmailClient().sendMail({
-    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+  return sendTransactionalEmail({
     to,
     subject: "Your Taptap Foodtrip verification code",
     text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes. If you did not request this code, change your password.`,
@@ -528,8 +541,7 @@ export async function sendCustomerVerificationEmail(to, verificationLink, name =
   }
   const safeName = escapeHtml(name || "Customer");
   const safeLink = escapeHtml(verificationLink);
-  return gmailClient().sendMail({
-    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+  return sendTransactionalEmail({
     to,
     subject: "Verify your Taptap Foodtrip account",
     text: `Hi ${name || "Customer"}, verify your Taptap Foodtrip account here: ${verificationLink}`,
@@ -596,8 +608,7 @@ export async function sendOrderReceiptEmail(order = {}) {
     </div>
   `;
 
-  await gmailClient().sendMail({
-    from: `"Taptap Foodtrip" <${process.env.GMAIL_USER}>`,
+  await sendTransactionalEmail({
     to: order.customerEmail,
     subject: `Your Taptap Foodtrip receipt for ${orderId}`,
     text,

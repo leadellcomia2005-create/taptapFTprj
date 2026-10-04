@@ -169,6 +169,12 @@ test("inventory insight context excludes customer and payment information", () =
   ], [{ name: "Chicken Meal", category: "Rice meals", price: 99, stock: 8, reorderPoint: 5, unavailable: false, supplier: "Private Supplier" }]);
 
   assert.equal(context.grossSales, 198);
+  assert.equal(context.averageOrderValue, 198);
+  assert.equal(context.totalItemsSold, 2);
+  assert.equal(context.lowStockCount, 0);
+  assert.equal(context.outOfStockCount, 0);
+  assert.deepEqual(context.bestSellingProduct, { name: "Chicken Meal", quantity: 2 });
+  assert.deepEqual(context.peakHour, { hour: 20, count: 1 });
   assert.deepEqual(context.productSales, [{ name: "Chicken Meal", quantity: 2 }]);
   assert.deepEqual(context.inventory[0], {
     name: "Chicken Meal",

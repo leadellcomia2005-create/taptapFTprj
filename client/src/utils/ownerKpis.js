@@ -6,6 +6,80 @@ const dayKeyFromOffset = (timestamp, offset) => dateKey(Number(timestamp) + offs
 const round = (value, digits = 0) => Number(Number(value || 0).toFixed(digits));
 const percent = (value, total) => total > 0 ? round(value / total * 100, 1) : 0;
 const validTime = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
+const manilaHourFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Manila", hour: "2-digit", hourCycle: "h23" });
+const manilaWeekdayFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Manila", weekday: "long" });
+
+function buildBusinessPatterns(orders, inventory, now, isRevenueOrder) {
+  const revenueOrders = orders.filter(isRevenueOrder).filter((order) => validTime(order.createdAt));
+  const recent30 = revenueOrders.filter((order) => Number(order.createdAt) >= now - 30 * dayMs);
+  const recent7 = revenueOrders.filter((order) => Number(order.createdAt) >= now - 7 * dayMs);
+  const previous7 = revenueOrders.filter((order) => Number(order.createdAt) >= now - 14 * dayMs && Number(order.createdAt) < now - 7 * dayMs);
+  const sales = (rows) => rows.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const productStats = new Map();
+  const hourCounts = new Map();
+  const weekdayStats = new Map();
+  let unitsSold = 0;
+
+  for (const order of recent30) {
+    const hour = Number(manilaHourFormatter.format(new Date(Number(order.createdAt))));
+    const weekday = manilaWeekdayFormatter.format(new Date(Number(order.createdAt)));
+    hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+    const day = weekdayStats.get(weekday) || { orders: 0, sales: 0 };
+    day.orders += 1;
+    day.sales += Number(order.total || 0);
+    weekdayStats.set(weekday, day);
+    for (const item of order.items || []) {
+      const quantity = Number(item.qty || 0);
+      const itemSales = quantity * Number(item.price || 0);
+      unitsSold += quantity;
+      const current = productStats.get(item.id) || { id: item.id, name: item.name || "Unnamed product", units: 0, sales: 0 };
+      current.units += quantity;
+      current.sales += itemSales;
+      productStats.set(item.id, current);
+    }
+  }
+
+  const products = [...productStats.values()].sort((a, b) => b.units - a.units);
+  const topByRevenue = [...productStats.values()].sort((a, b) => b.sales - a.sales)[0] || null;
+  const peakHour = [...hourCounts.entries()].sort((a, b) => b[1] - a[1])[0] || null;
+  const strongestWeekday = [...weekdayStats.entries()].sort((a, b) => b[1].sales - a[1].sales)[0] || null;
+  const sevenDaySales = sales(recent7);
+  const previousSevenDaySales = sales(previous7);
+  const currentStockUnits = inventory.reduce((sum, item) => sum + Math.max(0, Number(item.stock || 0)), 0);
+
+  return {
+    sales: {
+      dailyAverageSales: round(sales(recent30) / 30, 2),
+      dailyAverageOrders: round(recent30.length / 30, 1),
+      sevenDaySales: round(sevenDaySales, 2),
+      thirtyDaySales: round(sales(recent30), 2),
+      sevenDayGrowthPercent: previousSevenDaySales > 0 ? round((sevenDaySales - previousSevenDaySales) / previousSevenDaySales * 100, 1) : null,
+      orderVolume: recent30.length,
+      averageOrderValue: recent30.length ? round(sales(recent30) / recent30.length, 2) : 0,
+      unitsSold,
+      highestDemandProduct: products[0] ? { name: products[0].name, units: products[0].units } : null,
+      highestRevenueProduct: topByRevenue ? { name: topByRevenue.name, sales: round(topByRevenue.sales, 2) } : null,
+      peakHour: peakHour ? { hour: peakHour[0], orders: peakHour[1] } : null,
+      strongestWeekday: strongestWeekday ? { day: strongestWeekday[0], sales: round(strongestWeekday[1].sales, 2), orders: strongestWeekday[1].orders } : null
+    },
+    inventory: {
+      productsTracked: inventory.length,
+      currentStockUnits,
+      outOfStockCount: inventory.filter((item) => Number(item.stock || 0) <= 0 || item.unavailable).length,
+      lowStockCount: inventory.filter((item) => Number(item.stock || 0) <= Number(item.reorderPoint || 0)).length,
+      thirtyDayUnitsSold: unitsSold,
+      sellThroughPercent: unitsSold + currentStockUnits > 0 ? percent(unitsSold, unitsSold + currentStockUnits) : 0
+    },
+    unavailable: [
+      { metric: "Ingredient consumption", reason: "Recipe and ingredient usage records are not available." },
+      { metric: "Stock variance", reason: "Expected-versus-actual stock counts are not recorded." },
+      { metric: "Waste and spoilage", reason: "Waste event records are not available." },
+      { metric: "Inventory turnover", reason: "Historical stock valuation is not available." },
+      { metric: "Reorder frequency", reason: "Purchase and receiving history is not available." },
+      { metric: "Supplier lead time", reason: "Supplier order and arrival dates are not available." }
+    ]
+  };
+}
 
 function summarizeWindow(orders, startOffset, dayCount, now, isRevenueOrder) {
   const keys = new Set(Array.from({ length: dayCount }, (_, index) => dayKeyFromOffset(now, startOffset + index)));
@@ -98,7 +172,7 @@ function buildForecast(orders, inventory, now, isRevenueOrder) {
     { label: "Evening", start: 18, end: 24 }
   ].map((shift) => {
     const count = revenueOrders.filter((order) => {
-      const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Manila", hour: "2-digit", hourCycle: "h23" }).format(new Date(Number(order.createdAt || 0))));
+      const hour = Number(manilaHourFormatter.format(new Date(Number(order.createdAt || 0))));
       return hour >= shift.start && hour < shift.end;
     }).length;
     const expectedOrders = historyDays ? count / historyDays : 0;
@@ -176,6 +250,7 @@ export function calculateOwnerDecisionSupport({ orders = [], inventory = [], com
     comparison("Last 30 days vs previous 30", summarizeWindow(orders, -29, 30, now, isRevenueOrder), summarizeWindow(orders, -59, 30, now, isRevenueOrder))
   ];
   const forecast = buildForecast(orders, inventory, now, isRevenueOrder);
+  const businessPatterns = buildBusinessPatterns(orders, inventory, now, isRevenueOrder);
   const priorities = [
     priority("paid-cancellations", "Paid cancellations", paidCancellations.length, 1, 60, "Cancelled paid orders require manual payment review.", "Review the payment record and document the outcome.", "Owner", "Today", "owner-reports"),
     priority("failed-payments", "Failed payments", failedPayments.length, 2, 45, "Failed online payments can block order completion.", "Review failed payment attempts and provider status.", "Owner", "Today", "owner-reports"),
@@ -192,6 +267,7 @@ export function calculateOwnerDecisionSupport({ orders = [], inventory = [], com
   return {
     kpis,
     comparisons,
+    businessPatterns,
     forecast,
     priorities,
     freshness: {

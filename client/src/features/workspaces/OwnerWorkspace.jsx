@@ -21,6 +21,7 @@ const daysOfStockLabel = (value) => {
   if (Number(value) < 1) return "Less than 1 day of stock left";
   return `About ${value} ${Number(value) === 1 ? "day" : "days"} of stock left`;
 };
+const hourLabel = (hour) => new Date(2026, 0, 1, Number(hour || 0)).toLocaleTimeString("en-PH", { hour: "numeric" });
 
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const revenueOrders = orders.filter(isRevenueOrder);
@@ -47,6 +48,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [insightCategory, setInsightCategory] = useState("all");
   const [planning, setPlanning] = useState(ownerPlanningDefaults);
   const [forecastAccuracy, setForecastAccuracy] = useState({ completedCount: 0, latest: null, recent: [] });
+  const [recommendationStatuses, setRecommendationStatuses] = useState({});
   const salesGoal = planning.salesGoal;
   const [dashboardPeriod, setDashboardPeriod] = useState("today");
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff", staffRole: "manager" });
@@ -117,6 +119,13 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       setForecastAccuracy({ completedCount: 0, latest: null, recent: [] });
     }
   }, [decisionSupport.forecast, orders]);
+  useEffect(() => {
+    try {
+      setRecommendationStatuses(JSON.parse(window.localStorage.getItem("taptap-owner-recommendation-statuses") || "{}"));
+    } catch {
+      setRecommendationStatuses({});
+    }
+  }, []);
   const unavailableServices = Object.entries(serviceStatus || {}).filter(([, ready]) => ready === false);
   const dataUpdatedAt = Math.max(0, ...orders.map((order) => Number(order.updatedAt || order.createdAt || 0)));
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
@@ -170,6 +179,17 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       notify("Planning settings could not be saved on this browser.");
     }
   };
+  const updateRecommendationStatus = (id, status) => {
+    const next = { ...recommendationStatuses, [id]: { status, updatedAt: Date.now() } };
+    setRecommendationStatuses(next);
+    try {
+      window.localStorage.setItem("taptap-owner-recommendation-statuses", JSON.stringify(next));
+      notify(`Recommendation marked ${status.toLowerCase()}.`);
+    } catch {
+      notify("Recommendation status could not be saved on this browser.");
+    }
+  };
+  const scrollToOwnerSection = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   const markCodRemitted = async (order) => {
     await updateOrder(order.id, { codRemitted: true });
     notify(`${order.id} COD marked as remitted.`);
@@ -184,7 +204,15 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     }
     setInsightStatus("loading");
     try {
-      const result = await api.insights(insightOrders, insightInventory, insightPeriod, insightCategory, decisionSupport);
+      const scopedDecisionSupport = calculateOwnerDecisionSupport({
+        orders: insightOrders,
+        inventory: insightInventory,
+        complaints,
+        shiftLogs,
+        targets: planning,
+        isRevenueOrder
+      });
+      const result = await api.insights(insightOrders, insightInventory, insightPeriod, insightCategory, scopedDecisionSupport);
       setInsight(result);
       setInsightStatus("success");
     } catch (error) {
@@ -512,10 +540,18 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
 
       <div className="owner-overview-meta"><span>{dashboardOrders.length} orders in scope</span><span>{dataUpdatedAt ? `Source data updated ${new Date(dataUpdatedAt).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}` : "Waiting for live orders"}</span><span className={decisionSupport.freshness.stale ? "freshness-stale" : "freshness-current"}>{decisionSupport.freshness.stale ? "Historical data" : "Live data"}</span></div>
 
-      <section className="owner-attention-board" aria-label="Items requiring owner attention">
+      <nav className="owner-section-nav" aria-label="Owner dashboard sections">
+        <button type="button" onClick={() => scrollToOwnerSection("owner-attention")}>Needs attention</button>
+        <button type="button" onClick={() => scrollToOwnerSection("owner-performance")}>Performance</button>
+        <button type="button" onClick={() => scrollToOwnerSection("owner-intelligence")}>Business intelligence</button>
+        <button type="button" onClick={() => scrollToOwnerSection("owner-forecast")}>Forecast</button>
+        <button type="button" onClick={() => scrollToOwnerSection("owner-ai-advisor")}>AI analysis</button>
+      </nav>
+
+      <section className="owner-attention-board" id="owner-attention" aria-label="Items requiring owner attention">
         <div className="module-heading"><div><p className="eyebrow text-danger">Today&apos;s exceptions</p><h2>Needs a decision</h2></div><span className="module-note">Open an item to continue in its operational workspace.</span></div>
         <div className="owner-attention-grid">
-          <button className={overdueOrders.length ? "urgent" : ""} type="button" onClick={() => onNavigate?.("owner-sales")}><AlertTriangle aria-hidden="true" /><span><strong>{overdueOrders.length}</strong><b>Overdue orders</b><small>Beyond the 15-minute prep target</small></span><ArrowRight aria-hidden="true" /></button>
+          <button className={overdueOrders.length ? "urgent" : ""} type="button" onClick={() => onNavigate?.("owner-sales")}><AlertTriangle aria-hidden="true" /><span><strong>{overdueOrders.length}</strong><b>Overdue orders</b><small>Beyond the {planning.prepTargetMinutes}-minute preparation target</small></span><ArrowRight aria-hidden="true" /></button>
           <button className={pendingPaymentOrders.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-sales")}><CreditCard aria-hidden="true" /><span><strong>{pendingPaymentOrders.length}</strong><b>Pending payments</b><small>Not yet counted as revenue</small></span><ArrowRight aria-hidden="true" /></button>
           <button className={lowStockItems.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-inventory")}><PackageSearch aria-hidden="true" /><span><strong>{lowStockItems.length}</strong><b>Low-stock items</b><small>Receiving or reorder action needed</small></span><ArrowRight aria-hidden="true" /></button>
           <button className={unremittedCodOrders.length ? "warning" : ""} type="button" onClick={() => onNavigate?.("owner-reports")}><ClipboardList aria-hidden="true" /><span><strong>{unremittedCodOrders.length}</strong><b>COD to reconcile</b><small>{currency(sumByTotal(unremittedCodOrders))} awaiting owner confirmation</small></span><ArrowRight aria-hidden="true" /></button>
@@ -524,7 +560,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         </div>
       </section>
 
-      <section className="owner-stat-grid owner-kpi-grid" aria-label="Owner performance metrics">
+      <section className="owner-stat-grid owner-kpi-grid" id="owner-performance" aria-label="Owner performance metrics">
         <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Paid sales</small><strong>{currency(dashboardSales)}</strong><span>{salesChange == null ? "No previous-period sales to compare" : `${signedPercent(salesChange)} compared with the previous period`}</span></button>
         <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Average paid order</small><strong>{currency(dashboardAverageOrder)}</strong><span>{dashboardRevenueOrders.length} paid order{dashboardRevenueOrders.length === 1 ? "" : "s"}</span></button>
         <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Active workload</small><strong>{countLabel(activeWorkload.length, "active order")}</strong><span>{countLabel(overdueOrders.length, "order")} beyond the preparation target</span></button>
@@ -553,7 +589,37 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           </div>
         </div>
 
-        <div className="owner-dashboard-section owner-forecast-section">
+        <div className="owner-dashboard-section" id="owner-intelligence">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Business intelligence</p><h2>Sales and inventory patterns</h2></div><span className="module-note">Latest 30 completed days unless stated otherwise</span></div>
+          <div className="owner-intelligence-grid">
+            <section aria-labelledby="sales-pattern-heading">
+              <div className="owner-intelligence-heading"><h3 id="sales-pattern-heading">Sales patterns</h3><button type="button" onClick={() => onNavigate?.("owner-sales")}>View sales</button></div>
+              <dl>
+                <div><dt>Average daily sales</dt><dd>{currency(decisionSupport.businessPatterns.sales.dailyAverageSales)} per day</dd></div>
+                <div><dt>Order volume</dt><dd>{countLabel(decisionSupport.businessPatterns.sales.orderVolume, "paid order")} in 30 days</dd></div>
+                <div><dt>Average order value</dt><dd>{currency(decisionSupport.businessPatterns.sales.averageOrderValue)} per paid order</dd></div>
+                <div><dt>Seven-day sales</dt><dd>{currency(decisionSupport.businessPatterns.sales.sevenDaySales)}{decisionSupport.businessPatterns.sales.sevenDayGrowthPercent == null ? "; no prior baseline" : `; ${signedPercent(decisionSupport.businessPatterns.sales.sevenDayGrowthPercent)} from the prior 7 days`}</dd></div>
+                <div><dt>Highest demand</dt><dd>{decisionSupport.businessPatterns.sales.highestDemandProduct ? `${decisionSupport.businessPatterns.sales.highestDemandProduct.name}; ${countLabel(decisionSupport.businessPatterns.sales.highestDemandProduct.units, "unit")} sold` : "Not enough paid sales data"}</dd></div>
+                <div><dt>Highest product revenue</dt><dd>{decisionSupport.businessPatterns.sales.highestRevenueProduct ? `${decisionSupport.businessPatterns.sales.highestRevenueProduct.name}; ${currency(decisionSupport.businessPatterns.sales.highestRevenueProduct.sales)}` : "Not enough paid sales data"}</dd></div>
+                <div><dt>Peak order hour</dt><dd>{decisionSupport.businessPatterns.sales.peakHour ? `${hourLabel(decisionSupport.businessPatterns.sales.peakHour.hour)}; ${countLabel(decisionSupport.businessPatterns.sales.peakHour.orders, "order")}` : "Not enough paid order data"}</dd></div>
+                <div><dt>Strongest weekday</dt><dd>{decisionSupport.businessPatterns.sales.strongestWeekday ? `${decisionSupport.businessPatterns.sales.strongestWeekday.day}; ${currency(decisionSupport.businessPatterns.sales.strongestWeekday.sales)} from ${countLabel(decisionSupport.businessPatterns.sales.strongestWeekday.orders, "order")}` : "Not enough paid order data"}</dd></div>
+              </dl>
+            </section>
+            <section aria-labelledby="inventory-health-heading">
+              <div className="owner-intelligence-heading"><h3 id="inventory-health-heading">Inventory health</h3><button type="button" onClick={() => onNavigate?.("owner-inventory")}>View inventory</button></div>
+              <dl>
+                <div><dt>Current stock</dt><dd>{countLabel(decisionSupport.businessPatterns.inventory.currentStockUnits, "unit")} across {countLabel(decisionSupport.businessPatterns.inventory.productsTracked, "product")}</dd></div>
+                <div><dt>Units sold</dt><dd>{countLabel(decisionSupport.businessPatterns.inventory.thirtyDayUnitsSold, "unit")} in 30 days</dd></div>
+                <div><dt>Sell-through estimate</dt><dd>{decisionSupport.businessPatterns.inventory.sellThroughPercent}% of sold plus remaining units</dd></div>
+                <div><dt>Low stock</dt><dd>{countLabel(decisionSupport.businessPatterns.inventory.lowStockCount, "product")} at or below reorder point</dd></div>
+                <div><dt>Out of stock</dt><dd>{countLabel(decisionSupport.businessPatterns.inventory.outOfStockCount, "product")}</dd></div>
+              </dl>
+              <details className="owner-data-availability"><summary>Metrics waiting for source data</summary><ul>{decisionSupport.businessPatterns.unavailable.map((item) => <li key={item.metric}><strong>{item.metric}</strong><span>{item.reason}</span></li>)}</ul></details>
+            </section>
+          </div>
+        </div>
+
+        <div className="owner-dashboard-section owner-forecast-section" id="owner-forecast">
           <div className="module-heading"><div><p className="eyebrow text-danger">Forecast</p><h2>Demand outlook</h2></div><span className={`forecast-confidence ${decisionSupport.forecast.confidence}`}>{decisionSupport.forecast.confidence} confidence</span></div>
           {!decisionSupport.forecast.available ? <div className="owner-forecast-empty"><strong>Reliable forecast not available</strong><p>{decisionSupport.forecast.reason}</p><small>{decisionSupport.forecast.analyzedOrders} paid orders across {decisionSupport.forecast.historyDays} day{decisionSupport.forecast.historyDays === 1 ? "" : "s"}.</small></div> : <>
             <div className="owner-forecast-metrics">
@@ -569,7 +635,8 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
 
         <div className="owner-dashboard-section">
           <div className="module-heading"><div><p className="eyebrow text-danger">Recommended actions</p><h2>Ranked priorities</h2></div><span className="module-note">Scores are calculated before Groq analysis</span></div>
-          {decisionSupport.priorities.length === 0 ? <div className="owner-priority-empty">No KPI has crossed its configured action threshold.</div> : <div className="owner-priority-list">{decisionSupport.priorities.map((item) => <button type="button" key={item.id} onClick={() => onNavigate?.(item.destination)}><span className={`priority-level ${item.level}`}>{item.level}</span><span><strong>{item.title}</strong><small>{item.detail}</small><em>{item.action}</em></span><span><b>{item.role}</b><small>{item.deadline}</small></span><ArrowRight size={18} aria-hidden="true" /></button>)}</div>}
+          {decisionSupport.priorities.length === 0 ? <div className="owner-priority-empty">No KPI has crossed its configured action threshold.</div> : <div className="owner-priority-list">{decisionSupport.priorities.map((item) => <article key={item.id}><button className="owner-priority-open" type="button" onClick={() => onNavigate?.(item.destination)}><span className={`priority-level ${item.level}`}>{item.level}<small>{item.score}/100</small></span><span><strong>{item.title}</strong><small>{item.detail}</small><em>{item.action}</em></span><span><b>{item.role}</b><small>{item.deadline}</small></span><ArrowRight size={18} aria-hidden="true" /></button><label>Status<select aria-label={`${item.title} recommendation status`} value={recommendationStatuses[item.id]?.status || "Not reviewed"} onChange={(event) => updateRecommendationStatus(item.id, event.target.value)}><option>Not reviewed</option><option>Accepted</option><option>Completed</option><option>Dismissed</option></select></label></article>)}</div>}
+          <p className="owner-tracking-note">Recommendation decisions are saved on this browser and do not change orders or inventory automatically.</p>
         </div>
       </section>
 
@@ -592,7 +659,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{countLabel(hour.count, "order")}</b></div>)}</div>
         <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Average: {item.dailyVelocity.toFixed(1)} units sold per day</small></span><b>{daysOfStockLabel(Number(item.daysLeft.toFixed(1)))}</b></div>)}</div>
         <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{countLabel(shift.orderCount, "order")} handled; cash variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)} in cash sales</b></div>)}</div>
-        <div className="dashboard-card ai-insight owner-decision-card" aria-live="polite">
+        <div className="dashboard-card ai-insight owner-decision-card" id="owner-ai-advisor" aria-live="polite">
           <div className="owner-ai-heading">
             <div><p className="eyebrow">Decision intelligence</p><h3>AI KPI Advisor</h3><small>Groq explains calculated KPIs and forecasts. Recommendations require owner review.</small></div>
           </div>
@@ -612,6 +679,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
             </section>}
             <section className="owner-ai-summary"><span>Summary</span><p>{insight.insight?.summary || insight.text}</p></section>
             {insight.insight && <>
+              <section className="owner-ai-section owner-ai-top-actions"><div><span>What to do today</span><small>Calculated priorities with accountable roles and deadlines</small></div>{decisionSupport.priorities.length === 0 ? <p>No configured KPI threshold currently requires action.</p> : decisionSupport.priorities.slice(0, 3).map((item) => <article key={item.id}><div><strong>{item.action}</strong><small>{item.detail}</small></div><span className={`owner-ai-severity ${item.level}`}>{item.level}</span><b>{item.role}; {item.deadline}</b></article>)}</section>
               <div className="owner-ai-counts"><span><strong>{insight.insight.stockRisks.length}</strong> stock risks</span><span><strong>{insight.insight.reorderRecommendations.length}</strong> reorder priorities</span><span><strong>{insight.insight.wasteRisks.length}</strong> waste risks</span></div>
               <div className="owner-ai-observations"><section><span>Sales trend</span><p>{insight.insight.salesTrend}</p></section><section><span>Peak period</span><p>{insight.insight.peakPeriod}</p></section></div>
               <section className="owner-ai-section"><div><span>Stock risks</span><small>Based on current stock and reorder points</small></div>{insight.insight.stockRisks.length === 0 ? <p>No immediate stock risk in the selected records.</p> : insight.insight.stockRisks.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.reason}</small></div><span className={`owner-ai-severity ${item.severity}`}>{item.severity}</span><b>{item.currentStock} / {item.reorderPoint}</b></article>)}</section>

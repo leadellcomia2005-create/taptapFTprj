@@ -348,6 +348,34 @@ const decisionSupportSchema = z.object({
     previousOrders: z.number().int().nonnegative(),
     destination: z.string().trim().max(40)
   }).strict()).max(3),
+  businessPatterns: z.object({
+    sales: z.object({
+      dailyAverageSales: z.number().nonnegative(),
+      dailyAverageOrders: z.number().nonnegative(),
+      sevenDaySales: z.number().nonnegative(),
+      thirtyDaySales: z.number().nonnegative(),
+      sevenDayGrowthPercent: z.number().nullable(),
+      orderVolume: z.number().int().nonnegative(),
+      averageOrderValue: z.number().nonnegative(),
+      unitsSold: z.number().nonnegative(),
+      highestDemandProduct: z.object({ name: z.string().trim().max(100), units: z.number().nonnegative() }).strict().nullable(),
+      highestRevenueProduct: z.object({ name: z.string().trim().max(100), sales: z.number().nonnegative() }).strict().nullable(),
+      peakHour: z.object({ hour: z.number().int().min(0).max(23), orders: z.number().int().nonnegative() }).strict().nullable(),
+      strongestWeekday: z.object({ day: z.string().trim().max(20), sales: z.number().nonnegative(), orders: z.number().int().nonnegative() }).strict().nullable()
+    }).strict(),
+    inventory: z.object({
+      productsTracked: z.number().int().nonnegative(),
+      currentStockUnits: z.number().nonnegative(),
+      outOfStockCount: z.number().int().nonnegative(),
+      lowStockCount: z.number().int().nonnegative(),
+      thirtyDayUnitsSold: z.number().nonnegative(),
+      sellThroughPercent: z.number().min(0).max(100)
+    }).strict(),
+    unavailable: z.array(z.object({
+      metric: z.string().trim().max(80),
+      reason: z.string().trim().max(180)
+    }).strict()).max(10)
+  }).strict(),
   forecast: z.object({
     available: z.boolean(),
     confidence: z.enum(["strong", "moderate", "limited"]),

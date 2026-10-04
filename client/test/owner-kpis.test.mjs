@@ -52,6 +52,22 @@ test("forecast stays unavailable when history is insufficient", () => {
   assert.equal(result.forecast.tomorrow.sales, 0);
 });
 
+test("business patterns use paid sales and disclose unsupported inventory metrics", () => {
+  const orders = [
+    { id: "one", status: "completed", paymentStatus: "paid", total: 300, createdAt: now, updatedAt: now, items: [{ id: "meal", name: "Meal", qty: 2, price: 150 }] },
+    { id: "two", status: "cancelled", paymentStatus: "paid", total: 999, createdAt: now, updatedAt: now, items: [{ id: "ignored", name: "Ignored", qty: 10, price: 99.9 }] }
+  ];
+  const inventory = [{ id: "meal", name: "Meal", stock: 8, reorderPoint: 5, updatedAt: now }];
+  const result = calculateOwnerDecisionSupport({ orders, inventory, complaints: [], shiftLogs: [], now, isRevenueOrder });
+
+  assert.equal(result.businessPatterns.sales.thirtyDaySales, 300);
+  assert.equal(result.businessPatterns.sales.unitsSold, 2);
+  assert.deepEqual(result.businessPatterns.sales.highestDemandProduct, { name: "Meal", units: 2 });
+  assert.deepEqual(result.businessPatterns.sales.highestRevenueProduct, { name: "Meal", sales: 300 });
+  assert.equal(result.businessPatterns.inventory.currentStockUnits, 8);
+  assert.equal(result.businessPatterns.unavailable.some((item) => item.metric === "Waste and spoilage"), true);
+});
+
 test("forecast history compares completed predictions with actual results", () => {
   const targetDate = "2026-10-03";
   const history = [{ targetDate, predictedSales: 900, predictedOrders: 9, confidence: "moderate", createdAt: now - 2 * dayMs }];

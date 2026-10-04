@@ -89,6 +89,16 @@ async function expectTwoColumnMobileGrid(page, selector) {
   expect((second?.x || 0)).toBeGreaterThan(first?.x || 0);
 }
 
+async function expectSingleColumnMobileGrid(page, selector) {
+  const items = page.locator(selector);
+  await expect(items).toHaveCount(4);
+  const [first, second] = await Promise.all([items.nth(0).boundingBox(), items.nth(1).boundingBox()]);
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(Math.abs((first?.x || 0) - (second?.x || 0))).toBeLessThanOrEqual(2);
+  expect((second?.y || 0)).toBeGreaterThan(first?.y || 0);
+}
+
 async function activateWithKeyboard(page, control, key = "Enter") {
   await control.focus();
   await expect(control).toBeFocused();
@@ -375,7 +385,7 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   expect(staffRuntime.deferredRequests).toEqual([]);
 });
 
-test("owner Groq inventory advisor renders structured review-only recommendations", async ({ page }) => {
+test("owner Groq KPI advisor renders structured review-only recommendations", async ({ page }) => {
   await page.route("**/api/status", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ services: { firebase: false, socket: false, groq: true, openai: false, dialogflow: false, paymongo: false, twilio: false } })
@@ -400,7 +410,7 @@ test("owner Groq inventory advisor renders structured review-only recommendation
 
   await loginAs(page, "owner");
   const advisor = page.locator(".owner-decision-card");
-  await expect(advisor.getByRole("heading", { name: "AI Inventory Advisor" })).toBeVisible();
+  await expect(advisor.getByRole("heading", { name: "AI KPI Advisor" })).toBeVisible();
   await expect(advisor.getByText("Groq ready")).toHaveCount(0);
   await advisor.getByLabel("Analysis period").selectOption("7d");
   await advisor.getByRole("button", { name: "Generate analysis" }).click();
@@ -1112,7 +1122,7 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
 
     if (role === "owner") {
       await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
-      await expectTwoColumnMobileGrid(page, ".owner-kpi-grid .owner-metric-card");
+      await expectSingleColumnMobileGrid(page, ".owner-kpi-grid .owner-metric-card");
       const [attention, metrics] = await Promise.all([
         page.locator(".owner-attention-board").boundingBox(),
         page.locator(".owner-kpi-grid").boundingBox()

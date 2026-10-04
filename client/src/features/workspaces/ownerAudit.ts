@@ -13,15 +13,20 @@ export type AuditEntry = Partial<AuditLog> & {
 
 export const ownerPlanningStorageKey = "taptap-owner-planning";
 
-export function ownerPlanningDefaults(): { salesGoal: number; activePromotion: string } {
+export function ownerPlanningDefaults(): { salesGoal: number; activePromotion: string; prepTargetMinutes: number; deliveryTargetMinutes: number; cashVarianceLimit: number; cancellationRateLimit: number; complaintLimit: number } {
   try {
     const saved = JSON.parse(window.localStorage.getItem(ownerPlanningStorageKey) || "{}") as Record<string, unknown>;
     return {
       salesGoal: Math.max(1, Number(saved.salesGoal || 100000)),
-      activePromotion: String(saved.activePromotion || "No active promotion")
+      activePromotion: String(saved.activePromotion || "No active promotion"),
+      prepTargetMinutes: Math.max(1, Number(saved.prepTargetMinutes || 15)),
+      deliveryTargetMinutes: Math.max(1, Number(saved.deliveryTargetMinutes || 45)),
+      cashVarianceLimit: Math.max(0, Number(saved.cashVarianceLimit || 100)),
+      cancellationRateLimit: Math.max(0.1, Number(saved.cancellationRateLimit || 5)),
+      complaintLimit: Math.max(1, Number(saved.complaintLimit || 3))
     };
   } catch {
-    return { salesGoal: 100000, activePromotion: "No active promotion" };
+    return { salesGoal: 100000, activePromotion: "No active promotion", prepTargetMinutes: 15, deliveryTargetMinutes: 45, cashVarianceLimit: 100, cancellationRateLimit: 5, complaintLimit: 3 };
   }
 }
 

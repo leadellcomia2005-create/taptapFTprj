@@ -385,10 +385,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  insights: (sales: JsonValue, inventory: InventoryItem[], period: "today" | "7d" | "30d" | "all" = "all", category = "all") =>
+  insights: (sales: JsonValue, inventory: InventoryItem[], period: "today" | "7d" | "30d" | "all" = "all", category = "all", decisionSupport?: JsonValue) =>
     request<InventoryInsightResponse>("/insights", {
       method: "POST",
-      body: JSON.stringify({ sales, inventory, period, category }),
+      body: JSON.stringify({ sales, inventory, period, category, decisionSupport }),
     }),
   createPayment: (orderId: EntityId) =>
     request<PaymentCheckoutResponse>(`/payments/checkout/${encodeURIComponent(orderId)}`, {

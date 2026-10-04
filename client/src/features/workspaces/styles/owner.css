@@ -223,10 +223,74 @@
   }
 }
 @media (max-width: 520px) {
+  .owner-kpi-grid { grid-template-columns: 1fr; }
   .owner-hero-actions {
     grid-template-columns: 1fr;
   }
   .owner-workspace-header .btn {
     width: 100%;
   }
+}
+
+.freshness-current,.freshness-stale { padding: 4px 8px; border-radius: 999px; font-weight: 800; }
+.freshness-current { color: #23623a; background: #e8f6ed; }
+.freshness-stale { color: #71500a; background: #fff2c9; }
+.owner-decision-dashboard { display: grid; gap: 14px; margin-bottom: 14px; }
+.owner-dashboard-section { min-width: 0; padding: 18px; background: white; border: 1px solid var(--ops-border); border-radius: 8px; box-shadow: var(--shadow-panel); }
+.owner-dashboard-section .module-heading { margin-bottom: 14px; }
+.owner-dashboard-section h2 { margin: 3px 0 0; font: 700 25px/1.08 var(--display); }
+.owner-decision-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
+.owner-decision-metrics button,.owner-comparison-grid button { min-width: 0; min-height: 104px; display: grid; align-content: center; gap: 5px; padding: 14px; color: var(--ink); text-align: left; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: 8px; }
+.owner-decision-metrics button:hover,.owner-comparison-grid button:hover,.owner-priority-list button:hover { border-color: rgba(217,54,36,.42); background: #fff8f4; }
+.owner-decision-metrics button.needs-review { border-color: #e8ad62; background: #fff7e8; }
+.owner-decision-metrics small,.owner-comparison-grid span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.owner-decision-metrics strong { font: 800 26px/1 var(--display); }
+.owner-decision-metrics span,.owner-comparison-grid small { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+.owner-comparison-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
+.owner-comparison-grid button { position: relative; padding-right: 38px; }
+.owner-comparison-grid strong { font: 800 23px/1 var(--display); }
+.owner-comparison-grid svg { position: absolute; top: 14px; right: 14px; color: var(--muted); }
+.forecast-confidence { padding: 5px 9px; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.forecast-confidence.strong { color: #23623a; background: #e8f6ed; }
+.forecast-confidence.moderate { color: #71500a; background: #fff2c9; }
+.forecast-confidence.limited { color: #872c20; background: #ffebe6; }
+.owner-forecast-empty { padding: 18px; background: var(--surface-subtle); border: 1px dashed var(--ops-border); border-radius: 8px; }
+.owner-forecast-empty strong { display: block; margin-bottom: 5px; }
+.owner-forecast-empty p,.owner-forecast-method { margin: 0; color: var(--muted); font-size: 11px; }
+.owner-forecast-empty small { display: block; margin-top: 7px; color: var(--muted); }
+.owner-forecast-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
+.owner-forecast-metrics > div { min-width: 0; display: grid; gap: 5px; padding: 14px; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: 8px; }
+.owner-forecast-metrics small { color: var(--muted); font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.owner-forecast-metrics strong { font: 800 22px/1 var(--display); }
+.owner-forecast-metrics span { color: var(--muted); font-size: 10px; }
+.owner-forecast-details { margin-top: 12px; border-top: 1px solid var(--ops-border); }
+.owner-forecast-details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 11px; font-weight: 900; }
+.owner-forecast-details > div { display: grid; }
+.owner-forecast-details button { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 12px; padding: 11px 0; color: var(--ink); text-align: left; background: transparent; border: 0; border-top: 1px solid var(--ops-border); }
+.owner-forecast-details button span { min-width: 0; display: grid; gap: 3px; }
+.owner-forecast-details button small,.owner-forecast-details button em { color: var(--muted); font-size: 10px; font-style: normal; }
+.owner-forecast-details button b { color: var(--red-dark); font-size: 11px; }
+.owner-forecast-method { margin-top: 12px; }
+.owner-priority-list { display: grid; gap: 8px; }
+.owner-priority-list button { min-width: 0; min-height: 82px; display: grid; grid-template-columns: 72px minmax(0,1fr) minmax(100px,.3fr) 20px; align-items: center; gap: 12px; padding: 12px; color: var(--ink); text-align: left; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: 8px; }
+.owner-priority-list button > span { min-width: 0; display: grid; gap: 3px; }
+.owner-priority-list small,.owner-priority-list em { overflow-wrap: anywhere; color: var(--muted); font-size: 10px; font-style: normal; }
+.owner-priority-list .priority-level { display: inline-flex; justify-content: center; padding: 6px; border-radius: 999px; font-size: 8px; font-weight: 900; text-transform: uppercase; }
+.priority-level.critical,.priority-level.high { color: #872c20; background: #ffebe6; }
+.priority-level.medium { color: #71500a; background: #fff2c9; }
+.priority-level.low { color: #23623a; background: #e8f6ed; }
+.owner-priority-empty { padding: 18px; color: var(--muted); background: var(--surface-subtle); border: 1px dashed var(--ops-border); border-radius: 8px; font-size: 11px; }
+@media (max-width: 1000px) {
+  .owner-decision-metrics,.owner-comparison-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .owner-forecast-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 640px) {
+  .owner-dashboard-section { padding: 14px; }
+  .owner-dashboard-section .module-heading { align-items: flex-start; flex-direction: column; }
+  .owner-decision-metrics,.owner-comparison-grid,.owner-forecast-metrics { grid-template-columns: 1fr; }
+  .owner-decision-metrics button,.owner-comparison-grid button { min-height: 88px; }
+  .owner-forecast-details button { grid-template-columns: minmax(0,1fr); gap: 5px; }
+  .owner-priority-list button { grid-template-columns: 68px minmax(0,1fr) 18px; align-items: start; }
+  .owner-priority-list button > span:nth-child(3) { grid-column: 2; }
+  .owner-priority-list button > svg { grid-column: 3; grid-row: 1; }
 }

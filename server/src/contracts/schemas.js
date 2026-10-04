@@ -315,11 +315,85 @@ export const supportRequestSchema = z.object({
 }).strict();
 
 const insightRecordSchema = z.object({}).passthrough();
+const decisionSupportSchema = z.object({
+  kpis: z.object({
+    grossSales: z.number().nonnegative(),
+    paidOrders: z.number().int().nonnegative(),
+    averageOrderValue: z.number().nonnegative(),
+    paymentSuccessRate: z.number().min(0).max(100),
+    paymentFailureCount: z.number().int().nonnegative(),
+    cancellationCount: z.number().int().nonnegative(),
+    cancellationRate: z.number().min(0).max(100),
+    cancelledOrderValue: z.number().nonnegative(),
+    paidCancellationReviewCount: z.number().int().nonnegative(),
+    cancellationReasons: z.array(z.object({ reason: z.string().trim().max(100), count: z.number().int().nonnegative() }).strict()).max(5),
+    openComplaintCount: z.number().int().nonnegative(),
+    averageDeliveryMinutes: z.number().nonnegative(),
+    delayedDeliveryCount: z.number().int().nonnegative(),
+    overduePrepCount: z.number().int().nonnegative(),
+    closedShiftCount: z.number().int().nonnegative(),
+    staffOrderCount: z.number().int().nonnegative(),
+    averageOrdersPerShift: z.number().nonnegative(),
+    cashVariance: z.number().nonnegative(),
+    lowStockCount: z.number().int().nonnegative(),
+    outOfStockCount: z.number().int().nonnegative()
+  }).strict(),
+  comparisons: z.array(z.object({
+    label: z.string().trim().max(80),
+    currentSales: z.number(),
+    previousSales: z.number(),
+    salesChange: z.number(),
+    salesChangePercent: z.number().nullable(),
+    currentOrders: z.number().int().nonnegative(),
+    previousOrders: z.number().int().nonnegative(),
+    destination: z.string().trim().max(40)
+  }).strict()).max(3),
+  forecast: z.object({
+    available: z.boolean(),
+    confidence: z.enum(["strong", "moderate", "limited"]),
+    historyDays: z.number().int().nonnegative(),
+    analyzedOrders: z.number().int().nonnegative(),
+    reason: z.string().trim().max(240),
+    tomorrow: z.object({ sales: z.number().nonnegative(), orders: z.number().nonnegative() }).strict(),
+    sevenDays: z.object({ sales: z.number().nonnegative(), orders: z.number().nonnegative() }).strict(),
+    products: z.array(z.object({
+      id: z.string().trim().max(128),
+      name: z.string().trim().max(100),
+      dailyDemand: z.number().nonnegative(),
+      sevenDayDemand: z.number().nonnegative(),
+      daysToDepletion: z.number().nonnegative().nullable(),
+      suggestedReorder: z.number().int().nonnegative()
+    }).strict()).max(8),
+    staffing: z.array(z.object({
+      label: z.enum(["Morning", "Afternoon", "Evening"]),
+      expectedOrders: z.number().nonnegative(),
+      suggestedStaff: z.number().int().positive().nullable()
+    }).strict()).max(3)
+  }).strict(),
+  priorities: z.array(z.object({
+    id: z.string().trim().max(80),
+    title: z.string().trim().max(100),
+    value: z.number().nonnegative(),
+    score: z.number().int().min(0).max(100),
+    detail: z.string().trim().max(240),
+    action: z.string().trim().max(240),
+    role: z.string().trim().max(40),
+    deadline: z.string().trim().max(80),
+    destination: z.string().trim().max(40),
+    level: z.enum(["critical", "high", "medium", "low"])
+  }).strict()).max(6),
+  freshness: z.object({
+    latestDataAt: z.number().nonnegative(),
+    ageMinutes: z.number().int().nonnegative().nullable(),
+    stale: z.boolean()
+  }).strict()
+}).strict();
 export const insightRequestSchema = z.object({
   sales: z.array(insightRecordSchema).max(500),
   inventory: z.array(insightRecordSchema).max(250),
   period: z.enum(["today", "7d", "30d", "all"]).default("all"),
-  category: z.string().trim().min(1).max(80).default("all")
+  category: z.string().trim().min(1).max(80).default("all"),
+  decisionSupport: decisionSupportSchema.optional()
 }).strict();
 
 export const recordIdParams = (name) => z.object({ [name]: recordIdSchema }).passthrough();

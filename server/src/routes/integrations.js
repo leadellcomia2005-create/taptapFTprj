@@ -235,7 +235,7 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
   }));
 
   router.post("/insights", authenticate, requireRoles("owner"), validateBody(insightRequestSchema), (req, res, next) => {
-    const cached = getCachedInventoryInsights(req.body.sales, req.body.inventory, { period: req.body.period, category: req.body.category });
+    const cached = getCachedInventoryInsights(req.body.sales, req.body.inventory, { period: req.body.period, category: req.body.category, decisionSupport: req.body.decisionSupport });
     if (!cached) return next();
     metrics?.increment("aiInsightCacheHits");
     return res.json(cached);

@@ -14,6 +14,14 @@ import { auditActionLabel, auditCategories, auditCategory, auditDetailText, audi
 import "./styles/owner.css";
 
 const SalesChart = lazy(() => import("../../components/SalesChart"));
+const countLabel = (value, singular, plural = `${singular}s`) => `${value} ${Number(value) === 1 ? singular : plural}`;
+const signedPercent = (value) => `${Number(value) >= 0 ? "+" : ""}${value}%`;
+const daysOfStockLabel = (value) => {
+  if (value == null) return "No depletion date";
+  if (Number(value) < 1) return "Less than 1 day of stock left";
+  return `About ${value} ${Number(value) === 1 ? "day" : "days"} of stock left`;
+};
+
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -517,31 +525,31 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       </section>
 
       <section className="owner-stat-grid owner-kpi-grid" aria-label="Owner performance metrics">
-        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Paid sales</small><strong>{currency(dashboardSales)}</strong><span>{salesChange == null ? "No previous-period baseline" : `${salesChange >= 0 ? "+" : ""}${salesChange}% vs previous period`}</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Paid sales</small><strong>{currency(dashboardSales)}</strong><span>{salesChange == null ? "No previous-period sales to compare" : `${signedPercent(salesChange)} compared with the previous period`}</span></button>
         <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Average paid order</small><strong>{currency(dashboardAverageOrder)}</strong><span>{dashboardRevenueOrders.length} paid order{dashboardRevenueOrders.length === 1 ? "" : "s"}</span></button>
-        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Active workload</small><strong>{activeWorkload.length}</strong><span>{overdueOrders.length} beyond prep target</span></button>
-        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-inventory")}><small>Low stock</small><strong>{lowStockItems.length}</strong><span>At or below reorder point</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-sales")}><small>Active workload</small><strong>{countLabel(activeWorkload.length, "active order")}</strong><span>{countLabel(overdueOrders.length, "order")} beyond the preparation target</span></button>
+        <button className="metric-card owner-metric-card" type="button" onClick={() => onNavigate?.("owner-inventory")}><small>Low stock</small><strong>{countLabel(lowStockItems.length, "product")}</strong><span>At or below the configured reorder point</span></button>
       </section>
 
       <section className="owner-decision-dashboard" aria-label="Priority KPI dashboard">
         <div className="owner-dashboard-section">
           <div className="module-heading"><div><p className="eyebrow text-danger">Current performance</p><h2>Operational KPIs</h2></div><span className="module-note">Calculated from loaded system records</span></div>
           <div className="owner-decision-metrics">
-            <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Payment success</small><strong>{decisionSupport.kpis.paymentSuccessRate}%</strong><span>{decisionSupport.kpis.paymentFailureCount} failed attempt{decisionSupport.kpis.paymentFailureCount === 1 ? "" : "s"}</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Cancellation rate</small><strong>{decisionSupport.kpis.cancellationRate}%</strong><span>{decisionSupport.kpis.cancellationCount} cancelled - {currency(decisionSupport.kpis.cancelledOrderValue)}</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-reports")} className={decisionSupport.kpis.paidCancellationReviewCount ? "needs-review" : ""}><small>Payment review required</small><strong>{decisionSupport.kpis.paidCancellationReviewCount}</strong><span>Paid cancellations requiring owner review</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-reviews")}><small>Open complaints</small><strong>{decisionSupport.kpis.openComplaintCount}</strong><span>Unresolved customer cases</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Average delivery</small><strong>{decisionSupport.kpis.averageDeliveryMinutes ? `${decisionSupport.kpis.averageDeliveryMinutes}m` : "-"}</strong><span>Target {planning.deliveryTargetMinutes} minutes</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Payment success rate</small><strong>{decisionSupport.kpis.paymentSuccessRate}% successful</strong><span>{countLabel(decisionSupport.kpis.paymentFailureCount, "failed payment attempt")}</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Cancellation rate</small><strong>{decisionSupport.kpis.cancellationRate}% cancelled</strong><span>{countLabel(decisionSupport.kpis.cancellationCount, "cancelled order")} worth {currency(decisionSupport.kpis.cancelledOrderValue)}</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-reports")} className={decisionSupport.kpis.paidCancellationReviewCount ? "needs-review" : ""}><small>Payment review required</small><strong>{countLabel(decisionSupport.kpis.paidCancellationReviewCount, "order")}</strong><span>Paid cancellations requiring owner review</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-reviews")}><small>Open complaints</small><strong>{countLabel(decisionSupport.kpis.openComplaintCount, "complaint")}</strong><span>Unresolved customer cases</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Average delivery time</small><strong>{decisionSupport.kpis.averageDeliveryMinutes ? countLabel(decisionSupport.kpis.averageDeliveryMinutes, "minute") : "No completed deliveries"}</strong><span>Target: {countLabel(planning.deliveryTargetMinutes, "minute")}</span></button>
             <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Absolute cash variance</small><strong>{currency(decisionSupport.kpis.cashVariance)}</strong><span>Limit {currency(planning.cashVarianceLimit)}</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Delivery delays</small><strong>{decisionSupport.kpis.delayedDeliveryCount}</strong><span>Beyond the {planning.deliveryTargetMinutes}-minute target</span></button>
-            <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Staff productivity</small><strong>{decisionSupport.kpis.averageOrdersPerShift}</strong><span>Orders per closed shift</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Delivery delays</small><strong>{countLabel(decisionSupport.kpis.delayedDeliveryCount, "delayed order")}</strong><span>Beyond the {countLabel(planning.deliveryTargetMinutes, "minute")} target</span></button>
+            <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Staff productivity</small><strong>{decisionSupport.kpis.averageOrdersPerShift} orders per shift</strong><span>Average across closed shifts</span></button>
           </div>
         </div>
 
         <div className="owner-dashboard-section">
           <div className="module-heading"><div><p className="eyebrow text-danger">Period comparison</p><h2>Performance change</h2></div><span className="module-note">Paid sales only</span></div>
           <div className="owner-comparison-grid">
-            {decisionSupport.comparisons.map((row) => <button type="button" key={row.label} onClick={() => onNavigate?.(row.destination)}><span>{row.label}</span><strong>{currency(row.currentSales)}</strong><small>{row.salesChangePercent == null ? "No previous sales baseline" : `${row.salesChangePercent >= 0 ? "+" : ""}${row.salesChangePercent}% - ${row.currentOrders} vs ${row.previousOrders} orders`}</small><ArrowRight size={17} aria-hidden="true" /></button>)}
+            {decisionSupport.comparisons.map((row) => <button type="button" key={row.label} onClick={() => onNavigate?.(row.destination)}><span>{row.label}</span><strong>{currency(row.currentSales)} in paid sales</strong><small>{row.salesChangePercent == null ? "No previous sales to compare" : `${signedPercent(row.salesChangePercent)}; ${countLabel(row.currentOrders, "current order")} compared with ${countLabel(row.previousOrders, "previous order")}`}</small><ArrowRight size={17} aria-hidden="true" /></button>)}
           </div>
         </div>
 
@@ -549,12 +557,12 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           <div className="module-heading"><div><p className="eyebrow text-danger">Forecast</p><h2>Demand outlook</h2></div><span className={`forecast-confidence ${decisionSupport.forecast.confidence}`}>{decisionSupport.forecast.confidence} confidence</span></div>
           {!decisionSupport.forecast.available ? <div className="owner-forecast-empty"><strong>Reliable forecast not available</strong><p>{decisionSupport.forecast.reason}</p><small>{decisionSupport.forecast.analyzedOrders} paid orders across {decisionSupport.forecast.historyDays} day{decisionSupport.forecast.historyDays === 1 ? "" : "s"}.</small></div> : <>
             <div className="owner-forecast-metrics">
-              <div><small>Tomorrow sales</small><strong>{currency(decisionSupport.forecast.tomorrow.sales)}</strong><span>{decisionSupport.forecast.tomorrow.orders} expected orders</span></div>
-              <div><small>Next 7 days</small><strong>{currency(decisionSupport.forecast.sevenDays.sales)}</strong><span>{decisionSupport.forecast.sevenDays.orders} expected orders</span></div>
+              <div><small>Tomorrow's forecast</small><strong>{currency(decisionSupport.forecast.tomorrow.sales)} in sales</strong><span>{countLabel(decisionSupport.forecast.tomorrow.orders, "expected order")}</span></div>
+              <div><small>Next 7 days forecast</small><strong>{currency(decisionSupport.forecast.sevenDays.sales)} in sales</strong><span>{countLabel(decisionSupport.forecast.sevenDays.orders, "expected order")}</span></div>
               <div><small>Forecast accuracy</small><strong>{forecastAccuracy.latest ? `${forecastAccuracy.latest.accuracyPercent}%` : "Pending"}</strong><span>{forecastAccuracy.latest ? `${forecastAccuracy.latest.targetDate} actual comparison` : "Available after one forecast cycle"}</span></div>
-              {decisionSupport.forecast.staffing.map((shift) => <div key={shift.label}><small>{shift.label} staffing</small><strong>{shift.suggestedStaff}</strong><span>{shift.expectedOrders} expected orders/day</span></div>)}
+              {decisionSupport.forecast.staffing.map((shift) => <div key={shift.label}><small>{shift.label} staffing</small><strong>{countLabel(shift.suggestedStaff, "staff member")} suggested</strong><span>{countLabel(shift.expectedOrders, "expected order")} per day</span></div>)}
             </div>
-            <details className="owner-forecast-details"><summary>Product demand and stock depletion</summary><div>{decisionSupport.forecast.products.length === 0 ? <p>No product forecast is available.</p> : decisionSupport.forecast.products.map((item) => <button type="button" key={item.id} onClick={() => onNavigate?.("owner-inventory")}><span><strong>{item.name}</strong><small>{item.sevenDayDemand} expected units in 7 days</small></span><b>{item.daysToDepletion == null ? "No depletion date" : `${item.daysToDepletion} days left`}</b><em>{item.suggestedReorder ? `Suggested +${item.suggestedReorder}` : "Stock sufficient"}</em></button>)}</div></details>
+            <details className="owner-forecast-details"><summary>Product demand and stock depletion</summary><div>{decisionSupport.forecast.products.length === 0 ? <p>No product forecast is available.</p> : decisionSupport.forecast.products.map((item) => <button type="button" key={item.id} onClick={() => onNavigate?.("owner-inventory")}><span><strong>{item.name}</strong><small>{countLabel(item.sevenDayDemand, "unit")} expected to sell in the next 7 days</small></span><b>{daysOfStockLabel(item.daysToDepletion)}</b><em>{item.suggestedReorder ? `Suggested reorder: ${countLabel(item.suggestedReorder, "unit")}` : "Current stock should be sufficient"}</em></button>)}</div></details>
           </>}
           <p className="owner-forecast-method">{decisionSupport.forecast.reason} Forecasts are advisory and never change stock or staffing automatically.</p>
         </div>
@@ -576,14 +584,14 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="owner-listing-orders"><OrderManagement orders={activeWorkload.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="dashboard-card owner-stock-panel">
           <div className="module-heading"><div><p className="eyebrow text-danger">Inventory watch</p><h3>Low-stock alerts</h3></div></div>
-          {lowStockItems.slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder point: {item.reorderPoint}</small></span><b>{item.stock}</b></div>)}
+          {lowStockItems.slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder when stock reaches {countLabel(item.reorderPoint, "unit")}</small></span><b>{countLabel(item.stock, "unit")} currently in stock</b></div>)}
           {lowStockItems.length === 0 && <p className="text-secondary small">All products are above their reorder points.</p>}
         </div>
-        <div className="dashboard-card"><h3>Best sellers</h3>{bestSellerRows.length === 0 && <div className="empty-chat">Sales will appear here.</div>}{bestSellerRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold</small></span><b>{currency(item.sales)}</b></div>)}</div>
-        <div className="dashboard-card"><h3>Slow-moving items</h3>{slowMovingRows.length === 0 && <div className="empty-chat">Inventory activity will appear here.</div>}{slowMovingRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.qty} sold, {item.stock} in stock</small></span><b>{item.qty}</b></div>)}</div>
-        <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{hour.count}</b></div>)}</div>
-        <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{item.dailyVelocity.toFixed(1)} sold/day</small></span><b>{item.daysLeft.toFixed(1)}d</b></div>)}</div>
-        <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{shift.orderCount} orders - variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Best sellers</h3>{bestSellerRows.length === 0 && <div className="empty-chat">Sales will appear here.</div>}{bestSellerRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{countLabel(item.qty, "unit")} sold</small></span><b>{currency(item.sales)} in sales</b></div>)}</div>
+        <div className="dashboard-card"><h3>Slow-moving items</h3>{slowMovingRows.length === 0 && <div className="empty-chat">Inventory activity will appear here.</div>}{slowMovingRows.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>{countLabel(item.qty, "unit")} sold; {countLabel(item.stock, "unit")} currently in stock</small></span><b>{countLabel(item.qty, "unit")} sold</b></div>)}</div>
+        <div className="dashboard-card"><h3>Peak order hours</h3>{peakHours.length === 0 && <div className="empty-chat">No order hour data yet.</div>}{peakHours.map((hour) => <div className="alert-row" key={hour.hour}><span><strong>{hour.label}</strong><small>High order volume</small></span><b>{countLabel(hour.count, "order")}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Inventory forecast</h3>{runoutForecast.length === 0 && <div className="empty-chat">Forecast appears after recent sales.</div>}{runoutForecast.map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Average: {item.dailyVelocity.toFixed(1)} units sold per day</small></span><b>{daysOfStockLabel(Number(item.daysLeft.toFixed(1)))}</b></div>)}</div>
+        <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{countLabel(shift.orderCount, "order")} handled; cash variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)} in cash sales</b></div>)}</div>
         <div className="dashboard-card ai-insight owner-decision-card" aria-live="polite">
           <div className="owner-ai-heading">
             <div><p className="eyebrow">Decision intelligence</p><h3>AI KPI Advisor</h3><small>Groq explains calculated KPIs and forecasts. Recommendations require owner review.</small></div>

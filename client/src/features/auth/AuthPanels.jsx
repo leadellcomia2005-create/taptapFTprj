@@ -299,6 +299,7 @@ function LoginPanel({ onLoggedIn }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [loginNotice, setLoginNotice] = useState("");
+  const [loginProgress, setLoginProgress] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
@@ -359,6 +360,12 @@ function LoginPanel({ onLoggedIn }) {
       }, 0);
     };
   }, [loginModalOpen]);
+
+  useEffect(() => {
+    if (!loginModalOpen || registering || demoModeEnabled) return undefined;
+    api.status().catch(() => undefined);
+    return undefined;
+  }, [loginModalOpen, registering]);
 
   useEffect(() => {
     const refreshStatus = () => setOpenStatus(getWebsiteOpenStatus());
@@ -483,9 +490,11 @@ function LoginPanel({ onLoggedIn }) {
 
   const submit = async (event) => {
     event.preventDefault();
+    let loginProgressTimer;
     setBusy(true);
     setError("");
     setLoginNotice("");
+    setLoginProgress("");
     setFieldErrors({});
     setTurnstileMessage("");
     if (registering) {
@@ -524,6 +533,9 @@ function LoginPanel({ onLoggedIn }) {
         setTurnstileToken("");
         setTurnstileResetKey((current) => current + 1);
       } else {
+        loginProgressTimer = window.setTimeout(() => {
+          setLoginProgress("Still connecting securely. The service may be waking up; this attempt will stop automatically if it cannot connect.");
+        }, 3500);
         const signedInUser = await login(email, password, undefined, demoAccounts);
         trackLogin(demoModeEnabled ? "demo" : "firebase", signedInUser?.role || "customer");
         onLoggedIn?.();
@@ -536,6 +548,8 @@ function LoginPanel({ onLoggedIn }) {
       }
       setError(friendlyAuthError(authError));
     } finally {
+      window.clearTimeout(loginProgressTimer);
+      setLoginProgress("");
       setBusy(false);
     }
   };
@@ -955,6 +969,7 @@ function LoginPanel({ onLoggedIn }) {
         </div>
       )}
       {!registering && loginNotice && <div className="alert alert-success py-2 small" role="status">{loginNotice}</div>}
+      {!registering && loginProgress && <div className="alert alert-secondary py-2 small" role="status">{loginProgress}</div>}
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
       {(!registering || registrationPhase !== "verify") && !registrationRecoveryRequired && (
         <button className="btn btn-danger w-100 login-submit-button" disabled={busy}>

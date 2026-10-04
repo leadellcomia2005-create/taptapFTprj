@@ -28,6 +28,7 @@ type JsonObject = Record<string, JsonValue | undefined>;
 type JsonRequestInit = Omit<RequestInit, "body" | "headers"> & {
   body?: BodyInit | null;
   headers?: Record<string, string>;
+  timeoutMs?: number;
 };
 type ApiPayload = Partial<ApiErrorResponse> & Record<string, unknown>;
 type ApiResult = Record<string, unknown>;
@@ -251,21 +252,30 @@ async function publicRequest<T = ApiResult>(path: string, options: JsonRequestIn
 }
 
 async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequestInit = {}, authHeaders: Record<string, string> = {}): Promise<T> {
+  const { timeoutMs = 30_000, signal: callerSignal, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  callerSignal?.addEventListener("abort", forwardAbort, { once: true });
+  const requestTimeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         ...authHeaders,
-        ...options.headers,
+        ...fetchOptions.headers,
       },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The email verification service took too long to respond. Retry the check.");
+      throw new Error("The secure service took too long to respond. Please try again.");
     }
     throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
+  } finally {
+    window.clearTimeout(requestTimeout);
+    callerSignal?.removeEventListener("abort", forwardAbort);
   }
   const rawPayload: unknown = await response.json().catch(() => ({}));
   const payload = isRecord(rawPayload) ? rawPayload as ApiPayload : {};
@@ -279,7 +289,7 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
 }
 
 export const api = {
-  status: () => request("/status"),
+  status: () => publicRequest("/status", { timeoutMs: 45_000 }),
   listHistory: <T extends ApiResult = ApiResult>(collection: HistoryCollection, options: { limit?: number; before?: string } = {}) => {
     const search = new URLSearchParams();
     if (options.limit) search.set("limit", String(options.limit));
@@ -309,7 +319,8 @@ export const api = {
       body: "{}",
     }),
   twoFactorStatus: (expectedRole?: UserRole) => request<TwoFactorStatusResponse>(
-    expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status"
+    expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status",
+    { timeoutMs: 25_000 }
   ),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),

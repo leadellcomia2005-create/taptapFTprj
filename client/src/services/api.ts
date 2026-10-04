@@ -1,4 +1,5 @@
 import { getAuthToken } from "./authSession";
+import { apiBaseUrl } from "../config/runtimeEndpoints";
 import { isRecord, requireApiObject } from "../contracts/runtime";
 import type {
   ActiveShift,
@@ -20,7 +21,7 @@ import type {
 } from "../types/domain";
 import type { ApiErrorResponse } from "../types/records";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const API_BASE = apiBaseUrl();
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = Record<string, JsonValue | undefined>;

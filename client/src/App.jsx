@@ -781,7 +781,7 @@ export default function App() {
   const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
   const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, twilio: false });
+  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, paymongoMode: "test", twilio: false });
   const previousOrderCount = useRef(0);
   const paymentReturnHandledRef = useRef(false);
   const payingOrderRef = useRef("");
@@ -920,10 +920,29 @@ export default function App() {
   }, [activeUser, view]);
   useEffect(() => {
     if (!activeUser) return undefined;
-    api.status()
-      .then((result) => setServiceStatus((current) => ({ ...current, api: true, ...result.services })))
-      .catch(() => setServiceStatus((current) => ({ ...current, api: false })));
-    return undefined;
+    let active = true;
+    let retryTimer;
+    const refreshStatus = () => api.status()
+      .then((result) => {
+        if (active) setServiceStatus((current) => ({
+          ...current,
+          api: true,
+          ...result.services,
+          paymongoMode: result.paymongoMode === "live" ? "live" : "test"
+        }));
+      })
+      .catch(() => {
+        if (!active) return;
+        setServiceStatus((current) => ({ ...current, api: false }));
+        retryTimer = window.setTimeout(refreshStatus, 8_000);
+      });
+    refreshStatus();
+    window.addEventListener("online", refreshStatus);
+    return () => {
+      active = false;
+      window.clearTimeout(retryTimer);
+      window.removeEventListener("online", refreshStatus);
+    };
   }, [activeUser]);
   useEffect(() => {
     if (!activeUser) return undefined;
@@ -1090,7 +1109,7 @@ export default function App() {
     <div className={`app-shell role-${user.role}-shell ${user.role === "customer" ? "customer-app-shell" : "workspace-app-shell"}`}>
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} notificationsOpen={notificationsOpen} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} onHelp={() => setAssistantOpen((current) => !current)} helpOpen={assistantOpen} onLogout={() => { setAssistantOpen(false); logout(); }} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
-      {serviceStatus.api === false && <div className="offline-banner" role="status">The app could not be reached. Restart the app, then refresh this page.</div>}
+      {serviceStatus.api === false && <div className="offline-banner" role="status">Live services are reconnecting. Check your connection if this message remains.</div>}
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={openCheckout} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
@@ -1121,7 +1140,7 @@ export default function App() {
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
-          <Checkout cart={cart} user={currentUser} profile={profile} online={online} paymongoEnabled={serviceStatus.paymongo} smsProviderEnabled={serviceStatus.twilio} onClose={closeCheckout} notify={setNotice} onComplete={completeCheckout} />
+          <Checkout cart={cart} user={currentUser} profile={profile} online={online} paymongoEnabled={serviceStatus.paymongo} paymongoMode={serviceStatus.paymongoMode} smsProviderEnabled={serviceStatus.twilio} onClose={closeCheckout} notify={setNotice} onComplete={completeCheckout} />
         </Suspense>
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}

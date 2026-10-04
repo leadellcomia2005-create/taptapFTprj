@@ -214,6 +214,7 @@ function addDemoStockHistory(data, itemId, entry) {
 
 const handoffOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 let pendingRoleValidation = null;
+let recentLoginStatus = null;
 
 export function observeAuth(callback) {
   if (firebaseEnabled) {
@@ -229,11 +230,16 @@ export function observeAuth(callback) {
           const accepted = await roleValidation.promise;
           if (!accepted || !active || auth.currentUser?.uid !== user.uid) return;
         }
-        const token = await user.getIdTokenResult(true);
+        const token = await user.getIdTokenResult();
         if (!active || auth.currentUser?.uid !== user.uid) return;
         if (token.claims.mfaSession !== true || token.claims.email_verified !== true) {
           try {
-            const status = await api.twoFactorStatus();
+            const cachedStatus = recentLoginStatus?.uid === user.uid
+              && recentLoginStatus.expiresAt > Date.now()
+              ? recentLoginStatus.status
+              : null;
+            const status = cachedStatus || await api.twoFactorStatus();
+            recentLoginStatus = null;
             if (!active || auth.currentUser?.uid !== user.uid) return;
             return callback({
               uid: user.uid,
@@ -289,9 +295,15 @@ export async function login(email, password, requestedRole, demoAccounts) {
       if (requestedRole && requestedRole !== role) {
         throw new Error(roleLoginMismatchMessage(role, requestedRole));
       }
+      recentLoginStatus = {
+        uid: credential.user.uid,
+        status,
+        expiresAt: Date.now() + 15_000
+      };
       settleRoleValidation(true);
       return credential.user;
     } catch (error) {
+      recentLoginStatus = null;
       try {
         if (auth.currentUser) await signOut(auth);
       } finally {

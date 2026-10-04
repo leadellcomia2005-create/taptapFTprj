@@ -42,7 +42,13 @@ services:
       - key: RESEND_FROM_EMAIL
         value: TapTap Foodtrip <security@mail.taptapfoodtrip.xyz>
       - key: ENABLE_PAYMONGO
-        value: "false"
+        value: "true"
+      - key: PAYMONGO_MODE
+        value: test
+      - key: PAYMONGO_SECRET_KEY
+        sync: false
+      - key: PAYMONGO_WEBHOOK_SECRET
+        sync: false
       - key: TURNSTILE_SECRET_KEY
         sync: false
       - key: TURNSTILE_BYPASS

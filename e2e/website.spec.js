@@ -1148,6 +1148,61 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("owner and staff operational layouts remain usable on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      complaints: {
+        complaint1: {
+          id: "complaint1",
+          orderId: "ORDER-1001",
+          customerId: "customer1",
+          customerName: "Mobile Customer",
+          type: "food-quality",
+          details: "The delivered meal needs review.",
+          requestedResolution: "refund",
+          items: ["Bangus Meal", "Boneless Chicken Meal"],
+          status: "pending",
+          createdAt: Date.now()
+        }
+      }
+    }));
+  });
+
+  await loginAs(page, "owner");
+  const ownerPanels = page.locator(".owner-panel-grid");
+  await ownerPanels.scrollIntoViewIfNeeded();
+  const [ownerGridBox, firstOwnerPanelBox] = await Promise.all([
+    ownerPanels.boundingBox(),
+    ownerPanels.locator(":scope > *").first().boundingBox()
+  ]);
+  expect(firstOwnerPanelBox?.width || 0).toBeGreaterThan(300);
+  expect(Math.abs((ownerGridBox?.x || 0) - (firstOwnerPanelBox?.x || 0))).toBeLessThanOrEqual(2);
+
+  await page.getByRole("button", { name: /Open navigation menu/i }).click();
+  await page.getByRole("navigation", { name: /owner mobile navigation/i }).getByRole("button", { name: /^Reviews$/i }).click();
+  const complaint = page.locator(".complaint-card").first();
+  await expect(complaint).toBeVisible();
+  const complaintColumns = await complaint.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  expect(complaintColumns).toBe(1);
+  await expectNoHorizontalOverflow(page);
+  await page.getByRole("button", { name: /Log out/i }).click();
+
+  await loginAs(page, "staff");
+  await page.getByRole("button", { name: /Open navigation menu/i }).click();
+  await page.getByRole("navigation", { name: /staff mobile navigation/i }).getByRole("button", { name: /Walk-in POS/i }).click();
+  const cartButton = page.getByRole("button", { name: /Cart \(0\)/i });
+  await expectMinimumTouchTarget(cartButton);
+  await cartButton.click();
+  const checkout = page.locator(".staff-checkout-panel");
+  await expect(checkout).toHaveClass(/mobile-open/);
+  const checkoutBox = await checkout.boundingBox();
+  expect(checkoutBox?.width || 0).toBeLessThanOrEqual(375);
+  await checkout.getByRole("button", { name: /Close cart/i }).click();
+  await expect(checkout).not.toHaveClass(/mobile-open/);
+  await expectNoHorizontalOverflow(page);
+});
+
 test("980px desktop-mode mobile viewport uses compact navigation without page overflow", async ({ page }) => {
   const runtime = watchRuntime(page);
   await page.setViewportSize({ width: 980, height: 720 });
@@ -1163,6 +1218,18 @@ test("980px desktop-mode mobile viewport uses compact navigation without page ov
     } else if (["owner", "staff"].includes(role)) {
       await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
       await expect(page.getByRole("navigation", { name: new RegExp(`${role} navigation`, "i") })).toBeHidden();
+      if (role === "staff") {
+        await page.getByRole("button", { name: /Open navigation menu/i }).click();
+        await page.getByRole("navigation", { name: /staff mobile navigation/i }).getByRole("button", { name: /Walk-in POS/i }).click();
+        const cartButton = page.getByRole("button", { name: /Cart \(0\)/i });
+        await expect(cartButton).toBeVisible();
+        await cartButton.click();
+        const checkout = page.locator(".staff-checkout-panel");
+        await expect(checkout).toHaveClass(/mobile-open/);
+        const checkoutBox = await checkout.boundingBox();
+        expect(checkoutBox?.width || 0).toBeLessThanOrEqual(980);
+        await checkout.getByRole("button", { name: /Close cart/i }).click();
+      }
     } else {
       const riderNavigation = page.getByRole("navigation", { name: /rider navigation/i });
       await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /Assigned Orders/i }));

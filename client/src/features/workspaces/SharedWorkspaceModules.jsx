@@ -461,6 +461,7 @@ export function SupportChat({ messages, user, notify }) {
   const [text, setText] = useState("");
   const [conversationState, setConversationState] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const conversations = useMemo(() => {
     const grouped = new Map();
     for (const message of messages) {
@@ -538,17 +539,18 @@ export function SupportChat({ messages, user, notify }) {
   return (
     <div className="dashboard-card support-chat">
       <div className="module-heading"><div><p className="eyebrow text-danger">Message history</p><h3>Customer and internal support</h3></div><span className="module-note">Use this channel for order questions and admin coordination.</span></div>
-      <div className="support-layout">
+      <div className={`support-layout ${mobileThreadOpen ? "thread-open" : ""}`}>
         <aside className="support-conversations">
           <strong>Customer conversations</strong>
           {conversations.length === 0 && <div className="empty-chat">No customer chats yet.</div>}
           {conversations.map((conversation) => {
             const latest = conversation.messages.at(-1);
-            return <button className={selectedConversation?.customerId === conversation.customerId ? "active" : ""} key={conversation.customerId} onClick={() => setSelectedCustomerId(conversation.customerId)}><span>{conversation.customerName.slice(0, 1).toUpperCase()}</span><div><strong>{conversation.customerName}</strong><small>{latest?.text}</small></div><time>{latest ? new Date(latest.createdAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }) : ""}</time></button>;
+            return <button className={selectedConversation?.customerId === conversation.customerId ? "active" : ""} key={conversation.customerId} onClick={() => { setSelectedCustomerId(conversation.customerId); setMobileThreadOpen(true); }}><span>{conversation.customerName.slice(0, 1).toUpperCase()}</span><div><strong>{conversation.customerName}</strong><small>{latest?.text}</small></div><time>{latest ? new Date(latest.createdAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }) : ""}</time></button>;
           })}
         </aside>
         <div className="support-thread">
           <header className="support-thread-header">
+            <button className="support-mobile-back" type="button" onClick={() => setMobileThreadOpen(false)}>Back</button>
             <div><strong>{selectedConversation?.customerName || "Select a customer"}</strong><small>{selectedConversation ? "Customer conversation" : "Messages will appear here"}</small></div>
             {selectedConversation && <div className="support-mode-actions">
               <span className={`support-mode-badge ${conversationState?.mode || "assistant"}`}>

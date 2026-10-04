@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import { getAuthToken } from "./authSession";
+import { socketServerUrl } from "../config/runtimeEndpoints";
 import type { DeliveryLocation, EntityId } from "../types/domain";
 
 type SocketAck = {
@@ -13,14 +14,11 @@ export type RiderLocationPayload = Partial<DeliveryLocation> & {
 
 let socket: Socket | null;
 
-const socketBaseUrl = (): string => import.meta.env.VITE_SOCKET_URL ||
-  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
-
 export async function getSocket(): Promise<Socket> {
   if (socket) return socket;
   const token = await getAuthToken();
   if (!token) throw new Error("Sign in before live updates can start.");
-  socket = io(socketBaseUrl(), {
+  socket = io(socketServerUrl(), {
     transports: ["websocket", "polling"],
     auth: { token },
     autoConnect: true

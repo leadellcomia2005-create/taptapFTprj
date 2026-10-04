@@ -1081,6 +1081,7 @@ button { font: inherit; }
 .support-conversations button small { margin-top: 3px; color: var(--muted); font-size: 8px; }
 .support-conversations button time { color: var(--muted); font-size: 7px; }
 .support-thread { min-width: 0; display: flex; flex-direction: column; background: white; }
+.support-mobile-back { display: none; }
 .support-thread > header { padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .support-thread-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .support-mode-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
@@ -3347,6 +3348,19 @@ button:not(:disabled),
 .spin { animation: dashboard-spin .9s linear infinite; }
 @keyframes dashboard-spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {
+  .complaint-card { grid-template-columns: minmax(0,1fr); padding: 14px; }
+  .complaint-card > *,
+  .complaint-card .form-label,
+  .complaint-card :where(select,textarea) { width: 100%; min-width: 0; }
+  .complaint-card .review-actions { display: grid; grid-template-columns: 1fr; }
+  .complaint-card .review-actions .btn { width: 100%; }
+  .support-layout { display: block; overflow: visible; }
+  .support-conversations { max-height: none; border: 0; }
+  .support-thread { display: none; }
+  .support-layout.thread-open .support-conversations { display: none; }
+  .support-layout.thread-open .support-thread { display: flex; min-height: calc(100dvh - 190px); }
+  .support-mobile-back { min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 1px solid var(--line); background: white; border-radius: 8px; font-weight: 800; }
+  .support-message-list { min-height: 0; max-height: none; }
   .customer-active-order-heading,
   .customer-active-order-details { align-items: flex-start; flex-direction: column; }
   .customer-order-progress { grid-template-columns: repeat(3,minmax(0,1fr)); row-gap: 14px; }

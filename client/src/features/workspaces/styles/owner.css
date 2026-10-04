@@ -24,6 +24,8 @@
 .owner-listing-orders { min-width: 0; }
 .owner-stock-panel { display: grid; gap: 10px; }
 @media (max-width: 1180px) {
+  .owner-listing-grid,
+  .owner-panel-grid { grid-template-columns: minmax(0,1fr); }
   .owner-chart-card { min-height: 320px; }
 }
 @media (max-width: 1024px) {
@@ -81,6 +83,12 @@
   .owner-attention-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 760px) {
+  .owner-listing-page { padding: 12px; }
+  .owner-panel-grid { gap: 12px; }
+  .owner-panel-grid > *,
+  .owner-panel-grid .dashboard-card { width: 100%; min-width: 0; }
+  .owner-panel-grid .alert-row { align-items: flex-start; flex-direction: column; }
+  .owner-panel-grid .alert-row b { align-self: flex-start; }
   .owner-hero-actions { width: 100%; }
   .owner-overview-meta { align-items: flex-start; flex-direction: column; }
   .owner-attention-grid { grid-template-columns: 1fr; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Banknote, ChefHat, Clock3, CreditCard, PackageSearch, RefreshCw, Search, ShoppingCart } from "lucide-react";
+import { AlertCircle, Banknote, ChefHat, Clock3, CreditCard, PackageSearch, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import MenuPhoto from "../../components/MenuPhoto";
 import { staffPosCategories } from "../../config/appConfig";
 import { getActiveShift, startShift } from "../../services/firebase/operations";
@@ -34,6 +34,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
   const [openingCash, setOpeningCash] = useState(2000);
   const [openingShift, setOpeningShift] = useState(false);
   const [completingPayment, setCompletingPayment] = useState(false);
+  const [mobileCheckoutOpen, setMobileCheckoutOpen] = useState(false);
   const loadActiveShift = async () => {
     setShiftLoading(true);
     setShiftError("");
@@ -158,6 +159,7 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
       setDiscountReason("");
       setPosCashReceived(0);
       setLastReceipt(receipt);
+      setMobileCheckoutOpen(false);
       if (!printReceipt(receipt)) notify("Allow pop-ups to print the receipt.");
       notify(`Walk-in receipt ${orderId} completed.`);
     } catch (error) {
@@ -236,8 +238,9 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
           </div>
         </div>
 
-        <aside className="dashboard-card sticky-pos staff-checkout-panel">
-          <div className="module-heading"><div><p className="eyebrow text-danger">Order cart</p><h3>Current walk-in order</h3></div>{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={clearCart}>Clear cart</button>}</div>
+        <button className={`staff-checkout-backdrop ${mobileCheckoutOpen ? "open" : ""}`} type="button" aria-label="Close walk-in cart" onClick={() => setMobileCheckoutOpen(false)} />
+        <aside className={`dashboard-card sticky-pos staff-checkout-panel ${mobileCheckoutOpen ? "mobile-open" : ""}`} aria-label="Current walk-in order">
+          <div className="module-heading"><div><p className="eyebrow text-danger">Order cart</p><h3>Current walk-in order</h3></div><div className="staff-cart-heading-actions">{posCart.length > 0 && <button className="btn btn-link btn-sm text-danger p-0" onClick={clearCart}>Clear cart</button>}<button className="staff-cart-close" type="button" aria-label="Close cart" onClick={() => setMobileCheckoutOpen(false)}><X size={20} /></button></div></div>
           <div className="staff-cart-list">
             {posCart.length === 0 && <div className="empty-chat">Select products to begin a POS order.</div>}
             {posCart.map((item) => (
@@ -283,6 +286,11 @@ function StaffWorkspaceContent({ section, user, orders, inventory: staffInventor
           {lastReceipt && <div className="last-receipt-card receipt-preview-card"><strong>Last receipt preview</strong><span>{lastReceipt.id} - {lastReceipt.items?.map((item) => `${item.qty}x ${item.name}`).join(", ")}</span><b>{currency(lastReceipt.total)}</b><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(lastReceipt)}>Print again</button></div>}
         </aside>
       </section>
+      <button className="staff-mobile-cart-button" type="button" onClick={() => setMobileCheckoutOpen(true)} aria-expanded={mobileCheckoutOpen}>
+        <ShoppingCart size={20} aria-hidden="true" />
+        <span>Cart ({posCart.reduce((sum, item) => sum + item.qty, 0)})</span>
+        <strong>{currency(posTotal)}</strong>
+      </button>
     </main>
   );
   if (section === "staff-orders") return <main className="container-fluid dashboard-page py-4"><div className="dashboard-heading"><div><p className="eyebrow text-danger">Online and walk-in fulfillment</p><h2>Order Queue</h2></div></div><div className="row g-3"><div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} user={user} /></div><div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div></div></main>;

@@ -37,7 +37,7 @@ function CheckoutSectionHeading({ icon: Icon, id, title, detail }) {
   );
 }
 
-export function Checkout({ cart, user, profile, online = true, paymongoEnabled, smsProviderEnabled = false, onClose, onComplete, notify }) {
+export function Checkout({ cart, user, profile, online = true, paymongoEnabled, paymongoMode = "live", smsProviderEnabled = false, onClose, onComplete, notify }) {
   const orderRequestKeyRef = useRef("");
   const checkoutCompletedRef = useRef(false);
   const placingRef = useRef(false);
@@ -123,6 +123,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
   const effectivePayment = payment === "gcash" && paymongoEnabled ? "gcash" : "cod";
   const cashPaymentLabel = deliveryType === "delivery" ? "Cash on delivery" : "Pay on pickup";
   const cashPaymentDetail = deliveryType === "delivery" ? "Pay the rider on handoff" : "Pay at the counter";
+  const paymongoSandbox = paymongoEnabled && paymongoMode === "test";
   useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
@@ -446,7 +447,7 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
             <section className="checkout-section" aria-labelledby="checkout-payment-title">
               <CheckoutSectionHeading icon={WalletCards} id="checkout-payment-title" title="Payment" detail={deliveryType === "delivery" ? "Choose how to pay for delivery." : "Choose how to pay at pickup."} />
               <div className={`checkout-payment-grid ${paymongoEnabled ? "" : "single"}`} role="group" aria-label="Payment method">
-                {paymongoEnabled && <button type="button" className={`payment-option ${effectivePayment === "gcash" ? "active" : ""}`} aria-pressed={effectivePayment === "gcash"} onClick={() => setPayment("gcash")}><strong>GCash</strong><small>Online checkout</small></button>}
+                {paymongoEnabled && <button type="button" className={`payment-option ${effectivePayment === "gcash" ? "active" : ""}`} aria-pressed={effectivePayment === "gcash"} onClick={() => setPayment("gcash")}><strong>{paymongoSandbox ? "GCash Sandbox" : "GCash"}</strong><small>{paymongoSandbox ? "Test only - no real money" : "Online checkout"}</small></button>}
                 <button type="button" className={`payment-option ${effectivePayment === "cod" ? "active" : ""}`} aria-pressed={effectivePayment === "cod"} onClick={() => setPayment("cod")}><strong>{cashPaymentLabel}</strong><small>{cashPaymentDetail}</small></button>
               </div>
             </section>

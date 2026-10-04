@@ -1,4 +1,5 @@
 import { serviceStatus } from "../services.js";
+import { payMongoMode } from "../integrations/paymongo.js";
 
 export function registerHealthRoutes(app, { config, firebase, serverStartedAt, metrics }) {
   const statusPayload = () => ({
@@ -6,6 +7,7 @@ export function registerHealthRoutes(app, { config, firebase, serverStartedAt, m
     serverStartedAt,
     uptimeSeconds: Math.round((Date.now() - serverStartedAt) / 1000),
     services: { ...serviceStatus(), firebase: firebase.enabled, socket: firebase.enabled },
+    paymongoMode: payMongoMode(),
     firebaseAdminError: firebase.enabled ? null : firebase.publicError
   });
 

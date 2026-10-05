@@ -49,6 +49,36 @@ interface DeliveryProofModalProps {
   onClose: () => void;
 }
 
+interface ConfirmationModalProps {
+  title: string;
+  message: string;
+  confirmText: string;
+  submitting?: boolean;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+}
+
+export function ConfirmationModal({ title, message, confirmText, submitting = false, onClose, onConfirm }: ConfirmationModalProps) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, submitting]);
+  return (
+    <div className="modal d-block" onMouseDown={(event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget && !submitting) onClose(); }}>
+      <div className="modal-dialog modal-dialog-centered">
+        <div className="modal-content confirmation-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-modal-title" aria-describedby="confirmation-modal-message">
+          <div className="modal-header"><h5 className="modal-title" id="confirmation-modal-title">{title}</h5><button className="btn-close" type="button" aria-label="Close" disabled={submitting} onClick={onClose} /></div>
+          <div className="modal-body"><p id="confirmation-modal-message" className="mb-0">{message}</p></div>
+          <div className="modal-footer"><button className="btn btn-outline-dark" type="button" autoFocus disabled={submitting} onClick={onClose}>Keep chat</button><button className="btn btn-danger" type="button" disabled={submitting} onClick={onConfirm}>{submitting ? "Deleting..." : confirmText}</button></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "The delivery proof could not be loaded.";
 const escapeText = (value: unknown) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] || char);
 

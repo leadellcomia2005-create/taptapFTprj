@@ -1,4 +1,5 @@
 import {
+  deleteSupportConversation as deleteSupportConversationCompatibility,
   sendSupportMessage as sendSupportMessageCompatibility,
   replyToSupportConversation as replyToSupportConversationCompatibility,
   requestSupportStaff as requestSupportStaffCompatibility,
@@ -50,6 +51,11 @@ export const resumeSupportAssistant = (
   customerId: EntityId,
   actor: Pick<AppUser, "uid" | "name" | "role">
 ) => resumeSupportAssistantCompatibility(customerId, actor);
+
+export const deleteSupportConversation = (
+  customerId: EntityId,
+  actor: Pick<AppUser, "uid" | "name" | "role">
+) => deleteSupportConversationCompatibility(customerId, actor);
 
 export const requestSupportStaff = (
   customerId: EntityId,

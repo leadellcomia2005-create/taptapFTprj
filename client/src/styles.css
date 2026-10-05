@@ -1085,6 +1085,7 @@ button { font: inherit; }
 .support-thread > header { padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .support-thread-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .support-mode-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.support-delete-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .support-mode-badge { display: inline-flex; min-height: 28px; align-items: center; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--green); background: var(--green-soft); font-size: 8px; font-weight: 900; }
 .support-mode-badge.staff { color: #8b2a20; border-color: #efb3aa; background: #fff1ee; }
 .support-assignment-note { margin: 0; padding: 9px 12px; color: #713027; background: #fff1ee; border-top: 1px solid #efb3aa; font-size: 9px; font-weight: 700; }
@@ -1310,6 +1311,7 @@ button { font: inherit; }
   .support-thread > header { padding: 12px 14px; }
   .support-thread-header { align-items: flex-start; flex-direction: column; }
   .support-mode-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .support-mode-actions .btn { width: 100%; min-height: 44px; }
   .support-mode-badge { justify-content: center; text-align: center; }
   .support-message-list { min-height: 300px; max-height: 50vh; padding: 14px; }
   .support-message-list > div:not(.empty-chat) { width: 100%; max-width: none; border-radius: 10px; }

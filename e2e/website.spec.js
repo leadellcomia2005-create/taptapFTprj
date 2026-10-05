@@ -901,6 +901,12 @@ test("staff reply claims a demo conversation and can return it to the assistant"
   await expect(page.getByText(/Handled by Mika Reyes/i)).toBeVisible();
   await page.getByRole("button", { name: /Return to assistant/i }).click();
   await expect(page.getByText("Assistant active", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Delete chat", exact: true }).click();
+  const confirmation = page.getByRole("alertdialog", { name: "Delete this support chat?" });
+  await expect(confirmation.getByText(/permanently removes the complete message history/i)).toBeVisible();
+  await confirmation.getByRole("button", { name: "Delete chat", exact: true }).click();
+  await expect(page.getByText("No customer chats yet.", { exact: true })).toBeVisible();
+  await expect(page.getByText("I need assistance.", { exact: true })).toHaveCount(0);
 });
 
 test("stored cart and checkout draft recover without trusting stale product data", async ({ page }) => {

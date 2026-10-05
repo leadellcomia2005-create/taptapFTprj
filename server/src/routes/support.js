@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getSupportConversation, replyToSupportConversation, requestSupportStaff, resumeSupportAssistant } from "../application/support.js";
+import { deleteSupportConversation, getSupportConversation, replyToSupportConversation, requestSupportStaff, resumeSupportAssistant } from "../application/support.js";
 import { recordIdParams, supportReplySchema, supportRequestSchema } from "../contracts/schemas.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
@@ -35,6 +35,12 @@ export function createSupportRouter({ firebase, authentication, realtime, metric
     const conversation = await resumeSupportAssistant(firebase.db(), req.user, req.params.customerId);
     realtime.emit([`user:${req.params.customerId}`, "role:owner", "role:staff"], "support:updated", { conversation });
     res.json({ conversation });
+  }));
+
+  router.delete("/support/conversations/:customerId", authenticate, requireRoles("owner", "staff"), validateParams(recordIdParams("customerId")), asyncRoute(async (req, res) => {
+    const result = await deleteSupportConversation(firebase.db(), req.user, req.params.customerId);
+    realtime.emit([`user:${req.params.customerId}`, "role:owner", "role:staff"], "support:deleted", result);
+    res.json(result);
   }));
 
   return router;

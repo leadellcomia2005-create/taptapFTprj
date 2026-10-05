@@ -450,6 +450,40 @@ test("staff takeover pauses customer assistant responses and rider access is den
   });
 });
 
+test("staff can delete support chats while customers and riders cannot", async () => {
+  const fixture = firebaseFixture({
+    supportConversations: {
+      "customer-1": { customerId: "customer-1", mode: "staff", assignedStaffId: "staff-1", updatedAt: 2 }
+    },
+    messages: {
+      support: {
+        first: { customerId: "customer-1", customerName: "Juan", text: "Delete me", createdAt: 1 },
+        second: { customerId: "customer-2", customerName: "Ana", text: "Keep me", createdAt: 2 }
+      }
+    }
+  });
+
+  for (const user of [
+    { uid: "customer-1", role: "customer", name: "Juan" },
+    { uid: "rider-1", role: "rider", name: "Rider" }
+  ]) {
+    await withApp({ firebase: fixture.firebase, user }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/support/conversations/customer-1`, { method: "DELETE" });
+      assert.equal(response.status, 403);
+    });
+  }
+
+  await withApp({ firebase: fixture.firebase, user: { uid: "staff-1", role: "staff", name: "Mika" } }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/support/conversations/customer-1`, { method: "DELETE" });
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.deletedMessageCount, 1);
+  });
+  assert.equal(fixture.database.read("supportConversations/customer-1"), undefined);
+  assert.equal(fixture.database.read("messages/support/first"), undefined);
+  assert.equal(fixture.database.read("messages/support/second/text"), "Keep me");
+});
+
 test("customer can request staff once and rate only their own assistant messages", async () => {
   const metrics = createOperationalMetrics();
   const fixture = firebaseFixture({

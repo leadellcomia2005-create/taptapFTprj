@@ -385,6 +385,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
+  deleteSupportConversation: (customerId: EntityId) =>
+    request<{ deleted: boolean; customerId: EntityId; deletedMessageCount: number }>(`/support/conversations/${encodeURIComponent(customerId)}`, {
+      method: "DELETE",
+    }),
   insights: (sales: JsonValue, inventory: InventoryItem[], period: "today" | "7d" | "30d" | "all" = "all", category = "all", decisionSupport?: JsonValue) =>
     request<InventoryInsightResponse>("/insights", {
       method: "POST",

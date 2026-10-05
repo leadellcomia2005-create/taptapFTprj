@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  deleteSupportConversation,
   getSupportConversation,
   replyToSupportConversation,
   requestSupportStaff,
@@ -91,4 +92,28 @@ test("only assigned staff or an owner can resume assistant replies", async () =>
   assert.equal(resumed.mode, "assistant");
   assert.equal(resumed.assignedStaffId, null);
   assert.equal((await getSupportConversation(db, "customer-1")).mode, "assistant");
+});
+
+test("staff can delete a complete customer support conversation", async () => {
+  const data = initialData();
+  data.messages.support.other = {
+    customerId: "customer-2",
+    customerName: "Other Customer",
+    senderId: "customer-2",
+    senderName: "Other Customer",
+    senderRole: "customer",
+    text: "Keep this chat",
+    createdAt: 2
+  };
+  data.supportConversations = {
+    "customer-1": { customerId: "customer-1", mode: "staff", assignedStaffId: "staff-1", updatedAt: 2 }
+  };
+  const db = new FakeRealtimeDatabase(data);
+  const result = await deleteSupportConversation(db, { uid: "staff-1", role: "staff", name: "Mika" }, "customer-1");
+
+  assert.deepEqual(result, { deleted: true, customerId: "customer-1", deletedMessageCount: 1 });
+  assert.equal(db.read("supportConversations/customer-1"), undefined);
+  assert.equal(db.read("messages/support/first"), undefined);
+  assert.equal(db.read("messages/support/other/text"), "Keep this chat");
+  assert.equal(Object.values(db.read("auditLogs"))[0].action, "support_conversation_deleted");
 });

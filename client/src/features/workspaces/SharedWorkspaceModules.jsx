@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
 import { api } from "../../services/api";
 import { moderateReview, updateComplaintStatus } from "../../services/firebase/feedback";
 import { adjustInventory } from "../../services/firebase/inventory";
 import { createMenuItem, updateMenuItem } from "../../services/firebase/menu";
-import { archiveCompletedOrders, closeActiveShift, createApprovalRequest, replyToSupportConversation, resolveApprovalRequest, resumeSupportAssistant, startShift, subscribeApprovalRequests, subscribeSupportConversation } from "../../services/firebase/operations";
+import { archiveCompletedOrders, closeActiveShift, createApprovalRequest, deleteSupportConversation, replyToSupportConversation, resolveApprovalRequest, resumeSupportAssistant, startShift, subscribeApprovalRequests, subscribeSupportConversation } from "../../services/firebase/operations";
 import { updateOrder } from "../../services/firebase/orders";
 import { orderPrepClock } from "../../utils/operations";
 import { currency, isRevenueOrder, orderItemText, orderPaymentLabel, statusLabel } from "./workspaceHelpers";
-import { DeliveryProofModal, ReasonModal } from "./WorkspaceModals";
+import { ConfirmationModal, DeliveryProofModal, ReasonModal } from "./WorkspaceModals";
 
 export function ReviewModerationModule({ reviews, user, notify }) {
   const [drafts, setDrafts] = useState({});
@@ -462,6 +463,7 @@ export function SupportChat({ messages, user, notify }) {
   const [conversationState, setConversationState] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const conversations = useMemo(() => {
     const grouped = new Map();
     for (const message of messages) {
@@ -536,6 +538,22 @@ export function SupportChat({ messages, user, notify }) {
       setSubmitting(false);
     }
   };
+
+  const deleteConversation = async () => {
+    if (!deleteTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await deleteSupportConversation(deleteTarget.customerId, user);
+      notify(`Chat with ${deleteTarget.customerName} deleted.`);
+      setDeleteTarget(null);
+      setMobileThreadOpen(false);
+      setSelectedCustomerId("");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "The chat could not be deleted.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
   return (
     <div className="dashboard-card support-chat">
       <div className="module-heading"><div><p className="eyebrow text-danger">Message history</p><h3>Customer and internal support</h3></div><span className="module-note">Use this channel for order questions and admin coordination.</span></div>
@@ -557,6 +575,7 @@ export function SupportChat({ messages, user, notify }) {
                 {conversationState?.mode === "staff" ? `Handled by ${conversationState.assignedStaffName || "support team"}` : conversationState?.mode === "waiting" ? "Waiting for staff" : "Assistant active"}
               </span>
               {canResumeAssistant && <button className="btn btn-outline-dark btn-sm" type="button" disabled={submitting} onClick={resumeAssistant}>Return to assistant</button>}
+              <button className="btn btn-outline-danger btn-sm support-delete-button" type="button" disabled={submitting} onClick={() => setDeleteTarget(selectedConversation)}><Trash2 size={16} aria-hidden="true" />Delete chat</button>
             </div>}
           </header>
           <div className="support-message-list">
@@ -567,6 +586,7 @@ export function SupportChat({ messages, user, notify }) {
           <form className="support-compose" onSubmit={send}><input className="form-control" maxLength="500" disabled={!selectedConversation || assignedElsewhere || submitting} value={text} onChange={(event) => setText(event.target.value)} placeholder={assignedElsewhere ? "This conversation is assigned to another staff member" : selectedConversation ? `Reply to ${selectedConversation.customerName}...` : "Select a customer conversation"} /><button className="btn btn-danger" disabled={!selectedConversation || assignedElsewhere || submitting || !text.trim()}>{submitting ? "Sending" : "Send"}</button></form>
         </div>
       </div>
+      {deleteTarget && <ConfirmationModal title="Delete this support chat?" message={`This permanently removes the complete message history with ${deleteTarget.customerName}. This action cannot be undone.`} confirmText="Delete chat" submitting={submitting} onClose={() => setDeleteTarget(null)} onConfirm={deleteConversation} />}
     </div>
   );
 }

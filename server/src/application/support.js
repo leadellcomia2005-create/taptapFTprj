@@ -187,3 +187,39 @@ export async function resumeSupportAssistant(db, actor, customerId) {
   });
   return conversation;
 }
+
+export async function deleteSupportConversation(db, actor, customerId) {
+  if (!validRecordId(customerId)) throw new HttpError(400, "Invalid customer ID.");
+  const [conversationSnapshot, messagesSnapshot] = await Promise.all([
+    db.ref(`supportConversations/${customerId}`).once("value"),
+    db.ref("messages/support")
+      .orderByChild("customerId")
+      .equalTo(customerId)
+      .once("value")
+  ]);
+  const conversation = conversationSnapshot.val();
+  const messages = messagesSnapshot.val() || {};
+  const messageIds = Object.keys(messages);
+  if (!conversation && messageIds.length === 0) {
+    throw new HttpError(404, "Customer conversation not found.");
+  }
+
+  const now = Date.now();
+  const auditId = db.ref("auditLogs").push().key;
+  const updates = {
+    [`supportConversations/${customerId}`]: null,
+    [`auditLogs/${auditId}`]: {
+      action: "support_conversation_deleted",
+      customerId,
+      actorId: actor.uid,
+      actorName: actor.name || "Support team",
+      actorRole: actor.role,
+      deletedMessageCount: messageIds.length,
+      previousMode: conversation?.mode || null,
+      createdAt: now
+    }
+  };
+  for (const messageId of messageIds) updates[`messages/support/${messageId}`] = null;
+  await db.ref().update(updates);
+  return { deleted: true, customerId, deletedMessageCount: messageIds.length };
+}

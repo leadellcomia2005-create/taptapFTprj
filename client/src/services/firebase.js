@@ -1372,6 +1372,32 @@ export async function resumeSupportAssistant(customerId, actor) {
   return { conversation };
 }
 
+export async function deleteSupportConversation(customerId, actor) {
+  if (firebaseEnabled) return api.deleteSupportConversation(customerId);
+  if (!["owner", "staff"].includes(actor.role)) throw new Error("Only owner and staff accounts can delete support chats.");
+  const data = readDemoData();
+  const matchingMessageIds = Object.entries(data.messages.support || {})
+    .filter(([, message]) => message.customerId === customerId)
+    .map(([id]) => id);
+  if (!data.supportConversations?.[customerId] && matchingMessageIds.length === 0) {
+    throw new Error("Customer conversation not found.");
+  }
+  for (const id of matchingMessageIds) delete data.messages.support[id];
+  if (data.supportConversations) delete data.supportConversations[customerId];
+  const now = Date.now();
+  data.auditLogs[`AUD-${now}-${Math.random().toString(16).slice(2, 7)}`] = {
+    action: "support_conversation_deleted",
+    customerId,
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    deletedMessageCount: matchingMessageIds.length,
+    createdAt: now
+  };
+  writeDemoData(data);
+  return { deleted: true, customerId, deletedMessageCount: matchingMessageIds.length };
+}
+
 export async function sendSupportMessage(text, actor, conversation = {}) {
   const customerId = conversation.customerId || (actor.role === "customer" ? actor.uid : null);
   const message = {

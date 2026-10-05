@@ -1456,7 +1456,7 @@ function TwoFactorPanel({ user, onComplete }) {
     rider: "Open rider dashboard"
   }[status.role] || "Continue";
   const browserPasskeysReady = passkeysSupported();
-  const [method, setMethod] = useState(status.method || (customerAccount && status.passkeyAvailable ? "passkey" : customerAccount && status.emailOtpAvailable ? "email" : "totp"));
+  const [method, setMethod] = useState(status.method || (customerAccount && status.passkeyAvailable ? "passkey" : status.emailOtpAvailable ? "email" : "totp"));
   const [setupData, setSetupData] = useState(null);
   const [code, setCode] = useState("");
   const [backupMode, setBackupMode] = useState(false);
@@ -1606,7 +1606,7 @@ function TwoFactorPanel({ user, onComplete }) {
         <p>{setup
           ? customerAccount
             ? "Choose passkey, email, a security app, or SMS. Passkey is the fastest option on phones with fingerprint, Face ID, or screen lock."
-            : "Owner, staff, and rider accounts must use a security app before opening POS tools."
+            : "Choose a one-time email code or a security app before opening operational tools. Email codes require access to this account's verified inbox."
           : status.method === "passkey"
             ? "Confirm with your phone fingerprint, Face ID, or screen lock to finish signing in."
             : `Enter the code from your ${status.method === "sms" ? "phone" : status.method === "email" ? "verified email" : "security app"}.`}</p>
@@ -1617,14 +1617,14 @@ function TwoFactorPanel({ user, onComplete }) {
                 <button type="button" disabled={!status.passkeyAvailable || !browserPasskeysReady} className={method === "passkey" ? "active" : ""} onClick={() => { setMethod("passkey"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
                   <strong>Passkey</strong><small>{browserPasskeysReady ? "Fingerprint, Face ID, or screen lock" : "Needs HTTPS or localhost"}</small>
                 </button>
-                <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
-                  <strong>Email code</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Email sending is not ready"}</small>
-                </button>
                 <button type="button" disabled={!status.smsAvailable} className={method === "sms" ? "active" : ""} onClick={() => { setMethod("sms"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
                   <strong>SMS code</strong><small>{status.smsAvailable ? `Send to ${status.phoneMasked}` : "Phone number required"}</small>
                 </button>
               </>
             )}
+            {status.allowedMethods?.includes("email") && <button type="button" disabled={!status.emailOtpAvailable} className={method === "email" ? "active" : ""} onClick={() => { setMethod("email"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
+              <strong>Email code</strong><small>{status.emailOtpAvailable ? `Send to ${status.emailMasked}` : "Verified email sending is not ready"}</small>
+            </button>}
             <button type="button" className={method === "totp" ? "active" : ""} onClick={() => { setMethod("totp"); setSetupData(null); setCode(""); setDeliveryMessage(""); }}>
               <strong>Security app</strong><small>Free, offline 30-second codes</small>
             </button>

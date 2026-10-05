@@ -57,11 +57,11 @@ test("requires Firebase's verified-email claim before POS access", () => {
   assert.equal(hasVerifiedEmail({}), false);
 });
 
-test("allows customer passkeys while limiting operational roles to authenticator 2FA", () => {
+test("allows email OTP for verified operational accounts without enabling passkeys or SMS", () => {
   assert.deepEqual(allowedTwoFactorMethods("customer"), ["passkey", "totp", "sms", "email"]);
-  assert.deepEqual(allowedTwoFactorMethods("owner"), ["totp"]);
-  assert.deepEqual(allowedTwoFactorMethods("staff"), ["totp"]);
-  assert.deepEqual(allowedTwoFactorMethods("rider"), ["totp"]);
+  assert.deepEqual(allowedTwoFactorMethods("owner"), ["totp", "email"]);
+  assert.deepEqual(allowedTwoFactorMethods("staff"), ["totp", "email"]);
+  assert.deepEqual(allowedTwoFactorMethods("rider"), ["totp", "email"]);
 });
 
 test("creates hashed customer email OTP records and throttles resends", async () => {
@@ -99,18 +99,21 @@ test("creates hashed customer email OTP records and throttles resends", async ()
   );
 });
 
-test("rejects email OTP for operational accounts", async () => {
+test("creates hashed email OTP records for operational accounts", async () => {
   const db = fakeDatabase({
     users: { staff1: { role: "staff" } },
     twoFactor: { staff1: {} }
   });
-  await assert.rejects(
-    () => sendEmailCode(
-      db,
-      { uid: "staff1", email: "staff@example.com", email_verified: true, role: "staff" },
-      async () => {},
-      "setup"
-    ),
-    (error) => error.status === 403
+  let deliveredCode;
+  const result = await sendEmailCode(
+    db,
+    { uid: "staff1", email: "staff@example.com", email_verified: true, role: "staff" },
+    async (_email, code) => { deliveredCode = code; },
+    "setup",
+    1_750_000_000_000
   );
+  assert.match(deliveredCode, /^\d{6}$/);
+  assert.equal(result.emailMasked, "st***@example.com");
+  assert.equal(db.state.twoFactor.staff1.pendingEmail.purpose, "setup");
+  assert.equal("code" in db.state.twoFactor.staff1.pendingEmail, false);
 });

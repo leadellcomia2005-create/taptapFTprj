@@ -276,7 +276,7 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
     phoneConfigured: Boolean(profile.phone),
     phoneMasked: maskPhone(profile.phone),
     smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone),
-    emailOtpAvailable: Boolean(role === "customer" && emailAvailable && user.email && user.email_verified === true),
+    emailOtpAvailable: Boolean(allowedTwoFactorMethods(role).includes("email") && emailAvailable && user.email && user.email_verified === true),
     passkeyAvailable: role === "customer",
     passkeyCount: Object.keys(config.passkeys || {}).length,
     emailMasked: maskEmail(user.email),
@@ -329,7 +329,7 @@ export async function sendEmailCode(db, user, sendEmail, purpose = "challenge", 
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
-  if (role !== "customer") throw new HttpError(403, "Email code is available only to customer accounts.");
+  if (!allowedTwoFactorMethods(role).includes("email")) throw new HttpError(403, "Email code is not available for this account.");
   if (user.email_verified !== true || !user.email) throw new HttpError(403, "Verify your email address before using email code.");
   if (purpose === "challenge" && (!config.enabled || config.method !== "email")) {
     throw new HttpError(409, "Email code is not the selected security method.");
@@ -370,7 +370,7 @@ export async function finishEnrollment(db, user, method, code, idToken) {
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
   if (!allowedTwoFactorMethods(role).includes(method)) {
-    throw new HttpError(403, "Owner, staff, and rider accounts must use a security app.");
+    throw new HttpError(403, "Choose an available account security method.");
   }
   let secret;
   let valid = false;

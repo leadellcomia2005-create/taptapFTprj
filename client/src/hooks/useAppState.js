@@ -4,6 +4,7 @@ import { buildReorderPlan } from "../features/customer/customerHelpers";
 import { observeAuth } from "../services/firebase/auth";
 import { subscribeNotifications } from "../services/firebase/notifications";
 import { subscribeUserProfile } from "../services/firebase/users";
+import { highestPriorityNotificationSound, installNotificationSoundUnlock, playNotificationSound } from "../services/notificationSounds";
 import { menuAvailability } from "../utils/operations";
 
 const CART_STORAGE_VERSION = 1;
@@ -121,6 +122,8 @@ export function useNotificationCenter(user) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
 
+  useEffect(() => installNotificationSoundUnlock(), []);
+
   useEffect(() => {
     if (!user) {
       setNotifications([]);
@@ -128,11 +131,23 @@ export function useNotificationCenter(user) {
       setNotificationsLoading(false);
       return undefined;
     }
+    let hydrated = false;
+    let knownIds = new Set();
     setNotificationsLoading(true);
-    return subscribeNotifications(user, (nextNotifications) => {
+    const unsubscribe = subscribeNotifications(user, (nextNotifications) => {
+      if (hydrated) {
+        const newUnread = nextNotifications.filter((notification) => !notification.readAt && !knownIds.has(notification.id));
+        const sound = highestPriorityNotificationSound(newUnread);
+        if (sound) void playNotificationSound(sound);
+      }
+      knownIds = new Set(nextNotifications.map((notification) => notification.id));
+      hydrated = true;
       setNotifications(nextNotifications);
       setNotificationsLoading(false);
     });
+    return () => {
+      unsubscribe();
+    };
   }, [user]);
 
   const unreadCount = useMemo(

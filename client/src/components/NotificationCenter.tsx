@@ -18,6 +18,8 @@ import {
   ShoppingBag,
   Star,
   Trash2,
+  Volume2,
+  VolumeX,
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -35,6 +37,7 @@ import {
   syncGrantedPushToken
 } from "../services/pushNotifications";
 import type { PushNotificationSnapshot } from "../services/pushNotifications";
+import { notificationSoundsEnabled, playNotificationSound, setNotificationSoundsEnabled, subscribeNotificationSoundPreference } from "../services/notificationSounds";
 import type { RoleView } from "../types/constants";
 import type { AppUser, Notification } from "../types/domain";
 import { currency, relativeTime } from "../utils/display";
@@ -284,6 +287,7 @@ export default function NotificationCenter({ notifications, loading = false, use
   const [bulkAction, setBulkAction] = useState<"mark" | "clear" | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushSnapshot, setPushSnapshot] = useState<PushNotificationSnapshot>(() => currentPushNotificationState());
+  const [soundEnabled, setSoundEnabled] = useState(() => notificationSoundsEnabled());
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -376,6 +380,8 @@ export default function NotificationCenter({ notifications, loading = false, use
       active = false;
     };
   }, [user.uid]);
+
+  useEffect(() => subscribeNotificationSoundPreference(setSoundEnabled), []);
 
   const visibleNotifications = useMemo(
     () => notifications.filter((notification) => matchesFilter(notification, activeFilter)),
@@ -504,6 +510,15 @@ export default function NotificationCenter({ notifications, loading = false, use
           ? "Browser alerts unavailable"
           : "Turn on browser alerts";
 
+  const handleSoundPreference = () => {
+    const next = !soundEnabled;
+    setNotificationSoundsEnabled(next);
+    setSoundEnabled(next);
+    setMoreOpen(false);
+    setFeedback({ type: "success", text: `Notification sounds are ${next ? "on" : "off"}.` });
+    if (next) void playNotificationSound("chat");
+  };
+
   const renderRow = (notification: Notification) => (
     <NotificationRow
       busy={pendingIds.has(notification.id)}
@@ -555,6 +570,10 @@ export default function NotificationCenter({ notifications, loading = false, use
               </button>
               {moreOpen && (
                 <div className="notification-more-menu" role="menu">
+                  <button data-testid="notification-sound-toggle" role="menuitem" type="button" onClick={handleSoundPreference}>
+                    {soundEnabled ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
+                    <span>{soundEnabled ? "Turn off notification sounds" : "Turn on notification sounds"}</span>
+                  </button>
                   <button
                     data-testid="push-notification-toggle"
                     disabled={pushActionDisabled}

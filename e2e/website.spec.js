@@ -250,6 +250,14 @@ test("browser notification permission is never requested automatically and denie
   await expect(dialog.getByText("Notification sounds are off.", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "More notification actions" }).click();
   await expect(dialog.getByTestId("notification-sound-toggle")).toContainText("Turn on notification sounds");
+  await expect(dialog.getByTestId("notification-sound-test")).toBeDisabled();
+  await dialog.getByTestId("notification-sound-toggle").click();
+  await expect(dialog.getByText("Notification sounds are on.", { exact: true })).toBeVisible();
+  await page.waitForTimeout(400);
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
+  await dialog.getByTestId("notification-sound-test").click();
+  await expect(dialog.getByText("Test notification sound played.", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "More notification actions" }).click();
   const unavailableAction = dialog.getByTestId("push-notification-toggle");
   await expect(unavailableAction).toContainText("Browser alerts unavailable");
   await expect(unavailableAction).toBeDisabled();

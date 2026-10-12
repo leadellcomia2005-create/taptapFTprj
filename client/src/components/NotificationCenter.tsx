@@ -519,6 +519,14 @@ export default function NotificationCenter({ notifications, loading = false, use
     if (next) void playNotificationSound("chat");
   };
 
+  const handleSoundTest = async () => {
+    setMoreOpen(false);
+    const played = await playNotificationSound("order");
+    setFeedback(played
+      ? { type: "success", text: "Test notification sound played." }
+      : { type: "error", text: "Sound could not play. Check this site's sound permission and your device media volume." });
+  };
+
   const renderRow = (notification: Notification) => (
     <NotificationRow
       busy={pendingIds.has(notification.id)}
@@ -573,6 +581,10 @@ export default function NotificationCenter({ notifications, loading = false, use
                   <button data-testid="notification-sound-toggle" role="menuitem" type="button" onClick={handleSoundPreference}>
                     {soundEnabled ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
                     <span>{soundEnabled ? "Turn off notification sounds" : "Turn on notification sounds"}</span>
+                  </button>
+                  <button data-testid="notification-sound-test" disabled={!soundEnabled} role="menuitem" type="button" onClick={handleSoundTest}>
+                    <Volume2 size={16} aria-hidden="true" />
+                    <span>Test notification sound</span>
                   </button>
                   <button
                     data-testid="push-notification-toggle"

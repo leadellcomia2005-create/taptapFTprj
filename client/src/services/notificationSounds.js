@@ -90,7 +90,7 @@ function scheduleNote(context, destination, start, frequency, gain, decay = 9, b
 
 function schedulePattern(context, kind) {
   const master = context.createGain();
-  master.gain.setValueAtTime(0.16, context.currentTime);
+  master.gain.setValueAtTime(0.24, context.currentTime);
   master.connect(context.destination);
   const start = context.currentTime + 0.012;
   let duration = 1.05;

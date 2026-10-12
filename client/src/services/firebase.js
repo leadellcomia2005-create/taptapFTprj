@@ -575,7 +575,7 @@ export function subscribeReviews(user, callback) {
   return () => window.removeEventListener("taptap-demo-data", emit);
 }
 
-export function subscribePublicReviews(callback) {
+export function subscribePublicReviews(callback, onError = () => {}) {
   const normalizePrivateReviews = (value = {}) => callback(
     firebaseRecordList(value, isReview)
       .map((review) => {
@@ -602,9 +602,9 @@ export function subscribePublicReviews(callback) {
   );
   if (firebaseEnabled) {
     return onValue(
-      query(ref(db, "public/reviews"), orderByChild("createdAt"), limitToLast(5)),
+      query(ref(db, "public/reviews"), orderByChild("createdAt"), limitToLast(25)),
       (snapshot) => normalizePublicReviews(snapshot.val() || {}),
-      () => callback([])
+      onError
     );
   }
   const emit = () => normalizePrivateReviews(readDemoData().reviews);

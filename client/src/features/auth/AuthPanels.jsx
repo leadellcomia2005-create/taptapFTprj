@@ -313,6 +313,7 @@ function LoginPanel({ onLoggedIn }) {
   const [showFullMenu, setShowFullMenu] = useState(false);
   const [publicReviews, setPublicReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [reviewsUnavailable, setReviewsUnavailable] = useState(false);
   const [showMobileOrderCta, setShowMobileOrderCta] = useState(false);
   const loginHomeRef = useRef(null);
   const loginModalRef = useRef(null);
@@ -404,6 +405,7 @@ function LoginPanel({ onLoggedIn }) {
     const loadingFallback = window.setTimeout(() => {
       if (!active) return;
       setPublicReviews([]);
+      setReviewsUnavailable(true);
       setReviewsLoading(false);
     }, 4000);
     const unsubscribe = subscribePublicReviews((reviews) => {
@@ -417,6 +419,13 @@ function LoginPanel({ onLoggedIn }) {
         quote: review.comment
       }));
       setPublicReviews(visibleReviews);
+      setReviewsUnavailable(false);
+      setReviewsLoading(false);
+    }, () => {
+      if (!active) return;
+      window.clearTimeout(loadingFallback);
+      setPublicReviews([]);
+      setReviewsUnavailable(true);
       setReviewsLoading(false);
     });
     return () => {
@@ -1204,7 +1213,10 @@ function LoginPanel({ onLoggedIn }) {
           {reviewsLoading && (
             <p className="login-review-state" data-login-reveal>Loading approved customer feedback...</p>
           )}
-          {!reviewsLoading && publicReviews.length === 0 && (
+          {!reviewsLoading && reviewsUnavailable && (
+            <p className="login-review-state" role="status" data-login-reveal>Customer reviews are temporarily unavailable.</p>
+          )}
+          {!reviewsLoading && !reviewsUnavailable && publicReviews.length === 0 && (
             <p className="login-review-state" data-login-reveal>Approved customer feedback will appear here when available.</p>
           )}
           {!reviewsLoading && publicReviews.slice(0, 3).map((review, index) => (

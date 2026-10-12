@@ -372,6 +372,75 @@ test("customer reorder skips unavailable items and reduces quantities to current
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("customer records use readable order references and stable action buttons", async ({ page }) => {
+  const internalOrderId = "-P0RCU2vdOTqsSROZeEy";
+  await page.addInitScript(({ orderId }) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      orders: {
+        [orderId]: {
+          customerId: "demo-customer",
+          customerName: "Demo Customer",
+          deliveryType: "pickup",
+          address: "Counter pickup",
+          items: [{ id: "hotdog-solo", name: "Hotdog Solo", category: "Solo", price: 79, qty: 1 }],
+          subtotal: 79,
+          total: 79,
+          paymentMethod: "cod",
+          paymentStatus: "paid",
+          status: "completed",
+          createdAt: 1700000000000
+        }
+      },
+      reviews: {
+        [orderId]: {
+          orderId,
+          customerId: "demo-customer",
+          customerName: "Demo Customer",
+          rating: 5,
+          comment: "Fresh and well packed.",
+          items: ["Hotdog Solo"],
+          moderationStatus: "approved",
+          createdAt: 1700000000000
+        }
+      }
+    }));
+  }, { orderId: internalOrderId });
+
+  const runtime = watchRuntime(page);
+  await loginAs(page, "customer");
+  const navigation = page.getByRole("navigation", { name: /customer navigation/i });
+
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: "Order History" }));
+  const orderRow = page.locator(".order-table-row").filter({ hasText: "TAP-97511466" });
+  await expect(orderRow).toBeVisible();
+  await expect(page.getByText(internalOrderId, { exact: true })).toHaveCount(0);
+  for (const name of ["Track", "Order again", "Report"]) await expectMinimumTouchTarget(orderRow.getByRole("button", { name }));
+
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: "Digital Receipts" }));
+  const receipt = page.locator(".receipt-card").filter({ hasText: "TAP-97511466" });
+  await expect(receipt).toBeVisible();
+  await expect(page.getByText(internalOrderId, { exact: true })).toHaveCount(0);
+  for (const name of ["Print", "PDF", "Email"]) await expectMinimumTouchTarget(receipt.getByRole("button", { name }));
+
+  await activateWithKeyboard(page, navigation.getByRole("button", { name: "Reviews & Feedback" }));
+  await expect(page.getByRole("heading", { name: "Previous reviews" })).toBeVisible();
+  await expect(page.getByText("TAP-97511466", { exact: true })).toBeVisible();
+  await expect(page.getByText(internalOrderId, { exact: true })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  const mobileNavigation = page.getByRole("navigation", { name: /customer mobile navigation/i });
+  await mobileNavigation.getByRole("button", { name: "Receipts" }).click();
+  await expect(receipt).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  for (const name of ["Print", "PDF", "Email"]) await expectMinimumTouchTarget(receipt.getByRole("button", { name }));
+  await mobileNavigation.getByRole("button", { name: "Orders" }).click();
+  await expect(orderRow).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  expect(runtime.errors).toEqual([]);
+  expect(runtime.deferredRequests).toEqual([]);
+});
+
 test("owner reports and staff POS/order queue are reachable", async ({ page }) => {
   const ownerRuntime = watchRuntime(page);
   await loginAs(page, "owner");
@@ -1350,7 +1419,7 @@ test("notification center stays readable and uses one scroll region at every req
   const repeatedSales = dialog.getByRole("button", { name: /New sale recorded.*3 updates/i });
   await repeatedSales.click();
   await expect(dialog.getByText("Order TAP-4821 \u00b7 \u20b1475", { exact: true })).toBeVisible();
-  await expect(dialog).toContainText("Order TAP-ER4821 is now preparing.");
+  await expect(dialog).toContainText("Order TAP-79739078 is now preparing.");
   await expect(dialog).not.toContainText("-OwSaleInternal4821");
   await expect(dialog).not.toContainText("-OwLegacyOrder4821");
   await expect(dialog.getByRole("heading", { name: "Today" })).toBeVisible();

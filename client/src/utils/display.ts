@@ -13,6 +13,19 @@ export const currency = (value: CurrencyValue): string => `\u20b1${Number(value 
 
 export const statusLabel = (value: OrderStatus | string): string => ORDER_STATUS_LABELS[value as OrderStatus] || value;
 
+export const orderReference = (recordId: string | null | undefined): string => {
+  const value = String(recordId || "").trim();
+  if (!value) return "TAP-ORDER";
+  if (/^TAP-[A-Z0-9-]{3,}$/i.test(value)) return value.toUpperCase();
+
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  }
+
+  return `TAP-${String((hash >>> 0) % 100_000_000).padStart(8, "0")}`;
+};
+
 export const menuPhotoStyle = (product: Pick<MenuItem, "image" | "imagePosition">): MenuPhotoStyle => product.image
   ? {
       backgroundImage: `url(${product.image})`,

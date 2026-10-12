@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, MapPin, PackageCheck, Phone, ReceiptText, RotateCcw, Star, WalletCards } from "lucide-react";
+import { Clock3, Download, Mail, MapPin, MessageSquareWarning, Navigation, PackageCheck, Phone, Printer, ReceiptText, RotateCcw, Star, WalletCards, XCircle } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { buildLasPinasAddress, isWithinLasPinasBounds, LAS_PINAS_BARANGAYS, LAS_PINAS_CITY, parseLasPinasAddress } from "../../data/lasPinas";
@@ -9,7 +9,7 @@ import { runPerformanceTrace } from "../../services/performance";
 import { submitComplaint, submitReview } from "../../services/firebase/feedback";
 import { createOrder, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
 import { saveUserProfile } from "../../services/firebase/users";
-import { currency, statusLabel } from "../../utils/display";
+import { currency, orderReference, statusLabel } from "../../utils/display";
 import { createRequestKey } from "../../utils/operations";
 import {
   complaintTypes,
@@ -487,7 +487,7 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
     setBusy(true);
     try {
       await submitComplaint(order, user, { type, details: details.trim(), requestedResolution: requestedResolution.trim() });
-      notify?.(`${order.id} complaint submitted.`);
+      notify?.(`${orderReference(order.id)} complaint submitted.`);
       onDone();
     } catch (error) {
       notify?.(error.message || "Complaint could not be submitted.");
@@ -506,7 +506,7 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
         <form className="modal-content reason-modal" onSubmit={submit}>
-          <div className="modal-header"><h5 className="modal-title">Report {order.id}</h5><button className="btn-close" type="button" aria-label="Close complaint" onClick={onClose} /></div>
+          <div className="modal-header"><h5 className="modal-title">Report {orderReference(order.id)}</h5><button className="btn-close" type="button" aria-label="Close complaint" onClick={onClose} /></div>
           <div className="modal-body">
             <label className="form-label">Issue type<select className="form-select" value={type} onChange={(event) => setType(event.target.value)}>{complaintTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="form-label">Details<textarea className="form-control" rows="4" required value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Tell us what happened with this order." /></label>
@@ -533,11 +533,11 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
     : ["received", "preparing", "ready", "completed"];
   const priorityStepIndex = priorityOrder ? Math.max(0, prioritySteps.indexOf(priorityOrder.status)) : -1;
   const cancelOrder = async (order) => {
-    const reason = window.prompt(`Why do you want to cancel ${order.id}?`);
+    const reason = window.prompt(`Why do you want to cancel ${orderReference(order.id)}?`);
     if (!reason?.trim()) return;
     try {
       await updateOrder(order.id, { cancel: true, cancelReason: reason.trim() });
-      notify?.(`${order.id} cancellation submitted.`);
+      notify?.(`${orderReference(order.id)} cancellation submitted.`);
     } catch (error) {
       notify?.(error.message || "This order can no longer be cancelled here.");
     }
@@ -561,14 +561,14 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
         {list.map((order) => (
           <article className="order-table-row" key={order.id}>
             <div className="order-line-item" data-label="Order">
-              <small>{order.id}</small>
+              <small>{orderReference(order.id)}</small>
               <strong>{order.items?.map((item) => `${item.qty} x ${item.name}`).join(", ") || "Order items"}</strong>
             </div>
             <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
             <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
             <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}{complaintByOrder.has(order.id) && <small className="d-block text-danger">Complaint: {complaintByOrder.get(order.id).status}</small>}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><div className="d-flex flex-wrap gap-1"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}>Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && <button className="btn btn-sm btn-danger" onClick={() => onPay(order)}>Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}>Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}>Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}>Cancel</button>}</div></div>
+            <div data-label="Action"><div className="order-row-actions"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}><Navigation size={14} aria-hidden="true" /> Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && <button className="btn btn-sm btn-danger order-action-wide" onClick={() => onPay(order)}><WalletCards size={14} aria-hidden="true" /> Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}><RotateCcw size={14} aria-hidden="true" /> Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}><MessageSquareWarning size={14} aria-hidden="true" /> Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}><XCircle size={14} aria-hidden="true" /> Cancel</button>}</div></div>
           </article>
         ))}
       </div>
@@ -585,7 +585,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
           </div>
           {priorityOrder && <section className="customer-active-order" aria-label="Priority active order">
             <div className="customer-active-order-heading">
-              <div><p className="eyebrow">Active order</p><h3>{priorityOrder.id}</h3><span><Clock3 size={14} aria-hidden="true" /> {statusLabel(priorityOrder.status)}</span></div>
+              <div><p className="eyebrow">Active order</p><h3>{orderReference(priorityOrder.id)}</h3><span><Clock3 size={14} aria-hidden="true" /> {statusLabel(priorityOrder.status)}</span></div>
               <strong>{currency(priorityOrder.total)}</strong>
             </div>
             <div className="customer-order-progress" aria-label={`Order status: ${statusLabel(priorityOrder.status)}`}>
@@ -808,14 +808,15 @@ export function ReceiptsView({ orders, printReceipt, notify }) {
     pdf.setFontSize(12);
     pdf.text("Digital Receipt", 18, 29);
     pdf.setFontSize(10);
-    pdf.text(`Receipt: ${order.id}`, 18, 40);
+    const displayOrderId = orderReference(order.id);
+    pdf.text(`Receipt: ${displayOrderId}`, 18, 40);
     pdf.text(`Date: ${new Date(order.createdAt).toLocaleString("en-PH")}`, 18, 47);
     pdf.text(`Customer: ${order.customerName}`, 18, 54);
     pdf.text(`Payment: ${order.paymentMethod?.toUpperCase()}`, 18, 61);
     order.items?.forEach((item, index) => pdf.text(`${item.qty} x ${item.name} - ${currency(item.qty * item.price)}`, 18, 76 + index * 8));
     pdf.setFontSize(13);
     pdf.text(`Total: ${currency(order.total)}`, 18, 90 + (order.items?.length || 0) * 8);
-    pdf.save(`${order.id}-receipt.pdf`);
+    pdf.save(`${displayOrderId}-receipt.pdf`);
   };
   const emailReceipt = async (order) => {
     setSendingReceiptId(order.id);
@@ -831,7 +832,7 @@ export function ReceiptsView({ orders, printReceipt, notify }) {
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Paperless records</p><h2>Digital receipts</h2></div><p>View and download itemized receipts for online orders.</p></div>
-      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{order.id}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}>Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}>Download PDF</button><button className="btn btn-sm btn-danger" disabled={sendingReceiptId === order.id} onClick={() => emailReceipt(order)}>{sendingReceiptId === order.id ? "Sending..." : "Email receipt"}</button></div></article>)}</div>
+      <div className="receipt-grid">{orders.length === 0 && <div className="empty-state">No receipts available yet.</div>}{orders.map((order) => <article className="receipt-card" key={order.id}><BrandMark className="receipt-brand" /><div className="receipt-copy"><small>{new Date(order.createdAt).toLocaleDateString("en-PH")}</small><h3>{orderReference(order.id)}</h3><p>{order.items?.map((item) => `${item.qty}× ${item.name}`).join(", ")}</p><span>{order.paymentMethod?.toUpperCase()} · {statusLabel(order.status)}</span></div><div className="receipt-total"><strong>{currency(order.total)}</strong><div className="receipt-actions"><button className="btn btn-sm btn-outline-dark" onClick={() => printReceipt(order)}><Printer size={15} aria-hidden="true" /> Print</button><button className="btn btn-sm btn-outline-dark" onClick={() => downloadReceipt(order)}><Download size={15} aria-hidden="true" /> PDF</button><button className="btn btn-sm btn-danger" disabled={sendingReceiptId === order.id} onClick={() => emailReceipt(order)}><Mail size={15} aria-hidden="true" /> {sendingReceiptId === order.id ? "Sending..." : "Email"}</button></div></div></article>)}</div>
     </main>
   );
 }
@@ -850,14 +851,14 @@ export function ReviewsView({ user, orders, reviews, notify }) {
     setSelectedOrderId("");
     setRating(5);
     setComment("");
-    notify(`Thank you for rating ${selectedOrder.id}.`);
+    notify(`Thank you for rating ${orderReference(selectedOrder.id)}.`);
   };
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
       <div className="row g-4">
-        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{order.id} - {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}><Star size={22} fill={star <= rating ? "currentColor" : "none"} aria-hidden="true" /></button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
-        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{review.orderId}</strong><span className="previous-review-stars" aria-label={`${review.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <Star key={star} size={15} fill={star <= review.rating ? "currentColor" : "none"} aria-hidden="true" />)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} - {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
+        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{orderReference(order.id)} - {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}><Star size={22} fill={star <= rating ? "currentColor" : "none"} aria-hidden="true" /></button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
+        <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{orderReference(review.orderId)}</strong><span className="previous-review-stars" aria-label={`${review.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <Star key={star} size={15} fill={star <= review.rating ? "currentColor" : "none"} aria-hidden="true" />)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} - {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
       </div>
     </main>
   );

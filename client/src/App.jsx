@@ -24,7 +24,7 @@ import { disconnectSocket, getSocket, subscribeSocketRiderLocation } from "./ser
 import { EmailVerificationPanel, LoginPanel, TwoFactorPanel } from "./features/auth/AuthPanels";
 import { useAuthSession, useCartState, useNotificationCenter, useRoleNavigation } from "./hooks/useAppState";
 import { menuAvailability } from "./utils/operations";
-import { currency, statusLabel } from "./utils/display";
+import { currency, orderReference, statusLabel } from "./utils/display";
 
 const DeliveryMap = lazy(() => import("./components/DeliveryMap"));
 const CustomerAssistant = lazy(() => import("./components/CustomerAssistant"));
@@ -320,7 +320,10 @@ const printOwnerDailyReport = (report) => {
 };
 
 const printableReceiptHtml = (order) => {
-  const receiptNo = order.receiptNo || order.id;
+  const displayOrderId = orderReference(order.id);
+  const receiptNo = /^-[A-Za-z0-9_-]{12,}$/.test(order.receiptNo || "")
+    ? orderReference(order.receiptNo)
+    : order.receiptNo || displayOrderId;
   const rows = (order.items || []).map((item) => `
     <tr>
       <td>${htmlEscape(`${item.qty} x ${item.name}`)}</td>
@@ -351,7 +354,7 @@ const printableReceiptHtml = (order) => {
   <p class="center">Digital receipt</p>
   <div class="meta">
     <p>Receipt: ${htmlEscape(receiptNo)}</p>
-    <p>Order: ${htmlEscape(order.id)}</p>
+    <p>Order: ${htmlEscape(displayOrderId)}</p>
     <p>Date: ${htmlEscape(new Date(order.createdAt || Date.now()).toLocaleString("en-PH"))}</p>
     <p>Customer: ${htmlEscape(order.customerName || "Walk-in Customer")}</p>
     <p>Cashier: ${htmlEscape(order.cashierName || "-")}</p>

@@ -3343,6 +3343,18 @@ button:not(:disabled),
 .customer-active-order-actions { justify-content: flex-start; }
 .customer-active-order-actions .btn { min-height: 44px; }
 .customer-orders-empty { display: grid; justify-items: start; gap: 8px; }
+.order-table-head,
+.order-table-row { grid-template-columns: minmax(210px,1.2fr) 96px 112px minmax(150px,.9fr) 92px minmax(188px,.85fr); }
+.order-row-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.order-row-actions .btn,
+.receipt-actions .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.order-row-actions .order-action-wide { grid-column: 1 / -1; }
+.receipt-card { grid-template-columns: 54px minmax(0,1fr) minmax(300px,auto); min-height: 0; }
+.receipt-copy { min-width: 0; }
+.receipt-copy p { overflow-wrap: anywhere; }
+.receipt-total { min-width: 300px; align-content: center; }
+.receipt-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.receipt-actions .btn { padding-inline: 13px; }
 .previous-review-stars { display: inline-flex; gap: 2px; letter-spacing: 0 !important; }
 .rating-picker button { width: 44px; height: 44px; display: grid; place-items: center; }
 .staff-shift-error,
@@ -3368,6 +3380,14 @@ button:not(:disabled),
   .customer-order-progress { grid-template-columns: repeat(3,minmax(0,1fr)); row-gap: 14px; }
   .customer-order-progress div:nth-child(4)::before { display: none; }
   .customer-active-order-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .order-row-actions { width: 100%; grid-template-columns: 1fr 1fr; }
+  .order-row-actions .btn { min-height: 44px; }
+  .receipt-card { grid-template-columns: 42px minmax(0,1fr); gap: 12px; padding: 16px; }
+  .receipt-total { min-width: 0; grid-column: 1 / -1; justify-items: stretch; }
+  .receipt-total strong { text-align: left; }
+  .receipt-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .receipt-actions .btn { min-width: 0; padding-inline: 8px; }
+  .previous-review > div { align-items: flex-start; flex-direction: column; gap: 8px; }
 }
 .pos-payment-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pos-payment-methods button {

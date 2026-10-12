@@ -40,7 +40,7 @@ import type { PushNotificationSnapshot } from "../services/pushNotifications";
 import { notificationSoundsEnabled, playNotificationSound, setNotificationSoundsEnabled, subscribeNotificationSoundPreference } from "../services/notificationSounds";
 import type { RoleView } from "../types/constants";
 import type { AppUser, Notification } from "../types/domain";
-import { currency, relativeTime } from "../utils/display";
+import { currency, orderReference, relativeTime } from "../utils/display";
 import "./NotificationCenter.css";
 
 type NotificationFilter = "all" | "unread" | "orders" | "payments" | "issues";
@@ -103,9 +103,7 @@ function iconForNotification(notification: Notification): LucideIcon {
 }
 
 function generatedReference(recordId: string): string {
-  if (/^TAP-[A-Z0-9-]{3,}$/i.test(recordId)) return recordId.toUpperCase();
-  const suffix = recordId.replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
-  return suffix ? `TAP-${suffix}` : "";
+  return orderReference(recordId);
 }
 
 function displayReference(notification: Notification): string {

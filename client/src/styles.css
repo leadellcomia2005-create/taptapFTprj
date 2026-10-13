@@ -625,14 +625,30 @@ button { font: inherit; }
 .notification-button { position: relative; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; color: var(--ink); border: 1px solid var(--line); background: white; border-radius: 10px; font-size: 9px; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease; }
 .notification-button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(45,30,18,.12); }
 .notification-button .bell-icon { font-size: 15px; line-height: 1; }
-.notification-button b { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; color: white; background: var(--red); border: 2px solid white; border-radius: 10px; font-size: 7px; }
-.user-chip { display: flex; align-items: center; gap: 8px; }
+.notification-button b { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; display: grid; place-items: center; padding: 0 3px; color: white; background: var(--red); border: 2px solid white; border-radius: 9px; font-size: 7px; }
+.account-menu { position: relative; flex: 0 0 auto; }
+.user-chip { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 4px 7px 4px 4px; color: inherit; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 10px; }
+.user-chip:hover,.user-chip[aria-expanded="true"] { background: rgba(32,25,20,.06); }
 .user-chip > span { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--ink); border-radius: 50%; font-size: 9px; font-weight: 800; }
 .user-chip strong, .user-chip small { display: block; }
 .user-chip strong { font-size: 9px; }
 .user-chip small { color: var(--muted); font-size: 8px; text-transform: capitalize; }
-/* erick: icon + text ang logout sa desktop, icon lang sa mobile. */
-.logout-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.account-menu-chevron { flex: 0 0 auto; transition: transform .16s ease; }
+.user-chip[aria-expanded="true"] .account-menu-chevron { transform: rotate(180deg); }
+.account-menu-popover { position: absolute; z-index: 1080; top: calc(100% + 9px); right: 0; width: min(270px,calc(100vw - 24px)); padding: 10px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 44px rgba(38,29,19,.2); }
+.account-menu-identity { padding: 8px 9px 12px; border-bottom: 1px solid var(--line); }
+.account-menu-identity strong,.account-menu-identity small { display: block; }
+.account-menu-identity strong { overflow-wrap: anywhere; font-size: 12px; }
+.account-menu-identity small { margin-top: 3px; color: var(--muted); font-size: 9px; text-transform: capitalize; }
+.account-menu-logout { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 10px; color: var(--red); text-align: left; border: 0; background: transparent; border-radius: 7px; font-size: 11px; font-weight: 850; }
+.account-menu-logout:hover { background: var(--red-soft); }
+.logout-confirmation { display: grid; gap: 5px; padding: 12px 9px 4px; }
+.logout-confirmation > strong { font-size: 13px; }
+.logout-confirmation > small { color: var(--muted); font-size: 9px; }
+.logout-confirmation > div { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; margin-top: 8px; }
+.logout-confirmation .btn { min-height: 44px; padding-inline: 8px; white-space: nowrap; }
+.customer-header .account-menu-popover .btn-danger { color: white; border-color: var(--red); background: var(--red); }
+.customer-header .account-menu-popover .btn-danger:hover { color: white; border-color: var(--red-dark); background: var(--red-dark); }
 .storefront-page { min-height: calc(100vh - 76px); padding: 24px clamp(16px,3vw,42px) 48px; background: var(--paper); }
 .storefront-shell { width: min(1500px,100%); display: grid; grid-template-columns: minmax(0,1fr) minmax(300px,340px); gap: 24px; align-items: start; margin: 0 auto; }
 .store-cart-column { position: sticky; top: 100px; display: grid; gap: 14px; }
@@ -1353,7 +1369,6 @@ button { font: inherit; }
   .customer-header .brand-lockup .brand-mark { width: 46px; height: 46px; flex-basis: 46px; }
   .header-actions { gap: 7px; }
   .header-actions .btn-sm { padding: 6px 8px; font-size: 9px; }
-  .logout-button span { display: none; }
   .notification-button { width: 36px; height: 36px; padding: 0; }
   .storefront-page { padding: 16px 12px calc(116px + env(safe-area-inset-bottom, 0px)); }
   .storefront-brand-card { padding: 12px; }
@@ -1394,7 +1409,7 @@ button { font: inherit; }
   /* erick: sa extra-small phones, itinatago ang extra text para walang overlap. */
   .checkout-mode-grid { grid-template-columns: 1fr; }
   .customer-header .brand-lockup div { display: none; }
-  .customer-header .user-chip { display: none; }
+  .customer-header .user-chip div,.customer-header .account-menu-chevron { display: none; }
   .customer-header .brand-mark { width: 44px; height: 44px; flex-basis: 44px; }
   .cart-summary-item { grid-template-columns: 34px minmax(0,1fr) 46px; }
   .cart-quantity { grid-column: 2; justify-self: start; }
@@ -5233,11 +5248,7 @@ button:not(:disabled),
   border-color: rgba(255,255,255,.5);
   background: rgba(80,20,13,.45);
 }
-.logout-button {
-  min-width: var(--control-height);
-  min-height: var(--control-height);
-  padding: 0 13px;
-}
+.account-menu-trigger { min-width: var(--control-height); }
 .workspace-app-shell {
   --paper: var(--ops-background);
   --paper-soft: var(--surface-subtle);
@@ -5417,13 +5428,10 @@ button:not(:disabled),
   .workspace-app-shell :where(button, .btn) {
     min-height: var(--control-height);
   }
-  .logout-button {
-    width: var(--control-height);
-    padding: 0;
-  }
-  .logout-button span {
-    display: none;
-  }
+  .user-chip { width: var(--control-height); min-width: var(--control-height); height: var(--control-height); justify-content: center; padding: 0; }
+  .user-chip > span { width: 34px; height: 34px; }
+  .user-chip div,.account-menu-chevron { display: none; }
+  .account-menu-popover { position: fixed; top: 70px; right: 12px; }
   .storefront-page {
     padding-bottom: calc(170px + env(safe-area-inset-bottom,0px));
   }

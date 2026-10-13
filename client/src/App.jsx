@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // erick: lucide icons para mas malinaw ang menu, close, bell, logout, at trash actions.
-import { Bell, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
+import { Bell, ChevronDown, ClipboardList, LogOut, Menu, MessageCircle, Plus, ReceiptText, RotateCcw, Search, Star, Store, Trash2, UserRound, X } from "lucide-react";
 import { BrandMark } from "./components/Branding";
 import LazyLoadBoundary from "./components/LazyLoadBoundary";
 import { PageLoader, SectionLoader } from "./components/Loaders";
@@ -415,7 +415,35 @@ function AppHeader({ user, activeView, unreadCount, notificationsOpen, onNavigat
   const workspaceDrawerNavigation = user.role === "owner" || user.role === "staff";
   // erick: drawer state ito para hiwalay ang mobile menu sa masikip na header.
   const [drawerMenuOpen, setDrawerMenuOpen] = useState(false);
-  useEffect(() => setDrawerMenuOpen(false), [activeView, user.role]);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
+  const accountMenuRef = useRef(null);
+  useEffect(() => {
+    setDrawerMenuOpen(false);
+    setAccountMenuOpen(false);
+    setLogoutConfirmationOpen(false);
+  }, [activeView, user.role]);
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+    const closeFromOutside = (event) => {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setAccountMenuOpen(false);
+        setLogoutConfirmationOpen(false);
+      }
+    };
+    const closeFromKeyboard = (event) => {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+        setLogoutConfirmationOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromKeyboard);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromKeyboard);
+    };
+  }, [accountMenuOpen]);
   const navigateFromHeader = (nextView) => {
     onNavigate(nextView);
     setDrawerMenuOpen(false);
@@ -479,9 +507,36 @@ function AppHeader({ user, activeView, unreadCount, notificationsOpen, onNavigat
         {/* erick: icon controls para compact pero malinaw pa rin ang notification at logout. */}
         {customerNavigation && <button className={`header-help-button ${helpOpen ? "active" : ""}`} onClick={onHelp} aria-label={helpOpen ? "Close customer support" : "Open customer support"} aria-expanded={helpOpen} aria-controls="assistant-panel"><MessageCircle size={18} strokeWidth={2.4} aria-hidden="true" /></button>}
         <button className="notification-button" aria-controls="notification-center" aria-expanded={notificationsOpen} onClick={onNotifications} aria-label="Open notifications"><Bell size={17} strokeWidth={2.5} aria-hidden="true" />{unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}</button>
-        <div className="user-chip"><span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div></div>
-        {/* erick: ginawang solid red button (dati plain text link). */}
-        <button className="btn btn-danger btn-sm logout-button" aria-label="Log out" onClick={onLogout}><LogOut size={14} strokeWidth={2.5} aria-hidden="true" /><span>Log out</span></button>
+        <div className="account-menu" ref={accountMenuRef}>
+          <button
+            className="user-chip account-menu-trigger"
+            aria-label={`Open account menu for ${user.name}`}
+            aria-haspopup="dialog"
+            aria-expanded={accountMenuOpen}
+            onClick={() => {
+              setAccountMenuOpen((current) => !current);
+              setLogoutConfirmationOpen(false);
+            }}
+          >
+            <span>{user.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+            <div><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div>
+            <ChevronDown className="account-menu-chevron" size={15} aria-hidden="true" />
+          </button>
+          {accountMenuOpen && (
+            <div className="account-menu-popover" role="dialog" aria-label="Account menu">
+              <div className="account-menu-identity"><strong>{user.name}</strong><small>{user.role === "staff" ? staffRoleLabels[user.staffRole] || "Staff" : user.role}</small></div>
+              {!logoutConfirmationOpen ? (
+                <button className="account-menu-logout" onClick={() => setLogoutConfirmationOpen(true)}><LogOut size={17} aria-hidden="true" /> Log out</button>
+              ) : (
+                <div className="logout-confirmation" role="alert">
+                  <strong>Log out now?</strong>
+                  <small>Your current session will end.</small>
+                  <div><button type="button" className="btn btn-sm btn-outline-dark" onClick={() => setLogoutConfirmationOpen(false)}>Cancel</button><button type="button" className="btn btn-sm btn-danger" onClick={onLogout}>Confirm logout</button></div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

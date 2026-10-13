@@ -37,7 +37,14 @@ async function loginAs(page, role) {
   await panel.getByLabel("Email").fill(demoCredentials[role].email);
   await panel.getByLabel("Password", { exact: true }).fill(demoCredentials[role].password);
   await panel.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: /Log out/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Open account menu/i })).toBeVisible();
+}
+
+async function logoutFromAccountMenu(page) {
+  await page.getByRole("button", { name: /Open account menu/i }).click();
+  const accountMenu = page.getByRole("dialog", { name: "Account menu" });
+  await accountMenu.getByRole("button", { name: "Log out", exact: true }).click();
+  await accountMenu.getByRole("button", { name: "Confirm logout", exact: true }).click();
 }
 
 async function mockLasPinasGeocoding(page, onRequest = () => {}) {
@@ -104,6 +111,31 @@ async function activateWithKeyboard(page, control, key = "Enter") {
   await expect(control).toBeFocused();
   await page.keyboard.press(key);
 }
+
+test("every role uses the compact account menu and confirmed logout", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  for (const role of Object.keys(demoCredentials)) {
+    await loginAs(page, role);
+    const accountTrigger = page.getByRole("button", { name: /Open account menu/i });
+    await expectMinimumTouchTarget(accountTrigger);
+    await expectNoHorizontalOverflow(page);
+
+    await accountTrigger.click();
+    const accountMenu = page.getByRole("dialog", { name: "Account menu" });
+    await expect(accountMenu).toBeVisible();
+    await expectAccessible(page, ".account-menu-popover");
+    await accountMenu.getByRole("button", { name: "Log out", exact: true }).click();
+    await expect(accountMenu.getByText("Log out now?", { exact: true })).toBeVisible();
+    await expect(accountTrigger).toBeVisible();
+
+    await accountMenu.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(accountMenu.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
+    await accountMenu.getByRole("button", { name: "Log out", exact: true }).click();
+    await accountMenu.getByRole("button", { name: "Confirm logout", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
+  }
+});
 
 test("landing page, registration entry, and accessibility are operational", async ({ page }) => {
   const runtime = watchRuntime(page);
@@ -451,7 +483,7 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   await expect(page.getByRole("heading", { name: /Reports & Reconciliation/i })).toBeVisible();
   await expectAccessible(page);
   expect(ownerRuntime.errors).toEqual([]);
-  await page.getByRole("button", { name: /Log out/i }).click();
+  await logoutFromAccountMenu(page);
 
   const staffRuntime = watchRuntime(page);
   await loginAs(page, "staff");
@@ -810,7 +842,7 @@ test("375px landing and customer workspace have no horizontal overflow", async (
   await supportPanel.getByRole("button", { name: /Close customer support/i }).click();
   await expect(supportPanel).toBeHidden();
   await page.evaluate(() => sessionStorage.setItem("taptap-checkout:v1:demo-customer", "temporary checkout data"));
-  await page.getByRole("button", { name: /Log out/i }).click();
+  await logoutFromAccountMenu(page);
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("taptap-checkout:v1:demo-customer"))).toBeNull();
   expect(runtime.errors).toEqual([]);
 });
@@ -1206,7 +1238,7 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
     await loginAs(page, role);
     await expect(page.getByRole("heading", { name: roleHeadings[role] })).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await expectMinimumTouchTarget(page.getByRole("button", { name: /Log out/i }));
+    await expectMinimumTouchTarget(page.getByRole("button", { name: /Open account menu/i }));
     await expect(page.locator(".workspace-overview-header")).toBeVisible();
 
     if (role === "owner") {
@@ -1240,7 +1272,7 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
 
     await page.setViewportSize({ width: 768, height: 1024 });
     await expectNoHorizontalOverflow(page);
-    await page.getByRole("button", { name: /Log out/i }).click();
+    await logoutFromAccountMenu(page);
     await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
   }
   expect(runtime.errors).toEqual([]);
@@ -1285,7 +1317,7 @@ test("owner and staff operational layouts remain usable on a phone", async ({ pa
   const complaintColumns = await complaint.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(complaintColumns).toBe(1);
   await expectNoHorizontalOverflow(page);
-  await page.getByRole("button", { name: /Log out/i }).click();
+  await logoutFromAccountMenu(page);
 
   await loginAs(page, "staff");
   await page.getByRole("button", { name: /Open navigation menu/i }).click();
@@ -1334,7 +1366,7 @@ test("980px desktop-mode mobile viewport uses compact navigation without page ov
       await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /Assigned Orders/i }));
     }
 
-    await page.getByRole("button", { name: /Log out/i }).click();
+    await logoutFromAccountMenu(page);
     await expect(page.getByRole("heading", { level: 1, name: /TapTap Foodtrip/i })).toBeVisible();
   }
 

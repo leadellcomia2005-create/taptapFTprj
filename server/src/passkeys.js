@@ -104,11 +104,7 @@ async function profileFor(db, user) {
 }
 
 async function customerProfile(db, user) {
-  const profile = await profileFor(db, user);
-  const role = user.role || profile.role || "customer";
-  if (role !== "customer") throw new HttpError(403, "Passkeys are available only for customer accounts.");
-  if (user.email_verified !== true) throw new HttpError(403, "Verify your email before setting up a passkey.");
-  return profile;
+  throw new HttpError(410, "Customer passkeys are disabled. Use an email or SMS verification code.");
 }
 
 async function issueSessionToken(db, user) {

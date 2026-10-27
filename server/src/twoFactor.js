@@ -285,6 +285,7 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
   const [profile, initialConfig] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   let config = initialConfig;
   const role = user.role || profile.role || "customer";
+  const configuredMethodAllowed = allowedTwoFactorMethods(role).includes(config.method);
   if (config.locked && Number(config.lockedPasswordUpdatedAt || 0) > 0) {
     const currentPasswordVersion = await passwordUpdatedAt(idToken);
     if (currentPasswordVersion > Number(config.lockedPasswordUpdatedAt)) {
@@ -306,15 +307,15 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
     role,
     emailVerified: user.email_verified === true,
     verificationExpiresAt: Number(profile.registration?.verificationExpiresAt || 0) || null,
-    enabled: Boolean(config.enabled),
-    method: config.method || null,
+    enabled: Boolean(config.enabled && configuredMethodAllowed),
+    method: configuredMethodAllowed ? config.method : null,
     locked: Boolean(config.locked),
     failedAttempts: Number(config.failedAttempts || 0),
     phoneConfigured: Boolean(profile.phone),
     phoneMasked: maskPhone(profile.phone),
     smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone && profile.phoneVerified),
     emailOtpAvailable: Boolean(allowedTwoFactorMethods(role).includes("email") && emailAvailable && user.email && user.email_verified === true),
-    passkeyAvailable: role === "customer",
+    passkeyAvailable: false,
     passkeyCount: Object.keys(config.passkeys || {}).length,
     emailMasked: maskEmail(user.email),
     allowedMethods: allowedTwoFactorMethods(role),
@@ -323,8 +324,10 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
 }
 
 export async function beginTotpSetup(db, user) {
-  const config = await configurationFor(db, user.uid);
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
+  if (!allowedTwoFactorMethods(role).includes("totp")) throw new HttpError(403, "Customers must use an email or SMS verification code.");
   const secret = base32Encode(randomBytes(20));
   const label = encodeURIComponent(user.email || user.uid);
   const issuer = encodeURIComponent("Taptap Foodtrip POS");
@@ -503,13 +506,13 @@ export async function finishEnrollment(db, user, method, code, idToken) {
   }
   if (!valid) return recordFailure(db, user, method, idToken);
 
-  const backupCodes = Array.from({ length: 8 }, backupCode);
+  const backupCodes = role === "customer" ? [] : Array.from({ length: 8 }, backupCode);
   const customToken = await issueSessionToken(db, user);
   await db.ref(`twoFactor/${user.uid}`).set({
     enabled: true,
     method,
     ...(method === "totp" ? { totpSecret: encrypt(secret) } : {}),
-    backupCodes: backupCodes.map((value) => hashCode(normalizeBackupCode(value))),
+    ...(backupCodes.length > 0 ? { backupCodes: backupCodes.map((value) => hashCode(normalizeBackupCode(value))) } : {}),
     failedAttempts: 0,
     locked: false,
     enabledAt: Date.now(),
@@ -520,18 +523,18 @@ export async function finishEnrollment(db, user, method, code, idToken) {
     await db.ref(`users/${user.uid}`).update({ phoneVerified: true, phoneVerifiedAt: Date.now() });
   }
   await audit(db, user.uid, "enabled", { method });
-  return {
-    customToken,
-    backupCodes
-  };
+  return backupCodes.length > 0 ? { customToken, backupCodes } : { customToken };
 }
 
 export async function verifyChallenge(db, user, input = {}, idToken) {
-  const config = await configurationFor(db, user.uid);
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
   if (!config.enabled) throw new HttpError(409, "Account security must be set up.");
   if (config.locked) throw new HttpError(423, "Account locked after three failed security attempts.");
+  if (!allowedTwoFactorMethods(role).includes(config.method)) throw new HttpError(409, "Choose email or SMS for customer account security.");
 
   if (input.backupCode) {
+    if (role === "customer") throw new HttpError(403, "Customers must use an email or SMS verification code.");
     const normalized = normalizeBackupCode(input.backupCode);
     let matched = false;
     const transaction = await transactionWithInitial(

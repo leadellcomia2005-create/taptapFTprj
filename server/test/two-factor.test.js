@@ -7,6 +7,8 @@ import {
   sendEmailCode,
   sendPhoneVerificationCode,
   sendSmsCode,
+  twoFactorStatus,
+  verifyChallenge,
   verifyPhoneVerificationCode,
   verifyTotp
 } from "../src/twoFactor.js";
@@ -66,10 +68,39 @@ test("requires Firebase's verified-email claim before POS access", () => {
 });
 
 test("allows email OTP for verified operational accounts without enabling passkeys or SMS", () => {
-  assert.deepEqual(allowedTwoFactorMethods("customer"), ["passkey", "totp", "sms", "email"]);
+  assert.deepEqual(allowedTwoFactorMethods("customer"), ["sms", "email"]);
   assert.deepEqual(allowedTwoFactorMethods("owner"), ["totp", "email"]);
   assert.deepEqual(allowedTwoFactorMethods("staff"), ["totp", "email"]);
   assert.deepEqual(allowedTwoFactorMethods("rider"), ["totp", "email"]);
+});
+
+test("requires legacy customer passkey accounts to choose email or SMS", async () => {
+  const db = new FakeRealtimeDatabase({
+    users: { customer1: { role: "customer", phone: "+639171234567", phoneVerified: true } },
+    twoFactor: { customer1: { enabled: true, method: "passkey", passkeys: { credential1: {} } } }
+  });
+  const status = await twoFactorStatus(
+    db,
+    { uid: "customer1", email: "customer@example.com", email_verified: true, role: "customer" },
+    true,
+    true,
+    "unused-token"
+  );
+  assert.equal(status.enabled, false);
+  assert.equal(status.method, null);
+  assert.equal(status.passkeyAvailable, false);
+  assert.deepEqual(status.allowedMethods, ["sms", "email"]);
+});
+
+test("rejects backup-code verification for customer accounts", async () => {
+  const db = new FakeRealtimeDatabase({
+    users: { customer1: { role: "customer" } },
+    twoFactor: { customer1: { enabled: true, method: "email", backupCodes: ["legacy-record"] } }
+  });
+  await assert.rejects(
+    () => verifyChallenge(db, { uid: "customer1", role: "customer" }, { backupCode: "ABCD-EFGH" }, "unused-token"),
+    (error) => error.status === 403 && /email or SMS/.test(error.message)
+  );
 });
 
 test("creates hashed customer email OTP records and throttles resends", async () => {

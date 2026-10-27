@@ -252,7 +252,8 @@ export const SERVICE_DISPLAY_NAMES = {
   openai: "Business insight",
   dialogflow: "Assistant answers",
   paymongo: "Online payment",
-  twilio: "SMS updates",
+  textbee: "SMS gateway",
+  sms: "SMS updates",
   emailOtp: "Email codes",
   twoFactor: "Account security",
   turnstile: "Bot protection"

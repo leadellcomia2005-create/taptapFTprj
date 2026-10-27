@@ -24,6 +24,10 @@ const environmentSchema = z.object({
   AI_INSIGHT_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
   AI_INSIGHT_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   ENABLE_PAYMONGO: z.enum(["true", "false"]).default("false"),
+  ENABLE_TEXTBEE: z.enum(["true", "false"]).default("false"),
+  TEXTBEE_API_KEY: z.string().trim().optional(),
+  TEXTBEE_DEVICE_ID: z.string().trim().optional(),
+  TEXTBEE_WEBHOOK_SECRET: z.string().trim().optional(),
   PAYMONGO_MODE: z.enum(["test", "live"]).default("test"),
   PAYMONGO_SECRET_KEY: z.string().trim().optional(),
   PAYMONGO_WEBHOOK_SECRET: z.string().trim().optional(),
@@ -36,6 +40,17 @@ const environmentSchema = z.object({
       path: ["TURNSTILE_BYPASS"],
       message: "Turnstile bypass cannot be enabled in production."
     });
+  }
+  if (environment.ENABLE_TEXTBEE === "true") {
+    for (const field of ["TEXTBEE_API_KEY", "TEXTBEE_WEBHOOK_SECRET"]) {
+      if (!environment[field]) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} is required when TextBee is enabled.`
+        });
+      }
+    }
   }
   if (environment.ENABLE_PAYMONGO !== "true") return;
   const expectedPrefix = environment.PAYMONGO_MODE === "live" ? "sk_live_" : "sk_test_";

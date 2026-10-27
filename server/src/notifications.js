@@ -20,6 +20,7 @@ const notificationActionViews = new Set([
   "owner-inventory",
   "owner-reports",
   "owner-reviews",
+  "owner-settings",
   "staff-pos",
   "staff-kitchen",
   "staff-orders",
@@ -39,8 +40,13 @@ export function notificationDisplayReference(recordId, prefix = "TAP") {
   const value = cleanText(recordId, 128);
   if (!value) return "";
   if (/^TAP-[A-Z0-9-]{3,}$/i.test(value)) return value.toUpperCase();
-  const suffix = value.replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
-  return suffix ? `${cleanText(prefix, 12).toUpperCase() || "TAP"}-${suffix}` : "";
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const suffix = String((hash >>> 0) % 100_000_000).padStart(8, "0");
+  return `${cleanText(prefix, 12).toUpperCase() || "TAP"}-${suffix}`;
 }
 
 export function notificationRecord(targetUserId, input = {}) {

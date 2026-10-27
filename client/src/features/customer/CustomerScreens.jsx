@@ -347,12 +347,6 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
       setBusy(false);
     }
   };
-  const verifyPhone = () => {
-    if (!validPhone) return notify("Enter a valid Philippine mobile number before verification.");
-    if (!smsProviderEnabled) return notify("Phone OTP verification is not connected yet.");
-    notify("Phone OTP verification will open here once SMS sending is active.");
-  };
-
   return (
     <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="modal-dialog modal-dialog-centered">
@@ -386,9 +380,8 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
                   <span className={`stock-badge ${verifiedPhone ? "healthy" : "low"}`}>{verifiedPhone ? "Verified phone" : "Phone not verified"}</span>
                   <div className="checkout-sms-actions">
                     <label className="checkout-sms-checkbox"><input type="checkbox" disabled={!smsReady} checked={Boolean(smsReady && smsOptIn)} onChange={(event) => setSmsOptIn(event.target.checked)} /> Send me SMS order updates</label>
-                    {!verifiedPhone && <button className="btn btn-sm btn-outline-dark" type="button" disabled={!validPhone} onClick={verifyPhone}>Verify phone</button>}
                   </div>
-                  <small>{smsReady ? "SMS order updates can be sent to this verified number." : "Verify this phone before enabling SMS updates."}</small>
+                  <small>{smsReady ? "Essential order SMS can be sent to this verified number." : "Verify this number in Profile > Updates before enabling essential order SMS."}</small>
                 </div>
               )}
             </section>
@@ -620,7 +613,14 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
 export function CustomerProfile({ user, profile, notify, smsProviderEnabled = false }) {
   const [form, setForm] = useState(profile || {});
   const [activeSection, setActiveSection] = useState("personal");
+  const [phoneVerification, setPhoneVerification] = useState({ state: "idle", code: "", expiresAt: 0, resendAt: 0, destination: "" });
+  const [phoneClock, setPhoneClock] = useState(Date.now());
   useEffect(() => setForm(profile || {}), [profile]);
+  useEffect(() => {
+    if (!phoneVerification.expiresAt) return undefined;
+    const timer = window.setInterval(() => setPhoneClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [phoneVerification.expiresAt]);
   const normalizedPhone = normalizePhilippinePhone(form.phone || "");
   const validPhone = !form.phone || isValidPhilippineMobile(normalizedPhone);
   const phoneChanged = normalizePhilippinePhone(profile?.phone || "") !== normalizedPhone;
@@ -669,7 +669,9 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
     ["notifications", "Updates"],
     ["legal", "Legal"]
   ];
-  const requestPhoneVerification = () => {
+  const phoneExpiresIn = phoneVerification.expiresAt ? Math.max(0, Math.ceil((phoneVerification.expiresAt - phoneClock) / 1000)) : 0;
+  const phoneResendIn = phoneVerification.resendAt ? Math.max(0, Math.ceil((phoneVerification.resendAt - phoneClock) / 1000)) : 0;
+  const requestPhoneVerification = async () => {
     if (!normalizedPhone || !validPhone) {
       notify("Enter a valid Philippine mobile number before phone verification.");
       return;
@@ -678,7 +680,40 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
       notify("Phone OTP verification is prepared. SMS sending is not active yet.");
       return;
     }
-    notify("Phone OTP verification will open here once SMS sending is active.");
+    setPhoneVerification((current) => ({ ...current, state: "sending" }));
+    try {
+      const result = await api.sendPhoneVerification(normalizedPhone);
+      setPhoneClock(Date.now());
+      setPhoneVerification({
+        state: "sent",
+        code: "",
+        expiresAt: Number(result.expiresAt || 0),
+        resendAt: Number(result.resendAt || 0),
+        destination: String(result.phoneMasked || "your phone")
+      });
+      notify(`Verification code sent to ${result.phoneMasked}.`);
+    } catch (error) {
+      setPhoneVerification((current) => ({ ...current, state: error?.status === 429 ? "rate-limited" : "failed" }));
+      notify(error.message || "The verification code could not be sent. Try again later.");
+    }
+  };
+  const confirmPhoneVerification = async () => {
+    if (!/^\d{6}$/.test(phoneVerification.code)) return;
+    setPhoneVerification((current) => ({ ...current, state: "verifying" }));
+    try {
+      const result = await api.verifyPhoneVerification(phoneVerification.code);
+      setForm((current) => ({
+        ...current,
+        phone: normalizedPhone,
+        phoneVerified: true,
+        phoneVerifiedAt: result.verifiedAt
+      }));
+      setPhoneVerification({ state: "verified", code: "", expiresAt: 0, resendAt: 0, destination: result.phoneMasked });
+      notify("Mobile number verified. You can now enable essential order SMS.");
+    } catch (error) {
+      setPhoneVerification((current) => ({ ...current, state: "sent", code: "" }));
+      notify(error.message || "The verification code is incorrect or expired.");
+    }
   };
   const save = async (event) => {
     event.preventDefault();
@@ -727,7 +762,7 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
             <div className="row g-3">
               <label className="form-label col-md-6">Full name<input className="form-control" autoComplete="name" required value={form.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
               <label className="form-label col-md-6">Email<input className="form-control" value={user.email} disabled /></label>
-              <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for SMS updates." : "Phone OTP verification is prepared but not active yet."}</small></label>
+              <label className="form-label col-md-6">Mobile number<input className={`form-control ${form.phone && !validPhone ? "is-invalid" : ""}`} type="tel" inputMode="tel" autoComplete="tel" value={form.phone || ""} onChange={(event) => { setForm((current) => ({ ...current, phone: event.target.value })); setPhoneVerification({ state: "idle", code: "", expiresAt: 0, resendAt: 0, destination: "" }); }} placeholder="+63 917 123 4567" /><small className={verifiedPhone ? "text-success" : "text-secondary"}>{verifiedPhone ? "Phone verified for essential order SMS." : "Verify this number in Updates before enabling SMS."}</small></label>
               <label className="form-label col-md-6">City<input className="form-control" value={form.city || ""} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>
             </div>
           </section>
@@ -776,8 +811,19 @@ export function CustomerProfile({ user, profile, notify, smsProviderEnabled = fa
         {activeSection === "notifications" && (
           <section className="profile-tab-panel" role="tabpanel">
             <div className="profile-panel-heading"><p className="eyebrow text-danger">Order updates</p><h3>Notification preferences</h3><span>Choose how TapTap can update you about orders and offers.</span></div>
-            <div className="profile-preferences"><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> Order status updates</label><label><input type="checkbox" checked={form.notificationPreferences?.promotions !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, promotions: event.target.checked } }))} /> Promotions and offers</label><label><input type="checkbox" checked={Boolean(form.smsNotificationsRequested || form.smsNotifications)} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Send me SMS order updates</label><small>{smsProviderEnabled ? "SMS order updates require a verified phone number." : "SMS sending is not active yet, so this saves the preference only."}</small></div>
-            <button className="btn btn-outline-danger w-100" disabled={!validPhone || !normalizedPhone} onClick={requestPhoneVerification} type="button">{verifiedPhone ? "Phone already verified" : "Verify phone when SMS is ready"}</button>
+            <div className="profile-preferences"><label><input type="checkbox" checked={form.notificationPreferences?.orderUpdates !== false} onChange={(event) => setForm((current) => ({ ...current, notificationPreferences: { ...current.notificationPreferences, orderUpdates: event.target.checked } }))} /> In-app and push order updates</label><label><input type="checkbox" checked disabled readOnly /> Email confirmations and receipts</label><label><input type="checkbox" disabled={!smsProviderEnabled || !verifiedPhone} checked={Boolean(verifiedPhone && (form.smsNotificationsRequested || form.smsNotifications))} onChange={(event) => setForm((current) => ({ ...current, smsNotificationsRequested: event.target.checked, smsNotifications: event.target.checked && verifiedPhone }))} /> Essential order SMS only</label><small>No promotional SMS is sent. Essential SMS is limited to out-for-delivery and cancellation updates.</small></div>
+            {!verifiedPhone && (
+              <div className="phone-verification-panel">
+                <button className="btn btn-outline-danger w-100" disabled={!smsProviderEnabled || !validPhone || !normalizedPhone || phoneVerification.state === "sending" || phoneResendIn > 0} onClick={requestPhoneVerification} type="button">
+                  {phoneVerification.state === "sending" ? "Sending verification code..." : phoneResendIn > 0 ? `Resend available in ${phoneResendIn}s` : phoneVerification.state === "sent" ? "Resend verification code" : "Verify mobile number"}
+                </button>
+                {phoneVerification.state === "sent" && phoneExpiresIn > 0 && <><label className="form-label">6-digit SMS code<input className="form-control" inputMode="numeric" autoComplete="one-time-code" maxLength="6" value={phoneVerification.code} onChange={(event) => setPhoneVerification((current) => ({ ...current, code: event.target.value.replace(/\D/g, "").slice(0, 6) }))} /></label><small>Sent to {phoneVerification.destination}. Expires in {Math.floor(phoneExpiresIn / 60)}:{String(phoneExpiresIn % 60).padStart(2, "0")}.</small><button className="btn btn-danger w-100" disabled={phoneVerification.code.length !== 6 || phoneVerification.state === "verifying"} onClick={confirmPhoneVerification} type="button">Confirm mobile number</button></>}
+                {phoneVerification.state === "sent" && phoneVerification.expiresAt > 0 && phoneExpiresIn === 0 && <small className="text-danger">This code expired. Request a new code.</small>}
+                {phoneVerification.state === "rate-limited" && <small className="text-danger">Too many requests. Wait before requesting another code.</small>}
+                {phoneVerification.state === "failed" && <small className="text-danger">SMS is temporarily unavailable. Your email and in-app notifications still work.</small>}
+                {!smsProviderEnabled && <small>SMS verification is disabled until the TextBee gateway is configured.</small>}
+              </div>
+            )}
           </section>
         )}
 

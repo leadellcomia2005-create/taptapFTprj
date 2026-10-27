@@ -20,11 +20,12 @@ import {
   generateCachedInsights,
   getCachedInventoryInsights,
   buildAssistantOrderContext,
-  retrievePayMongoCheckout,
-  sendTwilioSms
+  retrievePayMongoCheckout
 } from "../services.js";
 import { dispatchOrderPush } from "../pushNotifications.js";
 import { getSupportConversation } from "../application/support.js";
+import { applyTextBeeWebhook, dispatchOrderSms } from "../application/smsNotifications.js";
+import { textBeeConfiguration, verifyTextBeeWebhookSignature } from "../integrations/textbee.js";
 
 export function createIntegrationsRouter({ config, firebase, authentication, logger, metrics }) {
   const router = Router();
@@ -48,6 +49,18 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
       res.status(429).json({ error: "The AI analysis limit was reached. Wait a few minutes, then retry.", code: "AI_RATE_LIMITED" });
     }
   });
+
+  router.post("/integrations/textbee/webhook", asyncRoute(async (req, res) => {
+    const configuration = textBeeConfiguration();
+    if (!configuration.webhookSecret) {
+      throw new HttpError(503, "SMS delivery tracking is not configured.", { code: "SMS_WEBHOOK_DISABLED" });
+    }
+    if (!verifyTextBeeWebhookSignature(req.rawBody, req.get("X-Signature"), configuration.webhookSecret)) {
+      throw new HttpError(401, "Invalid SMS webhook signature.", { code: "INVALID_SMS_SIGNATURE" });
+    }
+    const result = await applyTextBeeWebhook({ db: firebase.db(), event: req.body, logger });
+    res.json({ received: true, ...result });
+  }));
 
   const openPaymentCheckout = async (req, res, orderId) => {
     const order = (await firebase.db().ref(`orders/${orderId}`).once("value")).val();
@@ -271,8 +284,14 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
     if (!order.phoneVerified || !order.smsNotifications) {
       throw new HttpError(409, "SMS updates require a verified phone number and customer consent.");
     }
-    const result = await sendTwilioSms({ to: order.phone, orderId: req.body.orderId, status: order.status });
-    res.json({ sent: Boolean(result), sid: result?.sid || null });
+    const result = await dispatchOrderSms({
+      db: firebase.db(),
+      orderId: req.body.orderId,
+      order,
+      changes: { status: order.status },
+      logger
+    });
+    res.json(result);
   }));
 
   return router;

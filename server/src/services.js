@@ -2,7 +2,6 @@ import dialogflow from "@google-cloud/dialogflow";
 import { createHash } from "node:crypto";
 import nodemailer from "nodemailer";
 import OpenAI from "openai";
-import twilio from "twilio";
 import { z } from "zod";
 import {
   createPayMongoCheckoutSession,
@@ -10,11 +9,17 @@ import {
   retrievePayMongoCheckoutSession
 } from "./integrations/paymongo.js";
 import { resendConfiguration, sendResendEmail } from "./integrations/resend.js";
+import {
+  sendTextBeeSms,
+  textBeeConfiguration
+} from "./integrations/textbee.js";
+import { notificationDisplayReference } from "./notifications.js";
 
 const has = (name) => Boolean(process.env[name]);
 const enabled = (name) => process.env[name] === "true";
 
 export function serviceStatus() {
+  const textbee = textBeeConfiguration().enabled;
   return {
     firebase: has("FIREBASE_DATABASE_URL"),
     socket: true,
@@ -23,7 +28,8 @@ export function serviceStatus() {
     openai: enabled("ENABLE_OPENAI") && has("OPENAI_API_KEY"),
     dialogflow: has("DIALOGFLOW_PROJECT_ID"),
     paymongo: payMongoConfiguration().enabled,
-    twilio: enabled("ENABLE_TWILIO") && has("TWILIO_ACCOUNT_SID") && has("TWILIO_AUTH_TOKEN") && has("TWILIO_FROM_NUMBER"),
+    sms: textbee,
+    textbee,
     emailOtp: resendConfiguration().enabled || (has("GMAIL_USER") && has("GMAIL_APP_PASSWORD")),
     turnstile: has("TURNSTILE_SECRET_KEY")
   };
@@ -489,26 +495,31 @@ export async function retrievePayMongoCheckout(sessionId) {
   return retrievePayMongoCheckoutSession(sessionId);
 }
 
-export async function sendTwilioSms({ to, orderId, status }) {
-  if (!serviceStatus().twilio || !to) return null;
-  const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  return client.messages.create({
-    from: process.env.TWILIO_FROM_NUMBER,
+export async function sendTwoFactorSms(to, code) {
+  return sendTextBeeSms({
     to,
-    body: `Taptap Foodtrip: Order ${orderId} is now ${String(status).replaceAll("-", " ")}.`
+    message: `Taptap Foodtrip login code: ${code}. It expires in 5 minutes. Do not share this code.`,
+    requireHealthyDevice: true
   });
 }
 
-export async function sendTwoFactorSms(to, code) {
-  if (!serviceStatus().twilio || !to) {
-    throw new Error("SMS verification is not ready yet.");
-  }
-  const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  return client.messages.create({
-    from: process.env.TWILIO_FROM_NUMBER,
+export async function sendPhoneVerificationSms(to, code) {
+  return sendTextBeeSms({
     to,
-    body: `Taptap Foodtrip verification code: ${code}. It expires in 10 minutes.`
+    message: `Taptap Foodtrip phone verification code: ${code}. It expires in 5 minutes. Do not share this code.`,
+    requireHealthyDevice: true
   });
+}
+
+export async function sendOrderStatusSms({ to, orderId, status }) {
+  const reference = notificationDisplayReference(orderId);
+  const messages = {
+    "out-for-delivery": `Taptap Foodtrip: ${reference} is out for delivery. Please keep your phone available for the rider.`,
+    cancelled: `Taptap Foodtrip: ${reference} was cancelled. Check your email or account for details.`
+  };
+  const message = messages[status];
+  if (!message) return null;
+  return sendTextBeeSms({ to, message });
 }
 
 let gmailTransport;
@@ -573,8 +584,8 @@ export async function sendTwoFactorEmail(to, code) {
   return sendTransactionalEmail({
     to,
     subject: "Your Taptap Foodtrip verification code",
-    text: `Your Taptap Foodtrip verification code is ${code}. It expires in 10 minutes. If you did not request this code, change your password.`,
-    html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 10 minutes. If you did not request this code, change your password.</p>`
+    text: `Your Taptap Foodtrip verification code is ${code}. It expires in 5 minutes. If you did not request this code, change your password.`,
+    html: `<p>Your Taptap Foodtrip verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>It expires in 5 minutes. If you did not request this code, change your password.</p>`
   });
 }
 
@@ -598,6 +609,7 @@ export async function sendOrderReceiptEmail(order = {}) {
   }
 
   const orderId = order.id || order.orderId || "order";
+  const reference = notificationDisplayReference(orderId);
   const items = Array.isArray(order.items) ? order.items : [];
   const itemLines = items.map((item) => {
     const qty = Number(item.qty || 0);
@@ -615,7 +627,7 @@ export async function sendOrderReceiptEmail(order = {}) {
   const text = [
     "Taptap Foodtrip digital receipt",
     "",
-    `Order: ${orderId}`,
+    `Order: ${reference}`,
     `Date: ${orderDate(order.createdAt)}`,
     `Customer: ${order.customerName || "Customer"}`,
     `Payment: ${paymentMethod} - ${paymentStatus}`,
@@ -635,7 +647,7 @@ export async function sendOrderReceiptEmail(order = {}) {
     <div style="font-family:Arial,sans-serif;color:#1f1f1f;line-height:1.5;max-width:640px;margin:auto">
       <h1 style="color:#c81d25;margin-bottom:4px">Taptap Foodtrip</h1>
       <p style="margin-top:0;color:#555">Digital receipt</p>
-      <p><strong>Order:</strong> ${escapeHtml(orderId)}<br>
+      <p><strong>Order:</strong> ${escapeHtml(reference)}<br>
       <strong>Date:</strong> ${escapeHtml(orderDate(order.createdAt))}<br>
       <strong>Customer:</strong> ${escapeHtml(order.customerName || "Customer")}<br>
       <strong>Payment:</strong> ${escapeHtml(paymentMethod)} - ${escapeHtml(paymentStatus)}<br>
@@ -653,9 +665,24 @@ export async function sendOrderReceiptEmail(order = {}) {
 
   await sendTransactionalEmail({
     to: order.customerEmail,
-    subject: `Your Taptap Foodtrip receipt for ${orderId}`,
+    subject: `Your Taptap Foodtrip receipt for ${reference}`,
     text,
     html
+  });
+  return { sent: true };
+}
+
+export async function sendOrderCancellationEmail(order = {}) {
+  if (!serviceStatus().emailOtp || !order.customerEmail || order.source === "walk-in-pos") {
+    return { sent: false };
+  }
+  const reference = notificationDisplayReference(order.id || order.orderId || "order");
+  const reason = String(order.cancelReason || "The order was cancelled.").trim().slice(0, 240);
+  await sendTransactionalEmail({
+    to: order.customerEmail,
+    subject: `Taptap Foodtrip order ${reference} was cancelled`,
+    text: `Your Taptap Foodtrip order ${reference} was cancelled. Reason: ${reason}`,
+    html: `<div style="font-family:Arial,sans-serif;color:#1f1f1f;line-height:1.5;max-width:640px;margin:auto"><h1 style="color:#c81d25">Order cancelled</h1><p>Your Taptap Foodtrip order <strong>${escapeHtml(reference)}</strong> was cancelled.</p><p><strong>Reason:</strong> ${escapeHtml(reason)}</p><p>Open your account for the latest order details.</p></div>`
   });
   return { sent: true };
 }

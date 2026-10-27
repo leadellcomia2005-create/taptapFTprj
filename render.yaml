@@ -33,8 +33,14 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-20b
-      - key: ENABLE_TWILIO
+      - key: ENABLE_TEXTBEE
         value: "false"
+      - key: TEXTBEE_API_KEY
+        sync: false
+      - key: TEXTBEE_DEVICE_ID
+        sync: false
+      - key: TEXTBEE_WEBHOOK_SECRET
+        sync: false
       - key: ENABLE_RESEND
         value: "false"
       - key: RESEND_API_KEY

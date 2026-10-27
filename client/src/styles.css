@@ -554,6 +554,11 @@ button { font: inherit; }
 .otp-inputs { display: grid; grid-template-columns: repeat(6,1fr); gap: 8px; }
 .otp-inputs input { width: 100%; min-width: 0; height: 56px; text-align: center; border: 1px solid var(--line); border-radius: 10px; font-size: 24px; font-weight: 800; }
 .otp-inputs input:focus { outline: 2px solid rgba(217,54,36,.22); border-color: var(--red); }
+.otp-delivery-panel { display: grid; gap: 8px; margin-bottom: 16px; }
+.otp-delivery-panel small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.otp-delivery-panel small.error { color: #a72d22; }
+.phone-verification-panel { display: grid; gap: 10px; margin-top: 14px; }
+.phone-verification-panel small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .totp-setup { margin: 16px 0; text-align: center; }
 .totp-setup img { width: 220px; max-width: 100%; border: 8px solid white; box-shadow: 0 8px 30px rgba(0,0,0,.1); }
 .totp-setup code { overflow-wrap: anywhere; }
@@ -3376,6 +3381,44 @@ button:not(:disabled),
 .rider-gps-error { display: flex; align-items: center; gap: 10px; margin: -6px 0 16px; padding: 12px 14px; color: var(--red-dark); background: #fff0ed; border: 1px solid rgba(217,54,36,.24); border-radius: 9px; }
 .spin { animation: dashboard-spin .9s linear infinite; }
 @keyframes dashboard-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1024px) {
+  .order-table-card { overflow: visible; }
+  .order-table { overflow: visible; }
+  .order-table-head { display: none; }
+  .order-table-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 16px;
+  }
+  .order-table-row > div {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 96px minmax(0,1fr);
+    align-items: start;
+    gap: 12px;
+  }
+  .order-table-row > div::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .order-line-item small,
+  .order-line-item strong { grid-column: 2; }
+  .order-line-item::before { grid-row: 1 / span 2; }
+  .order-line-item strong,
+  .order-delivery-cell {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .order-row-actions { grid-column: 2; }
+}
 @media (max-width: 760px) {
   .complaint-card { grid-template-columns: minmax(0,1fr); padding: 14px; }
   .complaint-card > *,

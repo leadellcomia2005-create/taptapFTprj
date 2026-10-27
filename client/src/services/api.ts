@@ -289,7 +289,7 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
 }
 
 export const api = {
-  status: () => publicRequest("/status", { timeoutMs: 45_000 }),
+  status: () => publicRequest("/status", { timeoutMs: 12_000 }),
   listHistory: <T extends ApiResult = ApiResult>(collection: HistoryCollection, options: { limit?: number; before?: string } = {}) => {
     const search = new URLSearchParams();
     if (options.limit) search.set("limit", String(options.limit));
@@ -320,7 +320,7 @@ export const api = {
     }),
   twoFactorStatus: (expectedRole?: UserRole) => request<TwoFactorStatusResponse>(
     expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status",
-    { timeoutMs: 25_000 }
+    { timeoutMs: 35_000 }
   ),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),
@@ -333,6 +333,16 @@ export const api = {
     request("/2fa/email/send", {
       method: "POST",
       body: JSON.stringify({ purpose }),
+    }),
+  sendPhoneVerification: (phone: string) =>
+    request("/profile/phone/send", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+  verifyPhoneVerification: (code: string) =>
+    request("/profile/phone/verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
     }),
   finishTwoFactorSetup: (method: TwoFactorMethod, code: string) =>
     request("/2fa/setup/verify", {

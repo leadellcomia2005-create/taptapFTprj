@@ -14,20 +14,24 @@ import {
   verifyTurnstileToken
 } from "../registration.js";
 import { HttpError, requireVerifiedEmail } from "../security.js";
-import { sendCustomerVerificationEmail, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
+import { sendCustomerVerificationEmail, sendPhoneVerificationSms, sendTwoFactorEmail, sendTwoFactorSms, serviceStatus } from "../services.js";
 import { sendFirebaseVerificationEmail } from "../integrations/firebaseVerificationEmail.js";
 import {
   beginTotpSetup,
   finishEnrollment,
+  sendPhoneVerificationCode,
   sendEmailCode,
   sendSmsCode,
   twoFactorStatus,
+  verifyPhoneVerificationCode,
   verifyChallenge
 } from "../twoFactor.js";
 import {
   registrationSchema,
   registrationEmailPrecheckSchema,
   registrationVerificationStatusSchema,
+  phoneVerificationSendSchema,
+  phoneVerificationVerifySchema,
   twoFactorChallengeSchema,
   twoFactorSendSchema,
   twoFactorVerifySchema
@@ -41,7 +45,14 @@ export function createAuthRouter({ config, firebase, authentication }) {
   const emailPrecheckLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8" });
   const verificationResendLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 8, standardHeaders: "draft-8" });
   const verificationStatusLimiter = rateLimit({ windowMs: 5 * 60_000, limit: 120, standardHeaders: "draft-8" });
-  const { authenticateBootstrap, requireFirebaseAdmin } = authentication;
+  const smsOtpLimiter = rateLimit({
+    windowMs: 60 * 60_000,
+    limit: 10,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: { error: "Too many SMS codes requested from this connection. Try again in one hour.", code: "SMS_IP_RATE_LIMITED" }
+  });
+  const { authenticate, authenticateBootstrap, requireFirebaseAdmin } = authentication;
   const registrationEmailSender = serviceStatus().emailOtp
     ? sendCustomerVerificationEmail
     : config.firebase?.webApiKey
@@ -119,19 +130,27 @@ export function createAuthRouter({ config, firebase, authentication }) {
       throw new HttpError(403, message, { code: "ROLE_LOGIN_MISMATCH" });
     }
     const status = serviceStatus();
-    res.json(await twoFactorStatus(firebase.db(), req.user, status.twilio, status.emailOtp, req.authToken));
+    res.json(await twoFactorStatus(firebase.db(), req.user, status.sms, status.emailOtp, req.authToken));
   }));
 
   router.post("/2fa/setup/totp", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {
     res.json(await beginTotpSetup(firebase.db(), req.user));
   }));
 
-  router.post("/2fa/sms/send", authenticateBootstrap, requireVerifiedEmail, validateBody(twoFactorSendSchema), asyncRoute(async (req, res) => {
+  router.post("/2fa/sms/send", smsOtpLimiter, authenticateBootstrap, requireVerifiedEmail, validateBody(twoFactorSendSchema), asyncRoute(async (req, res) => {
     res.json(await sendSmsCode(firebase.db(), req.user, sendTwoFactorSms, req.body.purpose === "setup" ? "setup" : "challenge"));
   }));
 
   router.post("/2fa/email/send", authenticateBootstrap, requireVerifiedEmail, validateBody(twoFactorSendSchema), asyncRoute(async (req, res) => {
     res.json(await sendEmailCode(firebase.db(), req.user, sendTwoFactorEmail, req.body.purpose === "setup" ? "setup" : "challenge"));
+  }));
+
+  router.post("/profile/phone/send", smsOtpLimiter, authenticate, requireVerifiedEmail, validateBody(phoneVerificationSendSchema), asyncRoute(async (req, res) => {
+    res.json(await sendPhoneVerificationCode(firebase.db(), req.user, req.body.phone, sendPhoneVerificationSms));
+  }));
+
+  router.post("/profile/phone/verify", authenticate, requireVerifiedEmail, validateBody(phoneVerificationVerifySchema), asyncRoute(async (req, res) => {
+    res.json(await verifyPhoneVerificationCode(firebase.db(), req.user, req.body.code));
   }));
 
   router.post("/2fa/setup/verify", authenticateBootstrap, requireVerifiedEmail, validateBody(twoFactorVerifySchema), asyncRoute(async (req, res) => {

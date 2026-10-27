@@ -4,7 +4,7 @@ import { serviceStatus } from "../src/services.js";
 
 test("service status reports all credentialed integrations", () => {
   const status = serviceStatus();
-  assert.deepEqual(Object.keys(status).sort(), ["dialogflow", "emailOtp", "firebase", "groq", "openai", "paymongo", "socket", "turnstile", "twilio", "twoFactor"]);
+  assert.deepEqual(Object.keys(status).sort(), ["dialogflow", "emailOtp", "firebase", "groq", "openai", "paymongo", "sms", "socket", "textbee", "turnstile", "twoFactor"]);
   assert.equal(status.socket, true);
 });
 
@@ -13,15 +13,15 @@ test("deferred providers require explicit opt-in even when credentials exist", (
     "ENABLE_OPENAI",
     "ENABLE_GROQ",
     "ENABLE_PAYMONGO",
-    "ENABLE_TWILIO",
+    "ENABLE_TEXTBEE",
     "OPENAI_API_KEY",
     "GROQ_API_KEY",
     "PAYMONGO_SECRET_KEY",
     "PAYMONGO_WEBHOOK_SECRET",
     "PAYMONGO_MODE",
-    "TWILIO_ACCOUNT_SID",
-    "TWILIO_AUTH_TOKEN",
-    "TWILIO_FROM_NUMBER",
+    "TEXTBEE_API_KEY",
+    "TEXTBEE_DEVICE_ID",
+    "TEXTBEE_WEBHOOK_SECRET",
     "ENABLE_RESEND",
     "RESEND_API_KEY",
     "RESEND_FROM_EMAIL"
@@ -33,29 +33,29 @@ test("deferred providers require explicit opt-in even when credentials exist", (
     process.env.PAYMONGO_SECRET_KEY = "sk_test_example";
     process.env.PAYMONGO_WEBHOOK_SECRET = "whsk_example";
     process.env.PAYMONGO_MODE = "test";
-    process.env.TWILIO_ACCOUNT_SID = "test-sid";
-    process.env.TWILIO_AUTH_TOKEN = "test-token";
-    process.env.TWILIO_FROM_NUMBER = "+630000000000";
+    process.env.TEXTBEE_API_KEY = "test-api-key";
+    process.env.TEXTBEE_DEVICE_ID = "device-1";
+    process.env.TEXTBEE_WEBHOOK_SECRET = "test-webhook-secret";
     process.env.RESEND_API_KEY = "re_test_key";
     process.env.RESEND_FROM_EMAIL = "TapTap Foodtrip <security@mail.example.com>";
     delete process.env.ENABLE_OPENAI;
     delete process.env.ENABLE_GROQ;
     delete process.env.ENABLE_PAYMONGO;
-    delete process.env.ENABLE_TWILIO;
+    delete process.env.ENABLE_TEXTBEE;
     delete process.env.ENABLE_RESEND;
     assert.deepEqual(
-      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
-      { emailOtp: false, groq: false, openai: false, paymongo: false, twilio: false }
+      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, sms: serviceStatus().sms, textbee: serviceStatus().textbee },
+      { emailOtp: false, groq: false, openai: false, paymongo: false, sms: false, textbee: false }
     );
 
     process.env.ENABLE_OPENAI = "true";
     process.env.ENABLE_GROQ = "true";
     process.env.ENABLE_PAYMONGO = "true";
-    process.env.ENABLE_TWILIO = "true";
+    process.env.ENABLE_TEXTBEE = "true";
     process.env.ENABLE_RESEND = "true";
     assert.deepEqual(
-      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, twilio: serviceStatus().twilio },
-      { emailOtp: true, groq: true, openai: true, paymongo: true, twilio: true }
+      { emailOtp: serviceStatus().emailOtp, groq: serviceStatus().groq, openai: serviceStatus().openai, paymongo: serviceStatus().paymongo, sms: serviceStatus().sms, textbee: serviceStatus().textbee },
+      { emailOtp: true, groq: true, openai: true, paymongo: true, sms: true, textbee: true }
     );
   } finally {
     for (const [name, value] of Object.entries(previous)) {

@@ -839,7 +839,7 @@ export default function App() {
   const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
   const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, paymongoMode: "test", twilio: false });
+  const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, paymongoMode: "test", sms: false, textbee: false });
   const previousOrderCount = useRef(0);
   const paymentReturnHandledRef = useRef(false);
   const payingOrderRef = useRef("");
@@ -1186,7 +1186,7 @@ export default function App() {
       )}
       {user.role === "customer" && view === "profile" && (
         <Suspense fallback={<SectionLoader label="Loading profile..." />}>
-          <CustomerProfile user={currentUser} profile={profile} notify={setNotice} smsProviderEnabled={serviceStatus.twilio} />
+          <CustomerProfile user={currentUser} profile={profile} notify={setNotice} smsProviderEnabled={serviceStatus.sms} />
         </Suspense>
       )}
       {user.role !== "customer" && (
@@ -1198,7 +1198,7 @@ export default function App() {
       )}
       {user.role === "customer" && checkoutOpen && (
         <Suspense fallback={<SectionLoader label="Opening checkout..." />}>
-          <Checkout cart={cart} user={currentUser} profile={profile} online={online} paymongoEnabled={serviceStatus.paymongo} paymongoMode={serviceStatus.paymongoMode} smsProviderEnabled={serviceStatus.twilio} onClose={closeCheckout} notify={setNotice} onComplete={completeCheckout} />
+          <Checkout cart={cart} user={currentUser} profile={profile} online={online} paymongoEnabled={serviceStatus.paymongo} paymongoMode={serviceStatus.paymongoMode} smsProviderEnabled={serviceStatus.sms} onClose={closeCheckout} notify={setNotice} onComplete={completeCheckout} />
         </Suspense>
       )}
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}

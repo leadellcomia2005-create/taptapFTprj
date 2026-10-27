@@ -28,7 +28,7 @@ export function createApp({ config, firebase, authentication, realtime, logger, 
   app.use(express.json({
     limit: "1mb",
     verify(req, _res, buffer) {
-      if (req.originalUrl.split("?")[0].endsWith("/payments/paymongo/webhook")) {
+      if (/\/(?:payments\/paymongo|integrations\/textbee)\/webhook$/.test(req.originalUrl.split("?")[0])) {
         req.rawBody = Buffer.from(buffer);
       }
     }

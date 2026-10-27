@@ -2,7 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { notificationRecord } from "../src/notifications.js";
 import { hasVerifiedEmail } from "../src/security.js";
-import { allowedTwoFactorMethods, sendEmailCode, verifyTotp } from "../src/twoFactor.js";
+import {
+  allowedTwoFactorMethods,
+  sendEmailCode,
+  sendPhoneVerificationCode,
+  sendSmsCode,
+  verifyPhoneVerificationCode,
+  verifyTotp
+} from "../src/twoFactor.js";
+import { FakeRealtimeDatabase } from "./helpers/fakeRealtimeDb.js";
 
 function fakeDatabase(initial) {
   const state = structuredClone(initial);
@@ -83,7 +91,7 @@ test("creates hashed customer email OTP records and throttles resends", async ()
   assert.match(deliveredCode, /^\d{6}$/);
   assert.equal(result.emailMasked, "cu******@example.com");
   assert.equal(pending.purpose, "setup");
-  assert.equal(pending.expiresAt, now + 10 * 60 * 1000);
+  assert.equal(pending.expiresAt, now + 5 * 60 * 1000);
   assert.equal("code" in pending, false);
   assert.notEqual(pending.hash, deliveredCode);
 
@@ -97,6 +105,98 @@ test("creates hashed customer email OTP records and throttles resends", async ()
     ),
     (error) => error.status === 429
   );
+});
+
+test("creates hashed five-minute SMS OTP records only for customers", async () => {
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  const db = new FakeRealtimeDatabase({
+    users: { customer1: { role: "customer", phone: "09171234567", phoneVerified: true } },
+    twoFactor: { customer1: {} }
+  });
+  const now = 1_750_000_000_000;
+  let delivered;
+  const result = await sendSmsCode(
+    db,
+    { uid: "customer1", role: "customer" },
+    async (phone, code) => { delivered = { phone, code }; },
+    "setup",
+    now
+  );
+  const pending = db.read("twoFactor/customer1/pendingSms");
+  assert.equal(delivered.phone, "09171234567");
+  assert.match(delivered.code, /^\d{6}$/);
+  assert.equal(pending.expiresAt, now + 5 * 60 * 1000);
+  assert.equal(result.resendAt, now + 60_000);
+  assert.equal("code" in pending, false);
+  assert.notEqual(pending.hash, delivered.code);
+
+  await assert.rejects(
+    () => sendSmsCode(db, { uid: "customer1", role: "customer" }, async () => {}, "setup", now + 30_000),
+    (error) => error.status === 429
+  );
+});
+
+test("rejects SMS OTP for owner, staff, and rider roles", async () => {
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString("base64");
+  for (const role of ["owner", "staff", "rider"]) {
+    const db = new FakeRealtimeDatabase({ users: { account: { role, phone: "09171234567" } }, twoFactor: { account: {} } });
+    await assert.rejects(
+      () => sendSmsCode(db, { uid: "account", role }, async () => {}, "setup", Date.now()),
+      (error) => error.status === 403
+    );
+  }
+});
+
+test("removes a pending SMS OTP when the provider is unavailable", async () => {
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
+  const db = new FakeRealtimeDatabase({
+    users: { customer1: { role: "customer", phone: "09171234567", phoneVerified: true } },
+    twoFactor: { customer1: {} }
+  });
+  await assert.rejects(
+    () => sendSmsCode(db, { uid: "customer1", role: "customer" }, async () => { throw new Error("offline"); }, "setup", Date.now()),
+    /offline/
+  );
+  assert.equal(db.read("twoFactor/customer1/pendingSms"), undefined);
+});
+
+test("verifies a customer phone before enabling essential order SMS", async () => {
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = Buffer.alloc(32, 10).toString("base64");
+  const db = new FakeRealtimeDatabase({
+    users: { customer1: { role: "customer", smsNotificationsRequested: true } },
+    twoFactor: { customer1: {} }
+  });
+  const now = 1_750_000_000_000;
+  let deliveredCode;
+  const sent = await sendPhoneVerificationCode(
+    db,
+    { uid: "customer1", role: "customer" },
+    "0917 123 4567",
+    async (_phone, code) => { deliveredCode = code; },
+    now
+  );
+  assert.equal(sent.phoneMasked, "••••••4567");
+  assert.equal("code" in db.read("twoFactor/customer1/pendingPhoneVerification"), false);
+
+  const result = await verifyPhoneVerificationCode(db, { uid: "customer1", role: "customer" }, deliveredCode, now + 30_000);
+  assert.equal(result.verified, true);
+  assert.equal(db.read("users/customer1/phone"), "+639171234567");
+  assert.equal(db.read("users/customer1/phoneVerified"), true);
+  assert.equal(db.read("users/customer1/smsNotifications"), true);
+  assert.equal(db.read("twoFactor/customer1/pendingPhoneVerification"), undefined);
+});
+
+test("expires customer phone verification codes after five minutes", async () => {
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
+  const db = new FakeRealtimeDatabase({ users: { customer1: { role: "customer" } }, twoFactor: { customer1: {} } });
+  const now = 1_750_000_000_000;
+  let deliveredCode;
+  await sendPhoneVerificationCode(db, { uid: "customer1", role: "customer" }, "+639171234567", async (_phone, code) => { deliveredCode = code; }, now);
+  await assert.rejects(
+    () => verifyPhoneVerificationCode(db, { uid: "customer1", role: "customer" }, deliveredCode, now + 5 * 60_000 + 1),
+    (error) => error.status === 410
+  );
+  assert.equal(db.read("users/customer1/phoneVerified"), undefined);
 });
 
 test("creates hashed email OTP records for operational accounts", async () => {

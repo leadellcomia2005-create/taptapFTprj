@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ServiceBadge } from "../../components/Branding";
 import { menuCategoryOptions } from "../../config/appConfig";
-import { api } from "../../services/api";
 import { moderateReview, updateComplaintStatus } from "../../services/firebase/feedback";
 import { adjustInventory } from "../../services/firebase/inventory";
 import { createMenuItem, updateMenuItem } from "../../services/firebase/menu";
@@ -710,7 +709,7 @@ export function SettingsModule({ title, serviceStatus, staff = false, notify }) 
     { key: "firebase", label: "Account and records connection", detail: "Required for secure accounts and records.", fix: "Restart the app server and confirm the store account service credentials are available.", required: true },
     { key: "emailOtp", label: "Email sending", detail: "Used for email codes, verification, and receipts.", fix: "Add the Gmail sender account and app password, then restart the app server.", required: true },
     { key: "turnstile", label: "Registration protection", detail: "Protects customer registration from automated abuse.", fix: "Add the public site key and secret key, then restart the app server.", required: true },
-    { key: "twilio", label: "SMS provider", detail: "Optional phone texts for verified customers.", fix: "Connect an SMS sender before enabling paid text updates.", optional: true },
+    { key: "textbee", label: "TextBee SMS gateway", detail: "Essential phone texts for verified customers.", fix: "Connect the Android gateway and TextBee secrets before enabling SMS.", optional: true },
     { key: "paymongo", label: "Online payments", detail: "Optional online payment checkout.", fix: "Add payment credentials when online checkout is ready to launch.", optional: true },
     { key: "groq", label: "Groq AI assistance", detail: "Optional customer answers and owner inventory recommendations.", fix: "Add the server-side Groq key and enable Groq when AI assistance is needed.", optional: true }
   ].map((item) => {
@@ -767,7 +766,6 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
       return;
     }
     await updateOrder(order.id, { status: next, updatedAt: Date.now() });
-    if (order.phoneVerified && order.smsNotifications) api.sendNotification({ to: order.phone, orderId: order.id, status: next }).catch(() => {});
     notify(`${order.id} updated to ${statusLabel(next)}.`);
   };
   const cancelOrder = async (order, reason) => {

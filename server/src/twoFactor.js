@@ -18,7 +18,7 @@ const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const backupAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const totpPeriodSeconds = 30;
 const setupExpiryMs = 10 * 60 * 1000;
-const otpExpiryMs = 10 * 60 * 1000;
+const otpExpiryMs = 5 * 60 * 1000;
 const otpResendCooldownMs = 60 * 1000;
 const otpSendWindowMs = 60 * 60 * 1000;
 const maxOtpSendsPerWindow = 5;
@@ -165,10 +165,47 @@ function maskPhone(value = "") {
   return digits.length >= 4 ? `••••••${digits.slice(-4)}` : "";
 }
 
+function normalizePhilippinePhone(value = "") {
+  const digits = String(value).replace(/\D/g, "");
+  if (/^09\d{9}$/.test(digits)) return `+63${digits.slice(1)}`;
+  if (/^639\d{9}$/.test(digits)) return `+${digits}`;
+  if (/^9\d{9}$/.test(digits)) return `+63${digits}`;
+  return "";
+}
+
 function maskEmail(value = "") {
   const [name, domain] = String(value).split("@");
   if (!name || !domain) return "";
   return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
+}
+
+function phoneRateLimitKey(value) {
+  return createHmac("sha256", encryptionKey()).update(String(value || "").replace(/\D/g, "")).digest("hex").slice(0, 40);
+}
+
+async function claimOtpSendWindow(ref, now, label) {
+  const initial = (await ref.once("value")).val() || {};
+  let rejection;
+  const transaction = await transactionWithInitial(ref, initial, (currentValue) => {
+    const current = currentValue || {};
+    if (Number(current.sentAt || 0) + otpResendCooldownMs > now) {
+      rejection = new HttpError(429, `Wait one minute before requesting another ${label} code.`);
+      return undefined;
+    }
+    const sameWindow = Number(current.windowStartedAt || 0) + otpSendWindowMs > now;
+    const sendCount = sameWindow ? Number(current.sendCount || 0) + 1 : 1;
+    if (sendCount > maxOtpSendsPerWindow) {
+      rejection = new HttpError(429, `Too many ${label} codes requested. Try again in one hour.`);
+      return undefined;
+    }
+    return {
+      sentAt: now,
+      windowStartedAt: sameWindow ? Number(current.windowStartedAt) : now,
+      sendCount
+    };
+  });
+  if (!transaction.committed) throw rejection || new HttpError(429, "Too many verification attempts. Try again later.");
+  return transaction.snapshot.val();
 }
 
 async function audit(db, userId, action, details = {}) {
@@ -275,7 +312,7 @@ export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, id
     failedAttempts: Number(config.failedAttempts || 0),
     phoneConfigured: Boolean(profile.phone),
     phoneMasked: maskPhone(profile.phone),
-    smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone),
+    smsAvailable: Boolean(role === "customer" && smsAvailable && profile.phone && profile.phoneVerified),
     emailOtpAvailable: Boolean(allowedTwoFactorMethods(role).includes("email") && emailAvailable && user.email && user.email_verified === true),
     passkeyAvailable: role === "customer",
     passkeyCount: Object.keys(config.passkeys || {}).length,
@@ -304,25 +341,36 @@ export async function beginTotpSetup(db, user) {
   };
 }
 
-export async function sendSmsCode(db, user, sendSms, purpose = "challenge") {
+export async function sendSmsCode(db, user, sendSms, purpose = "challenge", now = Date.now()) {
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   const role = user.role || profile.role || "customer";
   if (config.locked) throw new HttpError(423, "This account is locked.");
   if (role !== "customer") throw new HttpError(403, "Owner, staff, and rider accounts must use a security app.");
   if (!profile.phone) throw new HttpError(400, "Add a phone number to this account before choosing SMS.");
+  if (!profile.phoneVerified) throw new HttpError(403, "Verify this phone number before using SMS sign-in.");
   if (purpose === "challenge" && (!config.enabled || config.method !== "sms")) {
     throw new HttpError(409, "SMS is not the selected security method.");
   }
+  await Promise.all([
+    claimOtpSendWindow(db.ref(`twoFactor/${user.uid}/smsRateLimit`), now, "SMS"),
+    claimOtpSendWindow(db.ref(`smsOtpRateLimits/${phoneRateLimitKey(profile.phone)}`), now, "SMS")
+  ]);
   const code = String(randomInt(100000, 1000000));
-  const record = hashCode(code);
   await db.ref(`twoFactor/${user.uid}/pendingSms`).set({
-    ...record,
+    ...hashCode(code),
     purpose,
-    expiresAt: Date.now() + otpExpiryMs
+    phoneFingerprint: phoneRateLimitKey(profile.phone),
+    expiresAt: now + otpExpiryMs,
+    sentAt: now
   });
-  await sendSms(profile.phone, code);
+  try {
+    await sendSms(profile.phone, code);
+  } catch (error) {
+    await db.ref(`twoFactor/${user.uid}/pendingSms`).remove();
+    throw error;
+  }
   await audit(db, user.uid, "sms_sent", { method: "sms" });
-  return { sent: true, phoneMasked: maskPhone(profile.phone), expiresAt: Date.now() + otpExpiryMs };
+  return { sent: true, phoneMasked: maskPhone(profile.phone), expiresAt: now + otpExpiryMs, resendAt: now + otpResendCooldownMs };
 }
 
 export async function sendEmailCode(db, user, sendEmail, purpose = "challenge", now = Date.now()) {
@@ -365,6 +413,68 @@ export async function sendEmailCode(db, user, sendEmail, purpose = "challenge", 
   return { sent: true, emailMasked: maskEmail(user.email), expiresAt: record.expiresAt };
 }
 
+export async function sendPhoneVerificationCode(db, user, phone, sendSms, now = Date.now()) {
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
+  if (role !== "customer") throw new HttpError(403, "Phone verification is available only to customers.");
+  if (config.locked) throw new HttpError(423, "This account is locked.");
+  const normalizedPhone = normalizePhilippinePhone(phone);
+  if (!normalizedPhone) throw new HttpError(400, "Enter a valid Philippine mobile number.");
+  await Promise.all([
+    claimOtpSendWindow(db.ref(`twoFactor/${user.uid}/phoneVerificationRateLimit`), now, "phone verification"),
+    claimOtpSendWindow(db.ref(`smsOtpRateLimits/${phoneRateLimitKey(normalizedPhone)}`), now, "phone verification")
+  ]);
+  const code = String(randomInt(100000, 1000000));
+  await db.ref(`twoFactor/${user.uid}/pendingPhoneVerification`).set({
+    ...hashCode(code),
+    phone: normalizedPhone,
+    phoneFingerprint: phoneRateLimitKey(normalizedPhone),
+    expiresAt: now + otpExpiryMs,
+    sentAt: now,
+    failedAttempts: 0
+  });
+  try {
+    await sendSms(normalizedPhone, code);
+  } catch (error) {
+    await db.ref(`twoFactor/${user.uid}/pendingPhoneVerification`).remove();
+    throw error;
+  }
+  await audit(db, user.uid, "phone_verification_sent", { method: "sms" });
+  return { sent: true, phoneMasked: maskPhone(normalizedPhone), expiresAt: now + otpExpiryMs, resendAt: now + otpResendCooldownMs };
+}
+
+export async function verifyPhoneVerificationCode(db, user, code, now = Date.now()) {
+  const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+  const role = user.role || profile.role || "customer";
+  if (role !== "customer") throw new HttpError(403, "Phone verification is available only to customers.");
+  const pending = config.pendingPhoneVerification;
+  if (!pending || Number(pending.expiresAt || 0) < now) {
+    await db.ref(`twoFactor/${user.uid}/pendingPhoneVerification`).remove();
+    throw new HttpError(410, "The phone verification code expired. Request a new code.");
+  }
+  if (!verifyHash(code, pending)) {
+    const failedAttempts = Number(pending.failedAttempts || 0) + 1;
+    if (failedAttempts >= maxFailures) {
+      await db.ref(`twoFactor/${user.uid}/pendingPhoneVerification`).remove();
+      await audit(db, user.uid, "phone_verification_blocked", { method: "sms" });
+      throw new HttpError(429, "Too many incorrect codes. Request a new code after one minute.");
+    }
+    await db.ref(`twoFactor/${user.uid}/pendingPhoneVerification`).update({ failedAttempts });
+    await audit(db, user.uid, "phone_verification_failure", { method: "sms" });
+    throw new HttpError(401, "The phone verification code is incorrect.");
+  }
+  await db.ref().update({
+    [`users/${user.uid}/phone`]: pending.phone,
+    [`users/${user.uid}/phoneVerified`]: true,
+    [`users/${user.uid}/phoneVerifiedAt`]: now,
+    [`users/${user.uid}/smsNotifications`]: Boolean(profile.smsNotificationsRequested),
+    [`users/${user.uid}/updatedAt`]: now,
+    [`twoFactor/${user.uid}/pendingPhoneVerification`]: null
+  });
+  await audit(db, user.uid, "phone_verified", { method: "sms" });
+  return { verified: true, phoneMasked: maskPhone(pending.phone), verifiedAt: now };
+}
+
 export async function finishEnrollment(db, user, method, code, idToken) {
   const [profile, config] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
   const role = user.role || profile.role || "customer";
@@ -403,8 +513,12 @@ export async function finishEnrollment(db, user, method, code, idToken) {
     failedAttempts: 0,
     locked: false,
     enabledAt: Date.now(),
-    lastVerifiedAt: Date.now()
+    lastVerifiedAt: Date.now(),
+    smsRateLimit: config.smsRateLimit || null
   });
+  if (method === "sms") {
+    await db.ref(`users/${user.uid}`).update({ phoneVerified: true, phoneVerifiedAt: Date.now() });
+  }
   await audit(db, user.uid, "enabled", { method });
   return {
     customToken,

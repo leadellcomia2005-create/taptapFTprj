@@ -13,6 +13,12 @@ const secretPatterns = [
   { label: "private payment key", pattern: /\bsk_(?:test|live)_[A-Za-z0-9_-]{20,}\b/ },
   { label: "service-account private key", pattern: /"private_key"\s*:\s*"-----BEGIN PRIVATE KEY-----/ }
 ];
+const productionCredentialPatterns = [
+  { label: "owner preview password", pattern: /Owner123!/ },
+  { label: "staff preview password", pattern: /Staff123!/ },
+  { label: "rider preview password", pattern: /Rider123!/ },
+  { label: "customer preview password", pattern: /Customer123!/ }
+];
 
 async function exists(target) {
   try {
@@ -41,6 +47,12 @@ for (const file of files) {
   for (const secret of secretPatterns) {
     if (secret.pattern.test(content)) {
       findings.push(`${path.relative(repositoryRoot, file).replaceAll("\\", "/")}: ${secret.label}`);
+    }
+  }
+  const relativePath = path.relative(repositoryRoot, file).replaceAll("\\", "/");
+  if (relativePath.startsWith("client/dist/") || relativePath.startsWith("client/public/")) {
+    for (const credential of productionCredentialPatterns) {
+      if (credential.pattern.test(content)) findings.push(`${relativePath}: ${credential.label}`);
     }
   }
 }

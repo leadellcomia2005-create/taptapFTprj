@@ -6,11 +6,12 @@ import {
   updateOrderRecord
 } from "../application/orders.js";
 import { canAccessOrder, HttpError, validRecordId } from "../security.js";
-import { sendOrderReceiptEmail } from "../services.js";
+import { sendOrderCancellationEmail, sendOrderReceiptEmail, serviceStatus } from "../services.js";
 import { createOrderSchema, orderListQuerySchema, recordIdParams, updateOrderSchema } from "../contracts/schemas.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.js";
 import { dispatchOrderPush } from "../pushNotifications.js";
+import { dispatchOrderSms } from "../application/smsNotifications.js";
 
 export function createOrdersRouter({ config, firebase, authentication, realtime, logger }) {
   const router = Router();
@@ -61,6 +62,23 @@ export function createOrdersRouter({ config, firebase, authentication, realtime,
       appBaseUrl: config.appBaseUrl,
       logger
     });
+    if (serviceStatus().sms) {
+      void dispatchOrderSms({
+        db: firebase.db(),
+        orderId: req.params.orderId,
+        order: result.order,
+        changes: result.changes,
+        logger
+      });
+    }
+    if (result.changes.status === "cancelled") {
+      void sendOrderCancellationEmail({ id: req.params.orderId, ...result.order }).catch((error) => {
+        logger?.warn("order_cancellation_email_failed", {
+          orderId: req.params.orderId,
+          errorCode: error?.code || "EMAIL_SEND_FAILED"
+        });
+      });
+    }
     realtime.emit([
       `order:${req.params.orderId}`,
       "role:owner",

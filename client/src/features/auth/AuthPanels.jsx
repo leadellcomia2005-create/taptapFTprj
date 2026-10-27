@@ -285,8 +285,8 @@ function LoginPanel({ onLoggedIn }) {
   ];
   const [registering, setRegistering] = useState(registrationRequested);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer.email);
-  const [password, setPassword] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer.password);
+  const [email, setEmail] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer?.email || "");
+  const [password, setPassword] = useState(registrationRequested || !demoModeEnabled ? "" : demoAccounts.customer?.password || "");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -363,10 +363,10 @@ function LoginPanel({ onLoggedIn }) {
   }, [loginModalOpen]);
 
   useEffect(() => {
-    if (!loginModalOpen || registering || demoModeEnabled) return undefined;
+    if (registering || demoModeEnabled) return undefined;
     api.status().catch(() => undefined);
     return undefined;
-  }, [loginModalOpen, registering]);
+  }, [registering]);
 
   useEffect(() => {
     const refreshStatus = () => setOpenStatus(getWebsiteOpenStatus());
@@ -544,7 +544,7 @@ function LoginPanel({ onLoggedIn }) {
       } else {
         loginProgressTimer = window.setTimeout(() => {
           setLoginProgress("Still connecting securely. The service may be waking up; this attempt will stop automatically if it cannot connect.");
-        }, 3500);
+        }, 2500);
         const signedInUser = await login(email, password, undefined, demoAccounts);
         trackLogin(demoModeEnabled ? "demo" : "firebase", signedInUser?.role || "customer");
         onLoggedIn?.();
@@ -1006,7 +1006,7 @@ function LoginPanel({ onLoggedIn }) {
     <main className="login-home" ref={loginHomeRef}>
       <a className="login-skip-link" href="#popular-meals" onClick={() => trackMenuView("skip_link")}>Skip to menu</a>
       <header className="login-home-header" data-login-nav>
-        <a className="brand-lockup login-home-brand" href="#home" aria-label="TapTap Foodtrip home">
+        <a className="brand-lockup login-home-brand" href="#home" aria-label="TapTap FOODTRIP">
           <BrandMark />
           <div><strong>TapTap</strong><small>FOODTRIP</small></div>
         </a>
@@ -1477,6 +1477,18 @@ function TwoFactorPanel({ user, onComplete }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [deliveryMessage, setDeliveryMessage] = useState("");
+  const [otpDelivery, setOtpDelivery] = useState(null);
+  const [clock, setClock] = useState(Date.now());
+
+  useEffect(() => {
+    if (!otpDelivery?.expiresAt) return undefined;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [otpDelivery?.expiresAt]);
+
+  const expiresIn = otpDelivery?.expiresAt ? Math.max(0, Math.ceil((otpDelivery.expiresAt - clock) / 1000)) : 0;
+  const resendIn = otpDelivery?.resendAt ? Math.max(0, Math.ceil((otpDelivery.resendAt - clock) / 1000)) : 0;
+  const expired = Boolean(otpDelivery?.expiresAt && expiresIn === 0);
 
   const beginTotp = async () => {
     setBusy(true);
@@ -1495,11 +1507,23 @@ function TwoFactorPanel({ user, onComplete }) {
     setBusy(true);
     setError("");
     setDeliveryMessage("");
+    setOtpDelivery((current) => current ? { ...current, state: "sending" } : { state: "sending" });
     try {
       const response = await api.sendTwoFactorSms(setup ? "setup" : "challenge");
       setDeliveryMessage(`A six-digit code was sent to ${response.phoneMasked}.`);
+      setClock(Date.now());
+      setOtpDelivery({
+        state: "sent",
+        expiresAt: Number(response.expiresAt || 0),
+        resendAt: Number(response.resendAt || 0),
+        destination: response.phoneMasked
+      });
     } catch (requestError) {
       setError(requestError.message);
+      setOtpDelivery((current) => ({
+        ...current,
+        state: requestError?.code?.includes("RATE") || requestError?.status === 429 ? "rate-limited" : "failed"
+      }));
     } finally {
       setBusy(false);
     }
@@ -1653,7 +1677,17 @@ function TwoFactorPanel({ user, onComplete }) {
         )}
         {setup && method === "totp" && !setupData && <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.totpAvailable} onClick={beginTotp}>Show security app setup code</button>}
         {setupData && method === "totp" && <div className="totp-setup"><img src={setupData.qrDataUrl} alt="Security app setup code" /><p>Setup key: <code>{setupData.manualKey}</code></p></div>}
-        {method === "sms" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.smsAvailable} onClick={sendSms}>Send 6-digit SMS code</button>}
+        {method === "sms" && !backupMode && (
+          <div className="otp-delivery-panel">
+            <button type="button" className="btn btn-outline-danger w-100" disabled={busy || !status.smsAvailable || resendIn > 0} onClick={sendSms}>
+              {busy && otpDelivery?.state === "sending" ? "Sending SMS code..." : resendIn > 0 ? `Resend available in ${resendIn}s` : otpDelivery?.state === "sent" ? "Resend SMS code" : "Send 6-digit SMS code"}
+            </button>
+            {otpDelivery?.state === "sent" && !expired && <small role="status">Code sent to {otpDelivery.destination}. Expires in {Math.floor(expiresIn / 60)}:{String(expiresIn % 60).padStart(2, "0")}.</small>}
+            {expired && <small className="error" role="alert">This code expired. Request a new code.</small>}
+            {otpDelivery?.state === "rate-limited" && <small className="error" role="alert">SMS requests are temporarily limited. Wait, or use email OTP.</small>}
+            {otpDelivery?.state === "failed" && <small className="error" role="alert">SMS could not be delivered. Use email OTP instead.</small>}
+          </div>
+        )}
         {method === "email" && !backupMode && <button type="button" className="btn btn-outline-danger w-100 mb-3" disabled={busy || !status.emailOtpAvailable} onClick={sendEmail}>Send 6-digit email code</button>}
         {!backupMode && method !== "passkey" ? (
           <>
@@ -1665,7 +1699,7 @@ function TwoFactorPanel({ user, onComplete }) {
         )}
         {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
         {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
-        {(method !== "passkey" || backupMode) && <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && code.length !== 6) || (backupMode && backupCode.length < 8)}>
+        {(method !== "passkey" || backupMode) && <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && (code.length !== 6 || (method === "sms" && expired))) || (backupMode && backupCode.length < 8)}>
           {busy ? "Verifying..." : setup ? "Save security setup" : continueLabel}
         </button>}
         {!setup && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}

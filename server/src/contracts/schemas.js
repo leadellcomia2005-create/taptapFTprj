@@ -166,6 +166,14 @@ export const twoFactorSendSchema = z.object({
   purpose: z.enum(["setup", "challenge"]).optional()
 }).passthrough();
 
+export const phoneVerificationSendSchema = z.object({
+  phone: z.string().trim().min(10).max(30)
+}).passthrough();
+
+export const phoneVerificationVerifySchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/)
+}).passthrough();
+
 export const twoFactorVerifySchema = z.object({
   method: z.enum(["totp", "email", "sms"]),
   code: z.string().trim().min(6).max(64)

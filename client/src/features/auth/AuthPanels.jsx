@@ -299,6 +299,8 @@ function LoginPanel({ onLoggedIn }) {
   const [error, setError] = useState("");
   const [loginNotice, setLoginNotice] = useState("");
   const [loginProgress, setLoginProgress] = useState("");
+  const [passwordResetStatus, setPasswordResetStatus] = useState("idle");
+  const [passwordResetEmail, setPasswordResetEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [registrationSteps, setRegistrationSteps] = useState(registrationStepDefaults);
@@ -476,6 +478,8 @@ function LoginPanel({ onLoggedIn }) {
     setFieldErrors({});
     setError("");
     setLoginNotice("");
+    setPasswordResetStatus("idle");
+    setPasswordResetEmail("");
     setRegistrationResult(null);
     setRegistrationRecoveryRequired(false);
     setRegistrationSteps(registrationStepDefaults);
@@ -565,6 +569,28 @@ function LoginPanel({ onLoggedIn }) {
   const submitLabel = busy
     ? registering ? "Creating your account..." : "Signing in..."
     : registering ? "Create account" : "Sign in";
+  const passwordResetInbox = emailInboxLink(passwordResetEmail);
+  const requestPasswordReset = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    setError("");
+    setLoginNotice("");
+    if (!isRegistrationEmailSyntaxValid(normalizedEmail)) {
+      setPasswordResetStatus("idle");
+      setError("Enter the email address connected to your TapTap account first.");
+      return;
+    }
+
+    setPasswordResetStatus("sending");
+    try {
+      await resetPassword(normalizedEmail);
+      setPasswordResetEmail(normalizedEmail);
+      setPasswordResetStatus("sent");
+      setLoginNotice(`Password reset link sent to ${normalizedEmail}. Check your inbox and Spam folder.`);
+    } catch (resetError) {
+      setPasswordResetStatus("idle");
+      setError(friendlyAuthError(resetError));
+    }
+  };
   const passwordItems = passwordChecklist(password);
   const registrationReadiness = validateCustomerRegistrationForm({
     name,
@@ -795,6 +821,9 @@ function LoginPanel({ onLoggedIn }) {
           value={email}
           onChange={(event) => {
             setEmail(event.target.value);
+            setPasswordResetStatus("idle");
+            setPasswordResetEmail("");
+            setLoginNotice("");
             setEmailPrecheck({ status: "idle", message: "" });
             invalidateRegistrationSecurity();
             if (registering) setFieldErrors((current) => ({ ...current, email: undefined }));
@@ -985,10 +1014,26 @@ function LoginPanel({ onLoggedIn }) {
         </button>
       )}
       {!registering && (
-        <div className="login-secondary-actions">
-          <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>Customer registration</button>
-          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => resetPassword(email).catch((resetError) => setError(resetError.message))}>Reset password</button>
-        </div>
+        <>
+          <div className="login-secondary-actions">
+            <button type="button" className="btn btn-outline-danger btn-sm" onClick={toggleRegistration}>Customer registration</button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              disabled={passwordResetStatus === "sending"}
+              onClick={requestPasswordReset}
+            >
+              {passwordResetStatus === "sending" ? "Sending reset link..." : "Reset password"}
+            </button>
+          </div>
+          <p className="login-reset-note">A secure password-reset link will be sent to the email address entered above.</p>
+          {passwordResetStatus === "sent" && (
+            <div className="login-reset-success" role="status">
+              <div><MailCheck size={18} aria-hidden="true" /><span>Reset email sent. Open your inbox and select the link to choose a new password.</span></div>
+              {passwordResetInbox && <a className="btn btn-outline-success btn-sm" href={passwordResetInbox.href} target="_blank" rel="noreferrer">{passwordResetInbox.label}</a>}
+            </div>
+          )}
+        </>
       )}
       {registering && registrationPhase === "account" && (
         <button type="button" className="registration-text-action" onClick={toggleRegistration}>Back to sign in</button>

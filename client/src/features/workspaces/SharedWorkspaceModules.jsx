@@ -148,8 +148,8 @@ export function ComplaintResolutionModule({ complaints = [], user, notify }) {
                 {complaint.requestedResolution && <em>Requested: {complaint.requestedResolution}</em>}
               </div>
               <label className="form-label">Status<select className="form-select form-select-sm" value={draft.status} onChange={(event) => updateDraft(complaint, "status", event.target.value)}><option value="pending">Pending</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option></select></label>
-              <label className="form-label">Resolution<textarea className="form-control" rows="2" value={draft.resolution} onChange={(event) => updateDraft(complaint, "resolution", event.target.value)} placeholder="Replacement, refund review, staff note..." /></label>
-              <div className="review-actions">
+              <label className="form-label">Resolution<textarea className="form-control" rows="2" value={draft.resolution} onChange={(event) => updateDraft(complaint, "resolution", event.target.value)} placeholder="Replacement, cancellation review, or staff note..." /></label>
+              <div className="review-actions complaint-actions responsive-action-group">
                 <button className="btn btn-sm btn-outline-dark" onClick={() => save(complaint, "reviewed")}>Mark reviewed</button>
                 <button className="btn btn-sm btn-success" onClick={() => save(complaint, "resolved")}>Resolve</button>
                 <button className="btn btn-sm btn-danger" onClick={() => save(complaint)}>Save</button>

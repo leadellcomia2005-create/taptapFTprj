@@ -754,18 +754,26 @@ export async function updateComplaintStatus(complaintId, values, actor) {
 }
 
 export function subscribeMenu(fallback, callback) {
+  const optimizeLocalMenuImage = (item) => ({
+    ...item,
+    image: typeof item?.image === "string" && /^\/assets\/menu\/[^?#]+\.png(?:[?#].*)?$/i.test(item.image)
+      ? item.image.replace(/\.png(?=([?#]|$))/i, ".webp")
+      : item?.image
+  });
   if (firebaseEnabled) {
     return onValue(ref(db, "public/menu"), (snapshot) => {
       const value = snapshot.val();
-      const menu = firebaseRecordList(value, isMenuItem);
+      const menu = firebaseRecordList(value, isMenuItem).map(optimizeLocalMenuImage);
       callback(menu.length ? menu : fallback);
     });
   }
   const emit = () => {
     const menu = readDemoData().menu || {};
     const fallbackIds = new Set(fallback.map((item) => item.id));
-    const merged = fallback.map((item) => ({ ...item, ...(menu[item.id] || {}) }));
-    const added = Object.values(menu).filter((item) => item?.id && !fallbackIds.has(item.id));
+    const merged = fallback.map((item) => optimizeLocalMenuImage({ ...item, ...(menu[item.id] || {}) }));
+    const added = Object.values(menu)
+      .filter((item) => item?.id && !fallbackIds.has(item.id))
+      .map(optimizeLocalMenuImage);
     callback([...merged, ...added]);
   };
   emit();

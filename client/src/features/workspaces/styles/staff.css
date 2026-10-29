@@ -204,3 +204,38 @@
     margin-bottom: 12px;
   }
 }
+
+/* Keep POS controls stable and finger-friendly at every mobile width. */
+.staff-checkout-panel .btn,
+.staff-checkout-panel .btn-sm { min-height: 44px; }
+.pos-quantity {
+  grid-template-columns: 44px 42px 44px;
+  min-height: 44px;
+}
+.pos-quantity button { width: 44px; min-height: 44px; }
+.pos-remove { min-height: 44px; display: inline-flex; align-items: center; padding-inline: 6px; }
+@media (max-width: 1024px) {
+  .staff-checkout-panel {
+    overscroll-behavior: contain;
+    box-shadow: 0 -18px 46px rgba(38,29,19,.2);
+  }
+  .staff-cart-heading-actions { margin-left: auto; }
+  .staff-mobile-cart-button { min-height: 58px; }
+}
+@media (max-width: 560px) {
+  .staff-checkout-panel { padding-inline: 14px; }
+  .staff-checkout-panel .module-heading { align-items: flex-start; }
+  .staff-cart-heading-actions { width: 100%; justify-content: space-between; }
+  .pos-cart-item { grid-template-columns: minmax(0,1fr) auto; }
+  .pos-cart-item > strong { justify-self: end; }
+  .pos-quantity { grid-column: 1; justify-self: start; }
+  .pos-remove { grid-column: 2; justify-self: end; }
+  .pos-shift-inline-actions,
+  .checkout-mode-grid,
+  .pos-payment-methods,
+  .pos-cash-shortcuts { grid-template-columns: 1fr; }
+  .pos-shift-inline-actions .btn,
+  .checkout-mode-grid button,
+  .pos-payment-methods button,
+  .pos-cash-shortcuts button { width: 100%; }
+}

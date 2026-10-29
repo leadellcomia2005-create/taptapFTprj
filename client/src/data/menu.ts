@@ -32,7 +32,7 @@ const photoRules: ReadonlyArray<readonly [string, string]> = [
 
 const photoFor = (id: string): string | undefined => {
   const match = photoRules.find(([prefix]) => id === prefix || id.startsWith(`${prefix}-`));
-  return match ? `/assets/menu/${match[1]}.png` : undefined;
+  return match ? `/assets/menu/${match[1]}.webp` : undefined;
 };
 
 const item = (
@@ -122,9 +122,11 @@ type DemoAccount = {
   name: string;
 };
 
-export const demoAccounts: Record<UserRole, DemoAccount> = {
+// Preview credentials exist only in Vite's local development build. The false
+// production branch is removed at build time, so passwords cannot reach hosting.
+export const demoAccounts: Partial<Record<UserRole, DemoAccount>> = import.meta.env.DEV ? {
   customer: { email: "customer@demo.ph", password: "Customer123!", name: "Juan Dela Cruz" },
   owner: { email: "owner@taptap.ph", password: "Owner123!", name: "Leadell Comia" },
   staff: { email: "staff@taptap.ph", password: "Staff123!", name: "Mika Reyes" },
   rider: { email: "rider@taptap.ph", password: "Rider123!", name: "Marco Dela Cruz" }
-};
+} : {};

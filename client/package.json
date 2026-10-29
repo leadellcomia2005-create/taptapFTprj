@@ -41,5 +41,9 @@
     "sass": "^1.102.0",
     "typescript": "^7.0.2",
     "vite": "^7.1.9"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.6",
+    "dompurify": "3.4.17"
   }
 }

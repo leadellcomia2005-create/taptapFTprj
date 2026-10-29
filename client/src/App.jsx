@@ -396,6 +396,9 @@ const workspaceNavigationSections = {
   staff: [
     { label: "Operate", views: ["staff-overview", "staff-pos", "staff-kitchen", "staff-orders"] },
     { label: "Support", views: ["staff-inventory", "staff-shifts", "staff-chat", "staff-reviews", "staff-settings"] }
+  ],
+  rider: [
+    { label: "Deliver", views: ["rider-orders", "rider-cod"] }
   ]
 };
 
@@ -412,7 +415,7 @@ function AppHeader({ user, activeView, unreadCount, notificationsOpen, onNavigat
   const navigation = navigationForUser(user);
   const homeView = defaultViewForRole(user.role);
   const customerNavigation = user.role === "customer";
-  const workspaceDrawerNavigation = user.role === "owner" || user.role === "staff";
+  const workspaceDrawerNavigation = ["owner", "staff", "rider"].includes(user.role);
   // erick: drawer state ito para hiwalay ang mobile menu sa masikip na header.
   const [drawerMenuOpen, setDrawerMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);

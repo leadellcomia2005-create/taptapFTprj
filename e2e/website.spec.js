@@ -1336,6 +1336,25 @@ test("owner and staff operational layouts remain usable on a phone", async ({ pa
 
 test("980px desktop-mode mobile viewport uses compact navigation without page overflow", async ({ page }) => {
   const runtime = watchRuntime(page);
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      orders: {
+        "TAP-E2E-DESKTOP-MOBILE": {
+          customerId: "demo-customer",
+          customerName: "Demo Customer",
+          deliveryType: "delivery",
+          address: "Las Pinas City test address",
+          items: [{ id: "porkchop-meal", name: "Porkchop", category: "Favorite Meal", price: 99, qty: 2 }],
+          subtotal: 198,
+          total: 198,
+          paymentMethod: "cod",
+          paymentStatus: "paid",
+          status: "delivered",
+          createdAt: 1700000000000
+        }
+      }
+    }));
+  });
   await page.setViewportSize({ width: 980, height: 720 });
   await page.goto("/");
   await expectNoHorizontalOverflow(page);
@@ -1345,7 +1364,19 @@ test("980px desktop-mode mobile viewport uses compact navigation without page ov
     await expectNoHorizontalOverflow(page);
 
     if (role === "customer") {
-      await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
+      const customerMenuButton = page.getByRole("button", { name: /Open navigation menu/i });
+      await expectMinimumTouchTarget(customerMenuButton);
+      await customerMenuButton.click();
+      await page.getByRole("navigation", { name: /^customer navigation$/i }).getByRole("button", { name: "Order History" }).click();
+      const pastOrderCard = page.locator(".order-table-card").filter({ hasText: "Past orders" });
+      const pastOrderRow = pastOrderCard.locator(".order-table-row").first();
+      await expect(pastOrderRow).toBeVisible();
+      const orderColumns = await pastOrderRow.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+      expect(orderColumns).toBe(1);
+      for (const label of ["Order", "Date", "Status", "Delivery", "Total", "Action"]) {
+        await expect(pastOrderRow.locator(`[data-label="${label}"]`)).toBeVisible();
+      }
+      await expectNoHorizontalOverflow(page);
     } else if (["owner", "staff"].includes(role)) {
       await expectMinimumTouchTarget(page.getByRole("button", { name: /Open navigation menu/i }));
       await expect(page.getByRole("navigation", { name: new RegExp(`${role} navigation`, "i") })).toBeHidden();

@@ -25,12 +25,30 @@ const landingHtml = await landing.text();
 record("landing page has React root", landingHtml.includes('id="root"'));
 record("landing page links the web manifest", landingHtml.includes('rel="manifest"') && landingHtml.includes("/manifest.webmanifest"));
 
+const isLiveOrigin = !["localhost", "127.0.0.1"].includes(baseUrl.hostname);
+if (isLiveOrigin) {
+  const contentSecurityPolicy = landing.headers.get("content-security-policy") || "";
+  record("live site blocks framing", landing.headers.get("x-frame-options") === "DENY" && contentSecurityPolicy.includes("frame-ancestors 'none'"));
+  record("live site has a referrer policy", landing.headers.get("referrer-policy") === "strict-origin-when-cross-origin");
+  record("live site has an enforced CSP", contentSecurityPolicy.includes("default-src 'self'") && contentSecurityPolicy.includes("object-src 'none'"));
+
+  const mainScriptPath = landingHtml.match(/<script[^>]+src="([^"]*\/assets\/main-[^"]+\.js)"/)?.[1];
+  record("live main script is discoverable", Boolean(mainScriptPath));
+  if (mainScriptPath) {
+    const mainScript = await (await fetch(new URL(mainScriptPath, baseUrl))).text();
+    const exposedPreviewCredential = ["Owner123!", "Staff123!", "Rider123!", "Customer123!"]
+      .find((credential) => mainScript.includes(credential));
+    record("live JavaScript excludes preview passwords", !exposedPreviewCredential, exposedPreviewCredential || "none found");
+  }
+}
+
 await fetchOk("/assets/hero-food.png", "hero PNG fallback loads", "image/");
 await fetchOk("/assets/hero-food.webp", "hero WebP loads", "image/");
 await fetchOk("/assets/hero-food.avif", "hero AVIF loads", "image/");
 await fetchOk("/assets/taptap-logo.png", "logo PNG fallback loads", "image/");
 await fetchOk("/assets/taptap-logo.webp", "logo WebP loads", "image/");
 await fetchOk("/assets/taptap-logo.avif", "logo AVIF loads", "image/");
+await fetchOk("/assets/menu/bangus.webp", "optimized menu image loads", "image/webp");
 await fetchOk("/robots.txt", "robots file loads", "text/plain");
 const manifestResponse = await fetchOk("/manifest.webmanifest", "PWA manifest loads", "application/manifest+json");
 const manifest = await manifestResponse.json();
@@ -56,7 +74,7 @@ record("public reviews are wired", authPanels.includes("subscribePublicReviews")
 record("empty reviews do not use fabricated testimonials", !authPanels.includes("fallbackCustomerReviews"));
 record("hours and FAQ use configured data", authPanels.includes("formatStoreHoursLabel") && authPanels.includes('id="frequently-asked"'));
 record("footer encoding is clean", authPanels.includes("&copy;") && !authPanels.includes(String.fromCharCode(194, 169)));
-record("secondary role access is present", authPanels.includes("login-footer-team") && authPanels.includes('openLoginModal(item.id, "footer_team")'));
+record("shared sign-in supports every saved role", authPanels.includes('openLoginModal("customer", "footer_sign_in")') && authPanels.includes("signedInUser?.role"));
 
 const appConfig = await readFile(new URL("../src/config/appConfig.ts", import.meta.url), "utf8");
 record("landing customer payments only advertise enabled methods", appConfig.includes('paymentMethods: ["cash", "cod"]'));

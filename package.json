@@ -20,6 +20,7 @@
     "check:cycles": "node scripts/check-import-cycles.mjs",
     "check:client-secrets": "node scripts/check-client-secrets.mjs",
     "check:operations-docs": "node scripts/check-operations-docs.mjs",
+    "smoke:live-browser": "node scripts/live-browser-smoke.mjs",
     "paymongo:check": "node scripts/check-paymongo-config.mjs",
     "clean:workspace": "node scripts/clean-workspace.mjs",
     "clean:workspace:apply": "node scripts/clean-workspace.mjs --apply",

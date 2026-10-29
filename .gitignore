@@ -53,6 +53,7 @@ ui-debug.log
 /config.yml
 /output/
 /separated-menu-photos/
+/design-previews/
 
 # Archives
 *.zip

@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "taptapftprj-leadell-2026"
+    "default": "taptap-foodtrip",
+    "rollback": "taptapftprj-leadell-2026"
   }
 }

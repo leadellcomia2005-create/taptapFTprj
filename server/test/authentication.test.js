@@ -25,6 +25,33 @@ test("checks Firebase token revocation before accepting an API session", async (
   assert.equal(user.name, "Test Staff");
 });
 
+test("skips the redundant revocation lookup for the immediate post-login status check", async () => {
+  const calls = [];
+  const database = new FakeRealtimeDatabase({
+    users: { "owner-1": { role: "owner", name: "Test Owner" } }
+  });
+  const firebase = {
+    enabled: true,
+    db: () => database,
+    auth: () => ({
+      async verifyIdToken(token, checkRevoked) {
+        calls.push({ token, checkRevoked });
+        return { uid: "owner-1", email_verified: true };
+      }
+    })
+  };
+  const req = { headers: { authorization: "Bearer fresh-login-token" } };
+  const res = { status() { throw new Error("Unexpected auth rejection"); }, json() { throw new Error("Unexpected auth rejection"); } };
+  let nextCalled = false;
+
+  await createAuthentication(firebase).authenticateLoginStatus(req, res, () => { nextCalled = true; });
+
+  assert.deepEqual(calls, [{ token: "fresh-login-token", checkRevoked: false }]);
+  assert.equal(nextCalled, true);
+  assert.equal(req.user.role, "owner");
+  assert.equal(req.userProfile.name, "Test Owner");
+});
+
 test("rejects a suspended profile even when its token is otherwise valid", async () => {
   const database = new FakeRealtimeDatabase({
     users: { "staff-1": { role: "staff", name: "Suspended Staff", suspended: true } }

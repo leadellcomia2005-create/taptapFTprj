@@ -53,6 +53,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
     message: { error: "Too many SMS codes requested from this connection. Try again in one hour.", code: "SMS_IP_RATE_LIMITED" }
   });
   const { authenticate, authenticateBootstrap, requireFirebaseAdmin } = authentication;
+  const authenticateLoginStatus = authentication.authenticateLoginStatus || authenticateBootstrap;
   const registrationEmailSender = serviceStatus().emailOtp
     ? sendCustomerVerificationEmail
     : config.firebase?.webApiKey
@@ -117,7 +118,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
     res.json(result);
   }));
 
-  router.get("/2fa/status", authenticateBootstrap, asyncRoute(async (req, res) => {
+  router.get("/2fa/status", authenticateLoginStatus, asyncRoute(async (req, res) => {
     const expectedRole = typeof req.query.expectedRole === "string" ? req.query.expectedRole.trim().toLowerCase() : "";
     const supportedRoles = new Set(["customer", "owner", "staff", "rider"]);
     if (expectedRole && !supportedRoles.has(expectedRole)) {

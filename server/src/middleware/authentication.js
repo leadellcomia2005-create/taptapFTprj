@@ -1,8 +1,8 @@
 import { bearerToken, hasVerifiedEmail } from "../security.js";
 
 export function createAuthentication(firebase, { logger, metrics } = {}) {
-  async function verifyUserTokenWithProfile(token) {
-    const decoded = await firebase.auth().verifyIdToken(token, true);
+  async function verifyUserTokenWithProfile(token, checkRevoked = true) {
+    const decoded = await firebase.auth().verifyIdToken(token, checkRevoked);
     const profile = (await firebase.db().ref(`users/${decoded.uid}`).once("value")).val() || {};
     if (profile.suspended === true) throw new Error("Account suspended");
     return {
@@ -23,7 +23,7 @@ export function createAuthentication(firebase, { logger, metrics } = {}) {
     return next();
   }
 
-  async function authenticateBootstrap(req, res, next) {
+  async function authenticateWithToken(req, res, next, checkRevoked) {
     if (!firebase.enabled) return requireFirebaseAdmin(req, res, next);
     const token = bearerToken(req.headers.authorization);
     if (!token) {
@@ -35,7 +35,7 @@ export function createAuthentication(firebase, { logger, metrics } = {}) {
     }
     try {
       req.authToken = token;
-      const verified = await verifyUserTokenWithProfile(token);
+      const verified = await verifyUserTokenWithProfile(token, checkRevoked);
       req.user = verified.user;
       req.userProfile = verified.profile;
       return next();
@@ -46,6 +46,14 @@ export function createAuthentication(firebase, { logger, metrics } = {}) {
       });
       return res.status(401).json({ error: "Invalid or expired authentication token." });
     }
+  }
+
+  function authenticateBootstrap(req, res, next) {
+    return authenticateWithToken(req, res, next, true);
+  }
+
+  function authenticateLoginStatus(req, res, next) {
+    return authenticateWithToken(req, res, next, false);
   }
 
   async function authenticate(req, res, next) {
@@ -66,5 +74,5 @@ export function createAuthentication(firebase, { logger, metrics } = {}) {
     });
   }
 
-  return { authenticate, authenticateBootstrap, requireFirebaseAdmin, verifyUserToken };
+  return { authenticate, authenticateBootstrap, authenticateLoginStatus, requireFirebaseAdmin, verifyUserToken };
 }

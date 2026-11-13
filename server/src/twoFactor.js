@@ -221,14 +221,23 @@ async function audit(db, userId, action, details = {}) {
 
 async function passwordUpdatedAt(idToken) {
   if (!process.env.FIREBASE_WEB_API_KEY || !idToken) return 0;
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_WEB_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken })
-  });
-  if (!response.ok) return 0;
-  const payload = await response.json();
-  return Number(payload.users?.[0]?.passwordUpdatedAt || 0);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_WEB_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+      signal: controller.signal
+    });
+    if (!response.ok) return 0;
+    const payload = await response.json();
+    return Number(payload.users?.[0]?.passwordUpdatedAt || 0);
+  } catch {
+    return 0;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function profileFor(db, user) {
@@ -281,8 +290,11 @@ async function completeSuccess(db, user, method, values = {}) {
   return issueSessionToken(db, user);
 }
 
-export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, idToken) {
-  const [profile, initialConfig] = await Promise.all([profileFor(db, user), configurationFor(db, user.uid)]);
+export async function twoFactorStatus(db, user, smsAvailable, emailAvailable, idToken, knownProfile = null) {
+  const [profile, initialConfig] = await Promise.all([
+    knownProfile ? Promise.resolve(knownProfile) : profileFor(db, user),
+    configurationFor(db, user.uid)
+  ]);
   let config = initialConfig;
   const role = user.role || profile.role || "customer";
   const configuredMethodAllowed = allowedTwoFactorMethods(role).includes(config.method);

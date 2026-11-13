@@ -1,11 +1,18 @@
 import { bearerToken, hasVerifiedEmail } from "../security.js";
 
 export function createAuthentication(firebase, { logger, metrics } = {}) {
-  async function verifyUserToken(token) {
+  async function verifyUserTokenWithProfile(token) {
     const decoded = await firebase.auth().verifyIdToken(token, true);
     const profile = (await firebase.db().ref(`users/${decoded.uid}`).once("value")).val() || {};
     if (profile.suspended === true) throw new Error("Account suspended");
-    return { ...decoded, role: profile.role || decoded.role || "customer", name: profile.name || decoded.name };
+    return {
+      user: { ...decoded, role: profile.role || decoded.role || "customer", name: profile.name || decoded.name },
+      profile
+    };
+  }
+
+  async function verifyUserToken(token) {
+    return (await verifyUserTokenWithProfile(token)).user;
   }
 
   function requireFirebaseAdmin(_req, res, next) {
@@ -28,7 +35,9 @@ export function createAuthentication(firebase, { logger, metrics } = {}) {
     }
     try {
       req.authToken = token;
-      req.user = await verifyUserToken(token);
+      const verified = await verifyUserTokenWithProfile(token);
+      req.user = verified.user;
+      req.userProfile = verified.profile;
       return next();
     } catch {
       logger?.warn("authentication_rejected", {

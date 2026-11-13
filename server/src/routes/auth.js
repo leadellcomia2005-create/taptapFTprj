@@ -130,7 +130,7 @@ export function createAuthRouter({ config, firebase, authentication }) {
       throw new HttpError(403, message, { code: "ROLE_LOGIN_MISMATCH" });
     }
     const status = serviceStatus();
-    res.json(await twoFactorStatus(firebase.db(), req.user, status.sms, status.emailOtp, req.authToken));
+    res.json(await twoFactorStatus(firebase.db(), req.user, status.sms, status.emailOtp, req.authToken, req.userProfile));
   }));
 
   router.post("/2fa/setup/totp", authenticateBootstrap, requireVerifiedEmail, asyncRoute(async (req, res) => {

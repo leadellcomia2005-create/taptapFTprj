@@ -216,6 +216,14 @@ const handoffOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 let pendingRoleValidation = null;
 let recentLoginStatus = null;
 
+function withAuthTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
 export function observeAuth(callback) {
   if (firebaseEnabled) {
     let active = true;
@@ -282,15 +290,27 @@ export function observeAuth(callback) {
 
 export async function login(email, password, requestedRole, demoAccounts) {
   if (firebaseEnabled) {
-    await authPersistenceReady;
+    await withAuthTimeout(
+      authPersistenceReady,
+      8_000,
+      "Your browser is taking too long to prepare a secure sign-in. Try again, or open TapTap in a regular browser tab."
+    );
     let settleRoleValidation;
     const roleValidation = {
       promise: new Promise((resolve) => { settleRoleValidation = resolve; })
     };
     pendingRoleValidation = roleValidation;
     try {
-      const credential = await signInWithEmailAndPassword(auth, email, password);
-      const status = await api.twoFactorStatus(requestedRole);
+      const credential = await withAuthTimeout(
+        signInWithEmailAndPassword(auth, email, password),
+        12_000,
+        "Firebase sign-in timed out. Check your connection and try again."
+      );
+      const status = await withAuthTimeout(
+        api.twoFactorStatus(requestedRole),
+        12_000,
+        "Your account was authenticated, but its security check timed out. Please try again."
+      );
       const role = status.role || "customer";
       if (requestedRole && requestedRole !== role) {
         throw new Error(roleLoginMismatchMessage(role, requestedRole));
@@ -304,11 +324,8 @@ export async function login(email, password, requestedRole, demoAccounts) {
       return credential.user;
     } catch (error) {
       recentLoginStatus = null;
-      try {
-        if (auth.currentUser) await signOut(auth);
-      } finally {
-        settleRoleValidation(false);
-      }
+      settleRoleValidation(false);
+      if (auth.currentUser) void signOut(auth).catch(() => {});
       throw error;
     } finally {
       if (pendingRoleValidation === roleValidation) pendingRoleValidation = null;

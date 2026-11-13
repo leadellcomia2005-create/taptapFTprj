@@ -89,6 +89,12 @@ export const complaintUpdateSchema = z.object({
 
 export const riderLocationSchema = locationSchema.extend({ orderId: recordIdSchema });
 
+export const deliveryRouteSchema = z.object({
+  origin: locationSchema.pick({ lat: true, lng: true }),
+  destination: locationSchema.pick({ lat: true, lng: true }),
+  orderId: recordIdSchema.optional()
+});
+
 export const deliveryProofSchema = z.object({
   dataUrl: z.string().startsWith("data:image/jpeg;base64,").max(700000),
   handoff: z.object({

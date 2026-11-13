@@ -117,6 +117,14 @@ export interface PushNotificationStatusResponse extends ApiResult {
   tokenCount: number;
 }
 
+export interface DeliveryRouteResponse extends ApiResult {
+  points: Array<[number, number]>;
+  distanceMeters: number;
+  durationSeconds: number;
+  source: "road-route";
+  cached: boolean;
+}
+
 export interface AssistantResponse extends ApiResult {
   text: string;
   messageId?: EntityId;
@@ -461,6 +469,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ orderId, ...location }),
     }),
+  deliveryRoute: (
+    origin: Pick<DeliveryLocation, "lat" | "lng">,
+    destination: Pick<DeliveryLocation, "lat" | "lng">,
+    orderId?: EntityId,
+    signal?: AbortSignal
+  ) => request<DeliveryRouteResponse>("/delivery/route", {
+    method: "POST",
+    body: JSON.stringify({ origin, destination, ...(orderId ? { orderId } : {}) }),
+    signal,
+    timeoutMs: 10_000,
+  }),
   uploadDeliveryProof: (orderId: EntityId, dataUrl: string, handoff: DeliveryProofHandoff = {}) =>
     request(`/orders/${encodeURIComponent(orderId)}/proof`, {
       method: "POST",

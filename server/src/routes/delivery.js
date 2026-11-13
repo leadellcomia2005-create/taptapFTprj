@@ -1,13 +1,32 @@
 import { Router } from "express";
 import { saveDeliveryProofRecord, saveRiderLocationRecord } from "../application/delivery.js";
-import { deliveryProofSchema, recordIdParams, riderLocationSchema } from "../contracts/schemas.js";
+import { fetchDeliveryRoute } from "../application/routing.js";
+import { deliveryProofSchema, deliveryRouteSchema, recordIdParams, riderLocationSchema } from "../contracts/schemas.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
-import { requireRoles } from "../security.js";
+import { canAccessOrder, HttpError, requireRoles } from "../security.js";
 
-export function createDeliveryRouter({ firebase, authentication, realtime, logger }) {
+export function createDeliveryRouter({ config, firebase, authentication, realtime, logger }) {
   const router = Router();
   const { authenticate } = authentication;
+
+  router.post("/delivery/route", authenticate, validateBody(deliveryRouteSchema), asyncRoute(async (req, res) => {
+    let origin = [req.body.origin.lat, req.body.origin.lng];
+    let destination = [req.body.destination.lat, req.body.destination.lng];
+    if (req.body.orderId) {
+      const order = (await firebase.db().ref(`orders/${req.body.orderId}`).once("value")).val();
+      if (!order) throw new HttpError(404, "Order not found.");
+      if (!canAccessOrder(req.user, order)) throw new HttpError(403, "You cannot access this delivery route.");
+      if (order.deliveryLocation?.lat != null && order.deliveryLocation?.lng != null) {
+        destination = [Number(order.deliveryLocation.lat), Number(order.deliveryLocation.lng)];
+      }
+      if (order.riderLocation?.lat != null && order.riderLocation?.lng != null) {
+        origin = [Number(order.riderLocation.lat), Number(order.riderLocation.lng)];
+      }
+    }
+    const route = await fetchDeliveryRoute({ origin, destination, config: config.routing });
+    res.set("Cache-Control", "private, max-age=30").json(route);
+  }));
 
   router.post("/riders/location", authenticate, requireRoles("rider"), validateBody(riderLocationSchema), asyncRoute(async (req, res) => {
     const result = await saveRiderLocationRecord(firebase.db(), req.user, req.body.orderId, req.body);

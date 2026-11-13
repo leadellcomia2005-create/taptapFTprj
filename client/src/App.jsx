@@ -766,7 +766,6 @@ const Storefront = memo(function Storefront({ menu, cart, setCart, onCheckout, n
 
 function TrackingView({ order, onClose }) {
   const [rider, setRider] = useState(null);
-  const customerPin = locationToPoint(order?.deliveryLocation);
   const riderPin = locationToPoint(rider);
   const trackingOrderId = order?.id;
   const orderRiderLocation = order?.riderLocation || null;
@@ -815,7 +814,7 @@ function TrackingView({ order, onClose }) {
       <div className="modal-dialog modal-xl modal-dialog-centered">
         <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
           <div className="modal-header"><div><small>{order.id}</small><h5 className="modal-title" id="tracking-title">{statusLabel(order.status)}</h5><span className="tracking-status-text">{trackingStatus}{order.handoffOtp && ["out-for-delivery", "arrived"].includes(order.status) ? ` - Delivery OTP ${order.handoffOtp}` : ""}</span></div><button className="btn-close" aria-label="Close tracking" onClick={onClose} /></div>
-          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={riderPin} customer={customerPin} /></Suspense></div>
+          <div className="modal-body p-0"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={rider || orderRiderLocation} customer={order.deliveryLocation} orderId={order.id} orderStatus={order.status} /></Suspense></div>
         </div>
       </div>
     </div>

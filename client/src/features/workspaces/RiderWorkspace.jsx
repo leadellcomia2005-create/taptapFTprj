@@ -374,7 +374,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
               {retryTask && <div className="rider-retry-bar" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span><strong>{retryTask.label} failed</strong><small>{networkOnline ? "Retry without repeating completed steps." : "Reconnect to the internet before retrying."}</small></span><button disabled={Boolean(busyAction) || !networkOnline} onClick={() => runAction(retryTask.label, retryTask.task)}>Retry</button></div>}
 
               {nextAction ? <button className={`rider-next-action ${nextAction.tone}`} disabled={Boolean(busyAction)} onClick={nextAction.action}><NextActionIcon size={19} aria-hidden="true" /> {busyAction || nextAction.label}</button> : <div className="rider-complete-state"><CheckCircle2 size={18} aria-hidden="true" /><span>{["delivered", "completed"].includes(active.status) ? "Delivery completed" : "No rider status action is available"}</span></div>}
-              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} /></Suspense></div>
+              <div className="rider-map-panel"><Suspense fallback={<SectionLoader label="Loading delivery map..." />}><DeliveryMap rider={visibleRiderLocation} customer={deliveryPin} orderId={active?.id} orderStatus={active?.status} /></Suspense></div>
               <div className="rider-action-grid secondary">
                 <a className="rider-action" href={googleMapsUrl} target="_blank" rel="noreferrer"><Navigation size={17} aria-hidden="true" /> Navigate</a>
                 {active.phone && <a className="rider-action" href={`tel:${active.phone}`}><Phone size={17} aria-hidden="true" /> Call</a>}

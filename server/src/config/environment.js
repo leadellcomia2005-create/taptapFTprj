@@ -23,6 +23,11 @@ const environmentSchema = z.object({
   AI_INSIGHT_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
   AI_INSIGHT_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
   AI_INSIGHT_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  ROUTING_BASE_URL: z.string().url().default("https://router.project-osrm.org"),
+  ROUTING_TIMEOUT_MS: z.coerce.number().int().min(1000).max(20000).default(7000),
+  ROUTING_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  STORE_LATITUDE: z.coerce.number().min(-90).max(90).default(14.4509229),
+  STORE_LONGITUDE: z.coerce.number().min(-180).max(180).default(120.9764514),
   ENABLE_PAYMONGO: z.enum(["true", "false"]).default("false"),
   ENABLE_TEXTBEE: z.enum(["true", "false"]).default("false"),
   TEXTBEE_API_KEY: z.string().trim().optional(),
@@ -132,6 +137,12 @@ export function loadServerConfig(environment = process.env) {
       insightLimit: env.AI_INSIGHT_RATE_LIMIT,
       insightWindowMs: env.AI_INSIGHT_RATE_WINDOW_SECONDS * 1000,
       insightCacheTtlMs: env.AI_INSIGHT_CACHE_TTL_SECONDS * 1000
+    },
+    routing: {
+      baseUrl: env.ROUTING_BASE_URL.replace(/\/$/, ""),
+      timeoutMs: env.ROUTING_TIMEOUT_MS,
+      cacheTtlMs: env.ROUTING_CACHE_TTL_SECONDS * 1000,
+      store: [env.STORE_LATITUDE, env.STORE_LONGITUDE]
     },
     firebase: {
       databaseUrl: env.FIREBASE_DATABASE_URL || "",

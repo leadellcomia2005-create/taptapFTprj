@@ -881,10 +881,11 @@ button { font: inherit; }
 .focus-store-button { position: absolute; z-index: 500; top: 12px; right: 12px; padding: 9px 12px; color: white; border: 2px solid white; background: var(--red); border-radius: 9px; box-shadow: 0 5px 18px rgba(20,17,13,.24); font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
 .custom-map-marker { background: transparent; border: 0; }
 .custom-map-marker span { width: 34px; height: 34px; display: grid; place-items: center; color: white; border: 4px solid white; border-radius: 50%; box-shadow: 0 4px 15px rgba(0,0,0,.25); font-size: 10px; font-weight: 900; }
-.route-eta-chip { position: absolute; z-index: 500; left: 12px; bottom: 12px; min-width: 132px; padding: 10px 12px; color: var(--ink); background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 24px rgba(20,17,13,.16); }
-.route-eta-chip strong,.route-eta-chip span { display: block; }
-.route-eta-chip strong { font-size: 12px; }
-.route-eta-chip span { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.route-eta-chip { position: absolute; z-index: 500; left: 12px; bottom: 12px; max-width: min(290px,calc(100% - 24px)); min-width: 180px; padding: 11px 13px; color: var(--ink); background: rgba(255,255,255,.96); border: 1px solid rgba(217,54,36,.22); border-left: 4px solid #d93624; border-radius: 9px; box-shadow: 0 10px 24px rgba(20,17,13,.16); }
+.route-eta-chip strong,.route-eta-chip span,.route-eta-chip small { display: block; }
+.route-eta-chip strong { font-size: 12px; font-variant-numeric: tabular-nums; }
+.route-eta-chip span { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.route-eta-chip small { margin-top: 4px; color: #6c6259; font-size: 8px; line-height: 1.35; }
 .tracking-status-text { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .proof-viewer-modal { overflow: hidden; border: 0; border-radius: 14px; }
 .proof-viewer-modal .modal-header { align-items: flex-start; background: var(--paper-soft); border-bottom: 1px solid var(--line); }

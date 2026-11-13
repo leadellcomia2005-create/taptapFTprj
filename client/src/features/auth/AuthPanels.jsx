@@ -546,7 +546,7 @@ function LoginPanel({ onLoggedIn }) {
         setTurnstileResetKey((current) => current + 1);
       } else {
         loginProgressTimer = window.setTimeout(() => {
-          setLoginProgress("Still connecting securely. The service may be waking up; this attempt will stop automatically if it cannot connect.");
+          setLoginProgress("Still connecting securely. The service may be waking up; keep this page open while we finish checking your account.");
         }, 2500);
         const signedInUser = await login(email, password, undefined, demoAccounts);
         trackLogin(demoModeEnabled ? "demo" : "firebase", signedInUser?.role || "customer");

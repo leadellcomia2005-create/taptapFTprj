@@ -320,7 +320,7 @@ export const api = {
     }),
   twoFactorStatus: (expectedRole?: UserRole) => request<TwoFactorStatusResponse>(
     expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status",
-    { timeoutMs: 35_000 }
+    { timeoutMs: 90_000 }
   ),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),

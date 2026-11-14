@@ -22,6 +22,33 @@ const daysOfStockLabel = (value) => {
   return `About ${value} ${Number(value) === 1 ? "day" : "days"} of stock left`;
 };
 const hourLabel = (hour) => new Date(2026, 0, 1, Number(hour || 0)).toLocaleTimeString("en-PH", { hour: "numeric" });
+const salesChartDayLimit = 90;
+const defaultSalesChartRange = () => {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(to.getDate() - 6);
+  return { from: localDateInputValue(from), to: localDateInputValue(to) };
+};
+const localDateFromInput = (value) => {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+
+function SalesChartControls({ chartType, onChartTypeChange, range, onRangeChange, onReset, error }) {
+  return (
+    <div className="owner-sales-chart-controls">
+      <div className="owner-chart-type" role="group" aria-label="Sales chart type">
+        <button type="button" className={chartType === "line" ? "active" : ""} aria-pressed={chartType === "line"} onClick={() => onChartTypeChange("line")}>Line</button>
+        <button type="button" className={chartType === "bar" ? "active" : ""} aria-pressed={chartType === "bar"} onClick={() => onChartTypeChange("bar")}>Bar</button>
+      </div>
+      <label>From<input type="date" value={range.from} max={range.to} onChange={(event) => onRangeChange((current) => ({ ...current, from: event.target.value }))} /></label>
+      <label>To<input type="date" value={range.to} min={range.from} max={localDateInputValue()} onChange={(event) => onRangeChange((current) => ({ ...current, to: event.target.value }))} /></label>
+      <button className="owner-chart-reset" type="button" onClick={onReset}>Last 7 days</button>
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
 
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const revenueOrders = orders.filter(isRevenueOrder);
@@ -31,16 +58,6 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const peakHours = peakOrderHours(orders);
   const runoutForecast = forecastRunouts(revenueOrders, inventory, 5);
   const shiftPerformance = [...shiftLogs].sort((a, b) => Number(b.orderCount || 0) - Number(a.orderCount || 0)).slice(0, 5);
-  const salesTrend = Array.from({ length: 7 }, (_, index) => {
-    const day = new Date();
-    day.setHours(0, 0, 0, 0);
-    day.setDate(day.getDate() - (6 - index));
-    const start = day.getTime();
-    const end = start + 24 * 60 * 60 * 1000;
-    return revenueOrders
-      .filter((order) => Number(order.createdAt || 0) >= start && Number(order.createdAt || 0) < end)
-      .reduce((sum, order) => sum + Number(order.total || 0), 0);
-  });
   const [insight, setInsight] = useState(null);
   const [insightStatus, setInsightStatus] = useState("idle");
   const [insightError, setInsightError] = useState("");
@@ -51,6 +68,8 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [recommendationStatuses, setRecommendationStatuses] = useState({});
   const salesGoal = planning.salesGoal;
   const [dashboardPeriod, setDashboardPeriod] = useState("today");
+  const [salesChartType, setSalesChartType] = useState("line");
+  const [salesChartRange, setSalesChartRange] = useState(defaultSalesChartRange);
   const [roleForm, setRoleForm] = useState({ uid: "", role: "staff", staffRole: "manager" });
   const [createUserForm, setCreateUserForm] = useState({ name: "", email: "", temporaryPassword: "", role: "staff", staffRole: "manager" });
   const [creatingUser, setCreatingUser] = useState(false);
@@ -79,6 +98,28 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const dashboardRevenueOrders = dashboardOrders.filter(isRevenueOrder);
   const dashboardSales = sumByTotal(dashboardRevenueOrders);
   const dashboardAverageOrder = dashboardRevenueOrders.length ? dashboardSales / dashboardRevenueOrders.length : 0;
+  const salesChart = useMemo(() => {
+    const from = localDateFromInput(salesChartRange.from);
+    const to = localDateFromInput(salesChartRange.to);
+    if (!from || !to || from > to) return { labels: [], values: [], error: "Choose a valid From and To date." };
+    from.setHours(0, 0, 0, 0);
+    to.setHours(0, 0, 0, 0);
+    const days = Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (days > salesChartDayLimit) return { labels: [], values: [], error: `Choose a range of ${salesChartDayLimit} days or fewer.` };
+    const labels = [];
+    const values = [];
+    for (let index = 0; index < days; index++) {
+      const day = new Date(from);
+      day.setDate(from.getDate() + index);
+      const start = day.getTime();
+      const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+      labels.push(day.toLocaleDateString("en-PH", days <= 7 ? { weekday: "short" } : { month: "short", day: "numeric" }));
+      values.push(orders
+        .filter((order) => isRevenueOrder(order) && Number(order.createdAt || 0) >= start && Number(order.createdAt || 0) < end)
+        .reduce((sum, order) => sum + Number(order.total || 0), 0));
+    }
+    return { labels, values, error: "" };
+  }, [orders, salesChartRange]);
   const periodLength = periodStart ? Math.max(1, now - periodStart) : 0;
   const previousSales = periodLength
     ? sumByTotal(orders.filter((order) => isRevenueOrder(order) && Number(order.createdAt || 0) >= periodStart - periodLength && Number(order.createdAt || 0) < periodStart))
@@ -336,7 +377,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => !["delivered", "completed", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live order workload</span></div></div>
-        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense></div></div>
+        <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Sales trends and forecast</h3><SalesChartControls chartType={salesChartType} onChartTypeChange={setSalesChartType} range={salesChartRange} onRangeChange={setSalesChartRange} onReset={() => setSalesChartRange(defaultSalesChartRange())} error={salesChart.error} />{!salesChart.error && <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesChart.values} labels={salesChart.labels} type={salesChartType} /></Suspense>}</div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Local planning controls</h3><p className="module-note">Saved only on this browser for planning. These values do not change customer pricing.</p><label className="form-label">Sales goal threshold<input className="form-control" type="number" min="1" value={salesGoal} onChange={(event) => setPlanning((current) => ({ ...current, salesGoal: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Preparation target (minutes)<input className="form-control" type="number" min="1" value={planning.prepTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, prepTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Delivery target (minutes)<input className="form-control" type="number" min="1" value={planning.deliveryTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, deliveryTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Acceptable cash variance<input className="form-control" type="number" min="0" value={planning.cashVarianceLimit} onChange={(event) => setPlanning((current) => ({ ...current, cashVarianceLimit: Math.max(0, Number(event.target.value || 0)) }))} /></label><label className="form-label">Cancellation rate limit (%)<input className="form-control" type="number" min="0.1" step="0.1" value={planning.cancellationRateLimit} onChange={(event) => setPlanning((current) => ({ ...current, cancellationRateLimit: Math.max(.1, Number(event.target.value || .1)) }))} /></label><label className="form-label">Open complaint limit<input className="form-control" type="number" min="1" value={planning.complaintLimit} onChange={(event) => setPlanning((current) => ({ ...current, complaintLimit: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Promotion scenario<select className="form-select" value={planning.activePromotion} onChange={(event) => setPlanning((current) => ({ ...current, activePromotion: event.target.value }))}><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={savePlanningStrategy}>Save on this browser</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
         <div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div>
@@ -649,10 +690,11 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
       <section className="owner-panel-grid">
         <div className="dashboard-card chart-card owner-chart-card">
           <div className="module-heading">
-            <div><p className="eyebrow text-danger">Sales performance</p><h3>Weekly revenue</h3></div>
+            <div><p className="eyebrow text-danger">Sales performance</p><h3>Revenue trend</h3></div>
             <span className="shift-chip">{Math.min(100, Math.round(dashboardSales / Math.max(1, salesGoal) * 100))}% of local goal</span>
           </div>
-          <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesTrend} /></Suspense>
+          <SalesChartControls chartType={salesChartType} onChartTypeChange={setSalesChartType} range={salesChartRange} onRangeChange={setSalesChartRange} onReset={() => setSalesChartRange(defaultSalesChartRange())} error={salesChart.error} />
+          {!salesChart.error && <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesChart.values} labels={salesChart.labels} type={salesChartType} /></Suspense>}
         </div>
         <div className="owner-listing-orders"><OrderManagement orders={activeWorkload.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="dashboard-card owner-stock-panel">

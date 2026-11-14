@@ -1,4 +1,5 @@
 import {
+  BarElement,
   CategoryScale,
   Chart as ChartJS,
   Filler,
@@ -9,28 +10,33 @@ import {
   Title,
   Tooltip
 } from "chart.js";
-import { Line } from "react-chartjs-2";
+import { Bar, Line } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 interface SalesChartProps {
   values: number[];
+  labels?: string[];
+  type?: "line" | "bar";
 }
 
-export default function SalesChart({ values }: SalesChartProps) {
+export default function SalesChart({ values, labels = [], type = "line" }: SalesChartProps) {
+  const ChartComponent = type === "bar" ? Bar : Line;
   return (
-    <Line
-      aria-label="Net sales trend for the last seven days"
+    <ChartComponent
+      aria-label={`Net sales ${type} chart for the selected date range`}
       data={{
-        labels: ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"],
+        labels,
         datasets: [{
           label: "Net sales",
           data: values,
           borderColor: "#d93624",
-          backgroundColor: "rgba(217,54,36,.12)",
-          fill: true,
-          tension: 0.38,
-          pointRadius: 4
+          backgroundColor: type === "bar" ? "rgba(217,54,36,.72)" : "rgba(217,54,36,.12)",
+          borderWidth: type === "bar" ? 1 : 2,
+          borderRadius: type === "bar" ? 7 : 0,
+          fill: type === "line",
+          tension: type === "line" ? 0.38 : 0,
+          pointRadius: type === "line" ? 4 : 0
         }]
       }}
       options={{

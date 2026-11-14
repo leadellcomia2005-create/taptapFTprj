@@ -216,6 +216,7 @@ function addDemoStockHistory(data, itemId, entry) {
 const handoffOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 let pendingRoleValidation = null;
 let recentLoginStatus = null;
+const twoFactorSessionTimeoutMs = 20_000;
 
 function withAuthTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -370,19 +371,25 @@ function roleLoginMismatchMessage(actualRole, requestedRole) {
 
 export async function completeTwoFactorSession(customToken) {
   if (!firebaseEnabled) return;
-  const credential = await signInWithCustomToken(auth, customToken);
-  const token = await credential.user.getIdTokenResult(true);
-  if (token.claims.mfaSession !== true) throw new Error("The secure POS session could not be created. Please try again.");
-  const profile = await get(ref(db, `users/${credential.user.uid}`));
-  return {
-    uid: credential.user.uid,
-    email: credential.user.email,
-    name: profile.val()?.name || credential.user.displayName || credential.user.email,
-    role: token.claims.role || profile.val()?.role || "customer",
-    emailVerified: token.claims.email_verified === true,
-    mfaVerified: true,
-    firebaseUser: credential.user
-  };
+  return withAuthTimeout((async () => {
+    const credential = await signInWithCustomToken(auth, customToken);
+    const token = await credential.user.getIdTokenResult(true);
+    if (token.claims.mfaSession !== true) throw new Error("The secure session could not be created. Please try again.");
+
+    // The custom token already contains the verified role and MFA claims. Do not
+    // block sign-in on a second database read; profile subscriptions load the
+    // remaining display data after the authenticated screen opens.
+    return {
+      uid: credential.user.uid,
+      email: credential.user.email,
+      name: credential.user.displayName || credential.user.email,
+      role: token.claims.role || "customer",
+      emailVerified: token.claims.email_verified === true,
+      mfaVerified: true,
+      firebaseUser: credential.user
+    };
+  })(), twoFactorSessionTimeoutMs,
+  "Verification took too long to finish. Please try a new code; the button is ready again.");
 }
 
 export async function resendVerificationEmail() {

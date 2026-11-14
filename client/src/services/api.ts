@@ -1,5 +1,6 @@
 import { getAuthToken } from "./authSession";
 import { apiBaseUrl } from "../config/runtimeEndpoints";
+import { loginSecurityAttemptTimeoutMs, retryLoginSecurity } from "./loginSecurity";
 import { isRecord, requireApiObject } from "../contracts/runtime";
 import type {
   ActiveShift,
@@ -251,7 +252,13 @@ function requestErrorForStatus(status: number, payload: ApiPayload = {}): string
 }
 
 async function request<T = ApiResult>(path: string, options: JsonRequestInit = {}): Promise<T> {
-  const token = await getAuthToken();
+  let tokenTimeout: ReturnType<typeof setTimeout> | undefined;
+  const token = await Promise.race([
+    getAuthToken(),
+    new Promise<never>((_, reject) => {
+      tokenTimeout = setTimeout(() => reject(new Error("Your sign-in session is taking too long to respond. Please try again.")), 10_000);
+    }),
+  ]).finally(() => clearTimeout(tokenTimeout));
   return requestWithHeaders(path, options, token ? { Authorization: `Bearer ${token}` } : {});
 }
 
@@ -266,6 +273,7 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
   callerSignal?.addEventListener("abort", forwardAbort, { once: true });
   const requestTimeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let response;
+  let rawPayload: unknown;
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...fetchOptions,
@@ -276,16 +284,20 @@ async function requestWithHeaders<T = ApiResult>(path: string, options: JsonRequ
         ...fetchOptions.headers,
       },
     });
+    // Keep the deadline active while reading the body, not only until headers arrive.
+    rawPayload = await response.json().catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      return {};
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The secure service took too long to respond. Please try again.");
+      throw Object.assign(new Error("The secure service took too long to respond. Please try again."), { code: "API_TIMEOUT" });
     }
-    throw new Error("The app could not be reached. Check your connection or restart the app, then try again.");
+    throw Object.assign(new Error("The app could not be reached. Check your connection or restart the app, then try again."), { code: "NETWORK_ERROR" });
   } finally {
     window.clearTimeout(requestTimeout);
     callerSignal?.removeEventListener("abort", forwardAbort);
   }
-  const rawPayload: unknown = await response.json().catch(() => ({}));
   const payload = isRecord(rawPayload) ? rawPayload as ApiPayload : {};
   if (!response.ok) {
     const error = new Error(requestErrorForStatus(response.status, payload)) as Error & { code?: string; status?: number };
@@ -326,10 +338,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
-  twoFactorStatus: (expectedRole?: UserRole) => request<TwoFactorStatusResponse>(
+  twoFactorStatus: (expectedRole?: UserRole) => retryLoginSecurity(() => request<TwoFactorStatusResponse>(
     expectedRole ? `/2fa/status?expectedRole=${encodeURIComponent(expectedRole)}` : "/2fa/status",
-    { timeoutMs: 90_000 }
-  ),
+    { timeoutMs: loginSecurityAttemptTimeoutMs }
+  )),
   beginTotpSetup: () =>
     request("/2fa/setup/totp", { method: "POST", body: "{}" }),
   sendTwoFactorSms: (purpose: TwoFactorPurpose) =>

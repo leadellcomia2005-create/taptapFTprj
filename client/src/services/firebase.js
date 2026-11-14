@@ -43,6 +43,7 @@ import {
   rememberAnalyticsEvent
 } from "./analyticsPolicy";
 import { configureAuthTokenProvider } from "./authSession";
+import { loginSecurityTimeoutMs } from "./loginSecurity";
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -308,8 +309,8 @@ export async function login(email, password, requestedRole, demoAccounts) {
       );
       const status = await withAuthTimeout(
         api.twoFactorStatus(requestedRole),
-        12_000,
-        "Your account was authenticated, but its security check timed out. Please try again."
+        loginSecurityTimeoutMs,
+        "Your account was authenticated, but the sign-in service is still unavailable. Please try signing in again shortly."
       );
       const role = status.role || "customer";
       if (requestedRole && requestedRole !== role) {

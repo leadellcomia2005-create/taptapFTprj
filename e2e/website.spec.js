@@ -14,6 +14,24 @@ const roleHeadings = {
   rider: /^Hi,/i
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/delivery/route", async (route) => {
+    const body = route.request().postDataJSON() || {};
+    const origin = body.origin || { lat: 14.4509229, lng: 120.9764514 };
+    const destination = body.destination || origin;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        points: [[origin.lat, origin.lng], [destination.lat, destination.lng]],
+        distanceMeters: 1200,
+        durationSeconds: 240,
+        source: "road-route",
+        cached: false
+      })
+    });
+  });
+});
+
 function watchRuntime(page) {
   const errors = [];
   const deferredRequests = [];
@@ -110,6 +128,15 @@ async function activateWithKeyboard(page, control, key = "Enter") {
   await control.focus();
   await expect(control).toBeFocused();
   await page.keyboard.press(key);
+}
+
+async function openWorkspaceMobileNavigation(page, role) {
+  const toggle = page.getByRole("button", { name: /Open navigation menu/i });
+  await expectMinimumTouchTarget(toggle);
+  await toggle.click();
+  const navigation = page.getByRole("navigation", { name: new RegExp(`${role} mobile navigation`, "i") });
+  await expect(navigation).toBeVisible();
+  return navigation;
 }
 
 test("every role uses the compact account menu and confirmed logout", async ({ page }) => {
@@ -1260,9 +1287,10 @@ test("role dashboards avoid page overflow at phone and tablet widths", async ({ 
       expect(priority?.y || 0).toBeLessThan(metrics?.y || 0);
     }
     if (role === "rider") {
-      const riderNavigation = page.getByRole("navigation", { name: /rider navigation/i });
+      const riderNavigation = await openWorkspaceMobileNavigation(page, role);
       await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /Assigned Orders/i }));
       await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /COD Ledger/i }));
+      await page.locator(".workspace-menu-toggle").click();
       const [activePanel, orderFeed] = await Promise.all([
         page.locator(".rider-active-panel").boundingBox(),
         page.locator(".rider-order-feed").boundingBox()
@@ -1393,8 +1421,9 @@ test("980px desktop-mode mobile viewport uses compact navigation without page ov
         await checkout.getByRole("button", { name: /Close cart/i }).click();
       }
     } else {
-      const riderNavigation = page.getByRole("navigation", { name: /rider navigation/i });
+      const riderNavigation = await openWorkspaceMobileNavigation(page, role);
       await expectMinimumTouchTarget(riderNavigation.getByRole("button", { name: /Assigned Orders/i }));
+      await page.locator(".workspace-menu-toggle").click();
     }
 
     await logoutFromAccountMenu(page);

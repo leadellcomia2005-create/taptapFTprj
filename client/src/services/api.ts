@@ -122,8 +122,9 @@ export interface DeliveryRouteResponse extends ApiResult {
   points: Array<[number, number]>;
   distanceMeters: number;
   durationSeconds: number;
-  source: "road-route";
+  source: "road-route" | "approximate-route";
   cached: boolean;
+  degraded?: boolean;
 }
 
 export interface AssistantResponse extends ApiResult {

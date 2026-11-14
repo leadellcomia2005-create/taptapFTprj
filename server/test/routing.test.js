@@ -57,3 +57,19 @@ test("caches nearby routes and rejects use outside the delivery area", async () 
     /outside the delivery service area/i
   );
 });
+
+test("returns a bounded approximate route when the road provider is unavailable", async () => {
+  clearDeliveryRouteCache();
+  const result = await fetchDeliveryRoute({
+    origin: [14.4509, 120.9764],
+    destination: [14.455, 120.98],
+    config,
+    fetchImpl: async () => new Response("unavailable", { status: 503 })
+  });
+
+  assert.equal(result.source, "approximate-route");
+  assert.equal(result.degraded, true);
+  assert.deepEqual(result.points, [[14.4509, 120.9764], [14.455, 120.98]]);
+  assert.ok(result.distanceMeters > 0);
+  assert.ok(result.durationSeconds >= 60);
+});

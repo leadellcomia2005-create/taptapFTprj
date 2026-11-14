@@ -18,6 +18,19 @@ function cacheKey(origin, destination) {
   return [...origin, ...destination].map((value) => Number(value).toFixed(5)).join(":");
 }
 
+function approximateRoute(origin, destination) {
+  const estimatedDistanceMeters = Math.max(1, Math.round(distanceKm(origin, destination) * 1_000 * 1.25));
+  const estimatedDurationSeconds = Math.max(60, Math.round(estimatedDistanceMeters / 1_000 / 22 * 3_600));
+  return {
+    points: [origin, destination],
+    distanceMeters: estimatedDistanceMeters,
+    durationSeconds: estimatedDurationSeconds,
+    source: "approximate-route",
+    cached: false,
+    degraded: true
+  };
+}
+
 function pruneCache(now) {
   if (routeCache.size < 250) return;
   for (const [key, entry] of routeCache) {
@@ -47,12 +60,10 @@ export async function fetchDeliveryRoute({ origin, destination, config, fetchImp
       signal: controller.signal,
       headers: { "Accept": "application/json", "User-Agent": "TapTap-Foodtrip/1.0 delivery-routing" }
     });
-    if (!response.ok) throw new HttpError(503, "Road routing is temporarily unavailable.");
+    if (!response.ok) return approximateRoute(origin, destination);
     payload = await response.json();
   } catch (error) {
-    if (error instanceof HttpError) throw error;
-    if (error?.name === "AbortError") throw new HttpError(504, "Road routing took too long to respond.");
-    throw new HttpError(503, "Road routing is temporarily unavailable.");
+    return approximateRoute(origin, destination);
   } finally {
     clearTimeout(timeout);
   }

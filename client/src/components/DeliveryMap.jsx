@@ -132,9 +132,9 @@ export default function DeliveryMap({ rider, customer = null, editableCustomer =
           etaMinutes: Math.max(1, Math.ceil(result.durationSeconds / 60)),
           label: `${Math.max(1, Math.ceil(result.durationSeconds / 60))} min drive`,
           distanceLabel: distanceLabel(result.distanceMeters),
-          source: "road-route"
+          source: result.source
         });
-        setRouteState("ready");
+        setRouteState(result.source === "road-route" ? "ready" : "fallback");
       } catch (error) {
         if (!active || controller.signal.aborted || error?.name === "AbortError") return;
         setRoadRoute(null);

@@ -19,14 +19,16 @@
     "express": "5.2.1",
     "firebase-admin": "13.10.0",
     "firebase-functions": "7.3.2",
-    "nodemailer": "9.1.1",
+    "nodemailer": "10.5.0",
     "openai": "6.42.0",
     "qrcode": "1.5.4",
     "twilio": "6.0.2"
   },
   "overrides": {
-    "brace-expansion": "5.0.9",
-    "minimatch": "10.2.4",
+    "brace-expansion": "5.0.13",
+    "glob": "14.0.6",
+    "minimatch": "11.0.8",
+    "rimraf": "6.1.4",
     "uuid": "11.1.1"
   }
 }

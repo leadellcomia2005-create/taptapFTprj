@@ -21,14 +21,16 @@
 .owner-panel-grid { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(300px,.65fr); gap: 14px; align-items: start; }
 .owner-chart-card,.owner-decision-card,.owner-stock-panel,.owner-listing-orders .dashboard-card { border-radius: 8px; }
 .owner-chart-card { min-height: 440px; }
-.owner-sales-chart-controls { display: grid; grid-template-columns: auto minmax(135px,1fr) minmax(135px,1fr) auto; align-items: end; gap: 9px; margin: 12px 0 14px; }
+.owner-sales-chart-controls { display: grid; grid-template-columns: auto minmax(135px,1fr) minmax(135px,1fr) minmax(290px,auto); align-items: end; gap: 9px; margin: 12px 0 14px; }
 .owner-sales-chart-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
-.owner-sales-chart-controls input,.owner-chart-reset,.owner-chart-type button { min-height: 38px; padding: 0 10px; color: var(--ink); border: 1px solid var(--ops-border); background: var(--surface-subtle); border-radius: 8px; font-size: 11px; font-weight: 800; }
+.owner-sales-chart-controls input,.owner-chart-type button,.owner-chart-presets button { min-height: 38px; padding: 0 10px; color: var(--ink); border: 1px solid var(--ops-border); background: var(--surface-subtle); border-radius: 8px; font-size: 11px; font-weight: 800; }
 .owner-chart-type { display: grid; grid-template-columns: repeat(2,1fr); overflow: hidden; border: 1px solid var(--ops-border); border-radius: 8px; }
 .owner-chart-type button { border: 0; border-radius: 0; }
 .owner-chart-type button + button { border-left: 1px solid var(--ops-border); }
 .owner-chart-type button.active { color: white; background: var(--red); }
-.owner-chart-reset { white-space: nowrap; cursor: pointer; }
+.owner-chart-presets { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; }
+.owner-chart-presets button { white-space: nowrap; cursor: pointer; }
+.owner-chart-grouping { grid-column: 1 / -1; color: var(--muted); font-size: 10px; font-weight: 700; }
 .owner-sales-chart-controls > p { grid-column: 1 / -1; margin: 0; color: var(--red-dark); font-size: 11px; font-weight: 700; }
 .owner-listing-orders { min-width: 0; }
 .owner-stock-panel { display: grid; gap: 10px; }
@@ -36,6 +38,7 @@
   .owner-listing-grid,
   .owner-panel-grid { grid-template-columns: minmax(0,1fr); }
   .owner-chart-card { min-height: 420px; }
+  .owner-sales-chart-controls { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 1024px) {
   .owner-stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -48,7 +51,8 @@
   .owner-listing-body { padding: 15px; }
   .owner-panel-grid { gap: 10px; }
   .owner-sales-chart-controls { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .owner-chart-type,.owner-chart-reset { width: 100%; }
+  .owner-chart-type,.owner-chart-presets { width: 100%; }
+  .owner-chart-presets { grid-template-columns: repeat(2,1fr); }
 }
 @media (max-width: 430px) {
   .owner-listing-body h3 { font-size: 26px; }

@@ -216,6 +216,40 @@ export async function retrievePayMongoCheckoutSession(sessionId, options = {}) {
   return checkoutResource(payload, configuration.mode);
 }
 
+export async function createPayMongoTestRefund({ paymentId, amount, orderId, note }, options = {}) {
+  const configuration = options.configuration || assertPayMongoConfiguration(options.environment);
+  if (configuration.mode !== "test") throw new PayMongoError("Refunds are available only in PayMongo test mode.", { status: 409, code: "REFUND_TEST_MODE_REQUIRED" });
+  if (!/^pay_[A-Za-z0-9]+$/.test(String(paymentId || "")) || !Number.isInteger(amount) || amount < 100) {
+    throw new PayMongoError("The stored payment is not eligible for a test refund.", { status: 409, code: "REFUND_PAYMENT_INVALID" });
+  }
+  const payload = await payMongoRequest("/refunds", {
+    secretKey: configuration.secretKey,
+    fetchImpl: options.fetchImpl,
+    method: "POST",
+    idempotencyKey: `taptap-refund-test-${createHash("sha256").update(`${orderId}:${paymentId}`).digest("hex")}`,
+    body: { data: { attributes: { amount, payment_id: paymentId, reason: "requested_by_customer", notes: String(note || `TapTap Foodtrip order ${orderId}`).slice(0, 255) } } }
+  });
+  return parseRefundResource(payload, paymentId, amount);
+}
+
+export async function retrievePayMongoTestRefund(refundId, { paymentId, amount, ...options } = {}) {
+  const configuration = options.configuration || assertPayMongoConfiguration(options.environment);
+  if (configuration.mode !== "test" || !/^[A-Za-z0-9_-]{3,128}$/.test(String(refundId || ""))) {
+    throw new PayMongoError("The test refund reference is invalid.", { status: 409, code: "REFUND_REFERENCE_INVALID" });
+  }
+  const payload = await payMongoRequest(`/refunds/${encodeURIComponent(refundId)}`, { secretKey: configuration.secretKey, fetchImpl: options.fetchImpl });
+  return parseRefundResource(payload, paymentId, amount);
+}
+
+function parseRefundResource(payload, paymentId, amount) {
+  const resource = payload?.data;
+  const attributes = resource?.attributes;
+  if (resource?.type !== "refund" || typeof resource.id !== "string" || attributes?.payment_id !== paymentId || attributes?.amount !== amount || attributes?.livemode !== false || !["pending", "processing", "succeeded", "failed"].includes(attributes?.status)) {
+    throw new PayMongoError("PayMongo returned an invalid test refund record.", { code: "REFUND_RESPONSE_INVALID" });
+  }
+  return { id: resource.id, status: attributes.status, livemode: false, amount: attributes.amount, paymentId: attributes.payment_id };
+}
+
 export function checkoutPaymentFromSession(session) {
   const payment = Array.isArray(session?.payments)
     ? session.payments.find((entry) => entry?.attributes?.status === "paid")

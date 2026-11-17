@@ -87,6 +87,21 @@ export const complaintUpdateSchema = z.object({
   resolution: optionalText(700)
 }).passthrough();
 
+export const refundRequestSchema = z.object({
+  reason: z.string().trim().min(3).max(120),
+  details: z.string().trim().min(10).max(700)
+}).strict();
+
+export const refundDecisionSchema = z.object({
+  action: z.enum(["approve", "reject", "refresh"]),
+  note: z.string().trim().min(3).max(300)
+}).strict();
+
+export const manualRefundCompletionSchema = z.object({
+  method: z.string().trim().min(3).max(80),
+  reference: z.string().trim().min(3).max(120)
+}).strict();
+
 export const riderLocationSchema = locationSchema.extend({ orderId: recordIdSchema });
 
 export const deliveryRouteSchema = z.object({

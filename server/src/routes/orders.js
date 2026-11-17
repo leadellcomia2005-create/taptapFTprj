@@ -5,9 +5,10 @@ import {
   listOrdersForUser,
   updateOrderRecord
 } from "../application/orders.js";
-import { canAccessOrder, HttpError, validRecordId } from "../security.js";
+import { canAccessOrder, HttpError, requireRoles, validRecordId } from "../security.js";
+import { completeManualRefund, decideRefund, requestRefund } from "../application/refunds.js";
 import { sendOrderCancellationEmail, sendOrderReceiptEmail, serviceStatus } from "../services.js";
-import { createOrderSchema, orderListQuerySchema, recordIdParams, updateOrderSchema } from "../contracts/schemas.js";
+import { createOrderSchema, manualRefundCompletionSchema, orderListQuerySchema, recordIdParams, refundDecisionSchema, refundRequestSchema, updateOrderSchema } from "../contracts/schemas.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.js";
 import { dispatchOrderPush } from "../pushNotifications.js";
@@ -49,6 +50,24 @@ export function createOrdersRouter({ config, firebase, authentication, realtime,
     }
     realtime.emit(["role:owner", "role:staff", `user:${req.user.uid}`], "order:created", result);
     res.status(result.idempotent ? 200 : 201).json({ ...result, receiptEmail });
+  }));
+
+  router.post("/orders/:orderId/refund", authenticate, requireRoles("customer"), validateParams(recordIdParams("orderId")), validateBody(refundRequestSchema), asyncRoute(async (req, res) => {
+    const result = await requestRefund(firebase.db(), req.user, req.params.orderId, req.body);
+    realtime.emit([`user:${req.user.uid}`, "role:owner"], "refund:updated", { orderId: req.params.orderId, ...result });
+    res.status(201).json(result);
+  }));
+
+  router.patch("/orders/:orderId/refund", authenticate, requireRoles("owner"), validateParams(recordIdParams("orderId")), validateBody(refundDecisionSchema), asyncRoute(async (req, res) => {
+    const result = await decideRefund(firebase.db(), req.user, req.params.orderId, req.body);
+    realtime.emit([`order:${req.params.orderId}`, "role:owner"], "refund:updated", { orderId: req.params.orderId, ...result });
+    res.json(result);
+  }));
+
+  router.post("/orders/:orderId/refund/manual", authenticate, requireRoles("owner"), validateParams(recordIdParams("orderId")), validateBody(manualRefundCompletionSchema), asyncRoute(async (req, res) => {
+    const result = await completeManualRefund(firebase.db(), req.user, req.params.orderId, req.body);
+    realtime.emit([`order:${req.params.orderId}`, "role:owner"], "refund:updated", { orderId: req.params.orderId, ...result });
+    res.json(result);
   }));
 
   router.patch("/orders/:orderId", authenticate, validateParams(recordIdParams("orderId")), validateBody(updateOrderSchema), asyncRoute(async (req, res) => {

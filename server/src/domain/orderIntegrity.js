@@ -80,6 +80,9 @@ export function orderTransitionAggregateUpdates(previous, next, timestamp = Date
   if (previous.paymentStatus !== "paid" && next.paymentStatus === "paid" && next.status !== "cancelled") {
     updates[`${path}/paidSales`] = increment(next.total);
   }
+  if (previous.paymentStatus === "paid" && next.paymentStatus === "refunded" && next.status !== "cancelled") {
+    updates[`${path}/paidSales`] = increment(-Number(previous.total || 0));
+  }
   return Object.keys(updates).length > 1 ? updates : {};
 }
 

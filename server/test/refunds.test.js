@@ -9,6 +9,34 @@ const order = (overrides = {}) => ({ customerId: customer.uid, customerName: cus
 const database = (value = order()) => new FakeRealtimeDatabase({ orders: { "TAP-1": value }, users: { [owner.uid]: { role: "owner" } } });
 const request = { reason: "Missing item", details: "The delivered order was missing an item." };
 
+function simulateColdTransactions(db) {
+  const originalRef = db.ref.bind(db);
+  let coldCalls = 0;
+  db.ref = (path) => {
+    const reference = originalRef(path);
+    if (path?.startsWith("orders/")) {
+      const transaction = reference.transaction.bind(reference);
+      reference.transaction = (update, ...options) => {
+        coldCalls += 1;
+        assert.equal(update(null), null, "an empty local cache must not reject or delete the order");
+        return transaction(update, ...options);
+      };
+    }
+    return reference;
+  };
+  return () => coldCalls;
+}
+
+test("refund transactions retry after an empty Admin SDK cache", async () => {
+  const db = database(order({ paymentMethod: "cod", paymentStatus: "cod-collected" }));
+  const coldCalls = simulateColdTransactions(db);
+  await requestRefund(db, customer, "TAP-1", request);
+  await decideRefund(db, owner, "TAP-1", { action: "approve", note: "Verified issue" });
+  await completeManualRefund(db, owner, "TAP-1", { method: "Cash handoff", reference: "RECEIPT-123" });
+  assert.equal(coldCalls(), 3);
+  assert.equal(db.read("orders/TAP-1/refundRequest/status"), "manual-refunded");
+});
+
 test("customer can request one refund for a paid sandbox order, including after delivery", async () => {
   const db = database();
   const result = await requestRefund(db, customer, "TAP-1", request);
@@ -51,6 +79,7 @@ test("owner rejection records a decision without changing payment status", async
 
 test("PayMongo success is recorded as sandbox only and never repeated", async () => {
   const db = database();
+  const coldCalls = simulateColdTransactions(db);
   await requestRefund(db, customer, "TAP-1", request);
   let calls = 0;
   const options = { configuration: { mode: "test", secretKey: "sk_test_fake" }, fetchImpl: async (_url, init) => {
@@ -63,6 +92,7 @@ test("PayMongo success is recorded as sandbox only and never repeated", async ()
   assert.equal(db.read("orders/TAP-1/paymentStatus"), "refunded");
   await assert.rejects(decideRefund(db, owner, "TAP-1", { action: "approve", note: "Again" }, options), /already been reviewed/);
   assert.equal(calls, 1);
+  assert.equal(coldCalls(), 3);
 });
 
 test("provider failure never records a completed refund", async () => {

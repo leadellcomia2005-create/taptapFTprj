@@ -540,6 +540,7 @@ test("owner Groq KPI advisor renders structured review-only recommendations", as
       generatedAt: Date.now(),
       insight: {
         summary: "Bangus Meal needs owner attention.",
+        discussion: "Four paid orders included Bangus Meal. Review the recorded stock count before replenishing.",
         salesTrend: "Paid meal sales were steady in the selected period.",
         peakPeriod: "The busiest period was 12 PM to 1 PM.",
         ownerAction: "Review the Bangus Meal reorder recommendation before receiving stock.",
@@ -557,6 +558,9 @@ test("owner Groq KPI advisor renders structured review-only recommendations", as
   await advisor.getByLabel("Analysis period").selectOption("7d");
   await advisor.getByRole("button", { name: "Generate analysis" }).click();
   await expect(advisor.getByText("Bangus Meal needs owner attention.")).toBeVisible();
+  await expect(advisor.getByText("Discussion", { exact: true })).toBeVisible();
+  await expect(advisor).toContainText("Review the recorded stock count before replenishing.");
+  await expect(advisor.getByRole("region", { name: "Analysis evidence" })).toBeVisible();
   await expect(advisor.getByText("Stock risks", { exact: true })).toBeVisible();
   await expect(advisor.getByText("Reorder priorities", { exact: true })).toBeVisible();
   await expect(advisor.getByText("+16")).toBeVisible();

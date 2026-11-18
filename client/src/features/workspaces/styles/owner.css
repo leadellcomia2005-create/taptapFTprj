@@ -138,6 +138,14 @@
 .owner-ai-empty > svg { width: 40px; height: 40px; padding: 9px; color: var(--red); background: var(--red-soft); border-radius: 8px; }
 .owner-ai-empty strong { display: block; margin-bottom: 5px; font-size: 14px; }
 .owner-ai-result { display: grid; gap: 16px; }
+.owner-ai-evidence { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.owner-ai-evidence > div { min-width: 0; display: grid; align-content: start; gap: 5px; padding: 12px; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: var(--radius-control); }
+.owner-ai-evidence span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.owner-ai-evidence strong { overflow-wrap: anywhere; font-size: 15px; }
+.owner-ai-evidence small { color: var(--muted); font-size: 11px; }
+.owner-decision-card.ai-insight .owner-ai-limited { padding: 10px 12px; color: #71500a; background: #fff2c9; border-radius: var(--radius-control); }
+.owner-ai-discussion { border-left-color: #357a5b; }
+.owner-decision-card.ai-insight .owner-ai-discussion p { color: var(--ink); font-size: 13px; }
 .owner-ai-summary,.owner-ai-action { padding-left: 13px; border-left: 3px solid var(--red); }
 .owner-ai-summary > span,.owner-ai-action > span,.owner-ai-observations span,.owner-ai-section > div > span { display: block; margin-bottom: 5px; color: var(--ink); font-size: 10px; font-weight: 900; text-transform: uppercase; }
 .owner-ai-counts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); border: 1px solid var(--ops-border); border-radius: var(--radius-control); }
@@ -299,10 +307,12 @@
 .owner-priority-empty { padding: 18px; color: var(--muted); background: var(--surface-subtle); border: 1px dashed var(--ops-border); border-radius: 8px; font-size: 11px; }
 .owner-tracking-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
 @media (max-width: 1000px) {
+  .owner-ai-evidence { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .owner-decision-metrics,.owner-comparison-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .owner-intelligence-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
+  .owner-ai-evidence { grid-template-columns: 1fr; }
   .owner-section-nav { margin-inline: 0; }
   .owner-dashboard-section { padding: 14px; }
   .owner-dashboard-section .module-heading { align-items: flex-start; flex-direction: column; }

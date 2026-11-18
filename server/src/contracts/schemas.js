@@ -405,28 +405,6 @@ const decisionSupportSchema = z.object({
       reason: z.string().trim().max(180)
     }).strict()).max(10)
   }).strict(),
-  forecast: z.object({
-    available: z.boolean(),
-    confidence: z.enum(["strong", "moderate", "limited"]),
-    historyDays: z.number().int().nonnegative(),
-    analyzedOrders: z.number().int().nonnegative(),
-    reason: z.string().trim().max(240),
-    tomorrow: z.object({ sales: z.number().nonnegative(), orders: z.number().nonnegative() }).strict(),
-    sevenDays: z.object({ sales: z.number().nonnegative(), orders: z.number().nonnegative() }).strict(),
-    products: z.array(z.object({
-      id: z.string().trim().max(128),
-      name: z.string().trim().max(100),
-      dailyDemand: z.number().nonnegative(),
-      sevenDayDemand: z.number().nonnegative(),
-      daysToDepletion: z.number().nonnegative().nullable(),
-      suggestedReorder: z.number().int().nonnegative()
-    }).strict()).max(8),
-    staffing: z.array(z.object({
-      label: z.enum(["Morning", "Afternoon", "Evening"]),
-      expectedOrders: z.number().nonnegative(),
-      suggestedStaff: z.number().int().positive().nullable()
-    }).strict()).max(3)
-  }).strict(),
   priorities: z.array(z.object({
     id: z.string().trim().max(80),
     title: z.string().trim().max(100),
@@ -444,7 +422,7 @@ const decisionSupportSchema = z.object({
     ageMinutes: z.number().int().nonnegative().nullable(),
     stale: z.boolean()
   }).strict()
-}).strict();
+});
 export const insightRequestSchema = z.object({
   sales: z.array(insightRecordSchema).max(500),
   inventory: z.array(insightRecordSchema).max(250),

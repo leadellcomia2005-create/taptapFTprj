@@ -34,9 +34,6 @@ export interface ItemSalesStat {
   reorderPoint: number;
   qty: number;
   sales: number;
-  recentQty: number;
-  dailyVelocity: number;
-  daysLeft: number;
 }
 
 export interface PeakOrderHour {
@@ -151,35 +148,25 @@ export function orderPrepClock(order: Partial<Order> = {}, now: TimestampMs = Da
 }
 
 export function itemSalesStats(orders: SalesOrder[] = [], inventory: SalesInventoryItem[] = []): ItemSalesStat[] {
-  const stats = new Map<string, Omit<ItemSalesStat, "dailyVelocity" | "daysLeft">>(inventory.map((item) => [item.id, {
+  const stats = new Map<string, ItemSalesStat>(inventory.map((item) => [item.id, {
     id: item.id,
     name: item.name,
     stock: Number(item.stock || 0),
     reorderPoint: Number(item.reorderPoint ?? 10),
     qty: 0,
-    sales: 0,
-    recentQty: 0
+    sales: 0
   }]));
-  const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
   for (const order of orders) {
     if (NON_REVENUE_ORDER_STATUSES.includes(order.status as never)) continue;
     for (const item of order.items || []) {
-      const current = stats.get(item.id) || { id: item.id, name: item.name, stock: 0, reorderPoint: 0, qty: 0, sales: 0, recentQty: 0 };
+      const current = stats.get(item.id) || { id: item.id, name: item.name, stock: 0, reorderPoint: 0, qty: 0, sales: 0 };
       const qty = Number(item.qty || 0);
       current.qty += qty;
       current.sales += qty * Number(item.price || 0);
-      if (Number(order.createdAt || 0) >= since) current.recentQty += qty;
       stats.set(item.id, current);
     }
   }
-  return [...stats.values()].map((item) => {
-    const dailyVelocity = item.recentQty / 7;
-    return {
-      ...item,
-      dailyVelocity,
-      daysLeft: dailyVelocity > 0 ? item.stock / dailyVelocity : Infinity
-    };
-  });
+  return [...stats.values()];
 }
 
 export const bestSellers = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 5): ItemSalesStat[] =>
@@ -187,12 +174,6 @@ export const bestSellers = (orders: SalesOrder[], inventory: SalesInventoryItem[
 
 export const slowMovingItems = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 5): ItemSalesStat[] =>
   itemSalesStats(orders, inventory).sort((a, b) => a.qty - b.qty || b.stock - a.stock).slice(0, count);
-
-export const forecastRunouts = (orders: SalesOrder[], inventory: SalesInventoryItem[], count = 6): ItemSalesStat[] =>
-  itemSalesStats(orders, inventory)
-    .filter((item) => item.stock > 0 && item.daysLeft !== Infinity)
-    .sort((a, b) => a.daysLeft - b.daysLeft)
-    .slice(0, count);
 
 export function peakOrderHours(orders: Array<Pick<Order, "createdAt">> = []): PeakOrderHour[] {
   const hours = new Map<number, number>();

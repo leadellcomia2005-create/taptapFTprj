@@ -284,27 +284,6 @@
 .owner-data-availability li { display: grid; gap: 2px; padding: 9px; background: white; border: 1px dashed var(--ops-border); border-radius: 6px; }
 .owner-data-availability li strong { font-size: 11px; }
 .owner-data-availability li span { color: var(--muted); font-size: 10px; }
-.forecast-confidence { padding: 5px 9px; border-radius: 999px; font-size: 9px; font-weight: 900; text-transform: uppercase; }
-.forecast-confidence.strong { color: #23623a; background: #e8f6ed; }
-.forecast-confidence.moderate { color: #71500a; background: #fff2c9; }
-.forecast-confidence.limited { color: #872c20; background: #ffebe6; }
-.owner-forecast-empty { padding: 18px; background: var(--surface-subtle); border: 1px dashed var(--ops-border); border-radius: 8px; }
-.owner-forecast-empty strong { display: block; margin-bottom: 5px; }
-.owner-forecast-empty p,.owner-forecast-method { margin: 0; color: var(--muted); font-size: 11px; }
-.owner-forecast-empty small { display: block; margin-top: 7px; color: var(--muted); }
-.owner-forecast-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
-.owner-forecast-metrics > div { min-width: 0; display: grid; gap: 5px; padding: 14px; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: 8px; }
-.owner-forecast-metrics small { color: var(--muted); font-size: 9px; font-weight: 900; text-transform: uppercase; }
-.owner-forecast-metrics strong { font: 800 22px/1 var(--display); }
-.owner-forecast-metrics span { color: var(--muted); font-size: 10px; }
-.owner-forecast-details { margin-top: 12px; border-top: 1px solid var(--ops-border); }
-.owner-forecast-details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 11px; font-weight: 900; }
-.owner-forecast-details > div { display: grid; }
-.owner-forecast-details button { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 12px; padding: 11px 0; color: var(--ink); text-align: left; background: transparent; border: 0; border-top: 1px solid var(--ops-border); }
-.owner-forecast-details button span { min-width: 0; display: grid; gap: 3px; }
-.owner-forecast-details button small,.owner-forecast-details button em { color: var(--muted); font-size: 10px; font-style: normal; }
-.owner-forecast-details button b { color: var(--red-dark); font-size: 11px; }
-.owner-forecast-method { margin-top: 12px; }
 .owner-priority-list { display: grid; gap: 8px; }
 .owner-priority-list > article { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) 150px; align-items: stretch; background: var(--surface-subtle); border: 1px solid var(--ops-border); border-radius: 8px; overflow: hidden; }
 .owner-priority-list .owner-priority-open { min-width: 0; min-height: 82px; display: grid; grid-template-columns: 72px minmax(0,1fr) minmax(100px,.3fr) 20px; align-items: center; gap: 12px; padding: 12px; color: var(--ink); text-align: left; background: transparent; border: 0; }
@@ -321,16 +300,14 @@
 .owner-tracking-note { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
 @media (max-width: 1000px) {
   .owner-decision-metrics,.owner-comparison-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .owner-forecast-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .owner-intelligence-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .owner-section-nav { margin-inline: 0; }
   .owner-dashboard-section { padding: 14px; }
   .owner-dashboard-section .module-heading { align-items: flex-start; flex-direction: column; }
-  .owner-decision-metrics,.owner-comparison-grid,.owner-forecast-metrics { grid-template-columns: 1fr; }
+  .owner-decision-metrics,.owner-comparison-grid { grid-template-columns: 1fr; }
   .owner-decision-metrics button,.owner-comparison-grid button { min-height: 88px; }
-  .owner-forecast-details button { grid-template-columns: minmax(0,1fr); gap: 5px; }
   .owner-intelligence-grid dl > div { grid-template-columns: 1fr; gap: 4px; }
   .owner-intelligence-grid dd { text-align: left; }
   .owner-priority-list > article { grid-template-columns: 1fr; }

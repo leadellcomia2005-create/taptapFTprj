@@ -104,94 +104,6 @@ function comparison(label, current, previous, destination = "owner-sales") {
   };
 }
 
-function dailySeries(orders, days, now, isRevenueOrder) {
-  return Array.from({ length: days }, (_, index) => {
-    const key = dayKeyFromOffset(now, index - (days - 1));
-    const scoped = orders.filter((order) => dateKey(order.createdAt) === key && isRevenueOrder(order));
-    return {
-      date: key,
-      sales: scoped.reduce((sum, order) => sum + Number(order.total || 0), 0),
-      orders: scoped.length
-    };
-  });
-}
-
-function coefficientOfVariation(values) {
-  if (!values.length) return Infinity;
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-  if (!mean) return Infinity;
-  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
-  return Math.sqrt(variance) / mean;
-}
-
-function buildForecast(orders, inventory, now, isRevenueOrder) {
-  const revenueOrders = orders.filter(isRevenueOrder).filter((order) => validTime(order.createdAt));
-  const earliest = revenueOrders.reduce((value, order) => Math.min(value, Number(order.createdAt)), Infinity);
-  const historyDays = Number.isFinite(earliest) ? Math.min(28, Math.max(1, Math.floor((now - earliest) / dayMs) + 1)) : 0;
-  const series = dailySeries(revenueOrders, 28, now, isRevenueOrder);
-  const observed = historyDays ? series.slice(-historyDays) : [];
-  const recent7 = series.slice(-7);
-  const earlier21 = series.slice(-28, -7);
-  const recentSalesAverage = recent7.reduce((sum, row) => sum + row.sales, 0) / 7;
-  const earlierSalesAverage = earlier21.reduce((sum, row) => sum + row.sales, 0) / 21;
-  const recentOrderAverage = recent7.reduce((sum, row) => sum + row.orders, 0) / 7;
-  const earlierOrderAverage = earlier21.reduce((sum, row) => sum + row.orders, 0) / 21;
-  const variation = coefficientOfVariation(observed.map((row) => row.orders));
-  const confidence = historyDays >= 28 && revenueOrders.length >= 50 && variation <= 1
-    ? "strong"
-    : historyDays >= 14 && revenueOrders.length >= 20
-      ? "moderate"
-      : "limited";
-  const available = historyDays >= 7 && revenueOrders.length >= 10;
-  const tomorrowSales = available ? recentSalesAverage * .7 + earlierSalesAverage * .3 : 0;
-  const tomorrowOrders = available ? recentOrderAverage * .7 + earlierOrderAverage * .3 : 0;
-  const productQuantities = new Map();
-  for (const order of revenueOrders.filter((entry) => Number(entry.createdAt || 0) >= now - Math.max(7, historyDays) * dayMs)) {
-    for (const item of order.items || []) {
-      productQuantities.set(item.id, (productQuantities.get(item.id) || 0) + Number(item.qty || 0));
-    }
-  }
-  const denominator = Math.max(1, historyDays);
-  const products = inventory.map((item) => {
-    const dailyDemand = (productQuantities.get(item.id) || 0) / denominator;
-    const stock = Number(item.stock || 0);
-    const reorderPoint = Number(item.reorderPoint || 0);
-    return {
-      id: item.id,
-      name: item.name,
-      dailyDemand: round(dailyDemand, 2),
-      sevenDayDemand: round(dailyDemand * 7, 1),
-      daysToDepletion: dailyDemand > 0 ? round(stock / dailyDemand, 1) : null,
-      suggestedReorder: Math.max(0, Math.ceil(dailyDemand * 7 + reorderPoint - stock))
-    };
-  }).filter((item) => item.dailyDemand > 0).sort((a, b) => (a.daysToDepletion ?? Infinity) - (b.daysToDepletion ?? Infinity)).slice(0, 8);
-
-  const shifts = [
-    { label: "Morning", start: 6, end: 12 },
-    { label: "Afternoon", start: 12, end: 18 },
-    { label: "Evening", start: 18, end: 24 }
-  ].map((shift) => {
-    const count = revenueOrders.filter((order) => {
-      const hour = Number(manilaHourFormatter.format(new Date(Number(order.createdAt || 0))));
-      return hour >= shift.start && hour < shift.end;
-    }).length;
-    const expectedOrders = historyDays ? count / historyDays : 0;
-    return { label: shift.label, expectedOrders: round(expectedOrders, 1), suggestedStaff: available ? Math.max(1, Math.ceil(expectedOrders / 8)) : null };
-  });
-
-  return {
-    available,
-    confidence,
-    historyDays,
-    analyzedOrders: revenueOrders.length,
-    reason: available ? "Weighted moving average using the latest 28 days." : "At least 10 paid orders across 7 days are required for a reliable forecast.",
-    tomorrow: { sales: round(tomorrowSales, 2), orders: round(tomorrowOrders, 1) },
-    sevenDays: { sales: round(tomorrowSales * 7, 2), orders: round(tomorrowOrders * 7, 1) },
-    products,
-    staffing: shifts
-  };
-}
-
 function priority(id, title, value, threshold, weight, detail, action, role, deadline, destination) {
   const ratio = threshold > 0 ? value / threshold : value > 0 ? 2 : 0;
   const score = Math.min(100, Math.round(ratio * weight));
@@ -249,7 +161,6 @@ export function calculateOwnerDecisionSupport({ orders = [], inventory = [], com
     comparison("Last 7 days vs previous 7", summarizeWindow(orders, -6, 7, now, isRevenueOrder), summarizeWindow(orders, -13, 7, now, isRevenueOrder)),
     comparison("Last 30 days vs previous 30", summarizeWindow(orders, -29, 30, now, isRevenueOrder), summarizeWindow(orders, -59, 30, now, isRevenueOrder))
   ];
-  const forecast = buildForecast(orders, inventory, now, isRevenueOrder);
   const businessPatterns = buildBusinessPatterns(orders, inventory, now, isRevenueOrder);
   const priorities = [
     priority("paid-cancellations", "Paid cancellations", paidCancellations.length, 1, 60, "Cancelled paid orders require manual payment review.", "Review the payment record and document the outcome.", "Owner", "Today", "owner-reports"),
@@ -268,7 +179,6 @@ export function calculateOwnerDecisionSupport({ orders = [], inventory = [], com
     kpis,
     comparisons,
     businessPatterns,
-    forecast,
     priorities,
     freshness: {
       latestDataAt,
@@ -277,39 +187,3 @@ export function calculateOwnerDecisionSupport({ orders = [], inventory = [], com
     }
   };
 }
-
-export function evaluateForecastHistory(history = [], orders = [], now = Date.now(), isRevenueOrder = () => false) {
-  const today = dateKey(now);
-  const completed = (Array.isArray(history) ? history : []).filter((entry) => entry?.targetDate && entry.targetDate < today).map((entry) => {
-    const actualOrders = orders.filter((order) => dateKey(order.createdAt) === entry.targetDate && isRevenueOrder(order));
-    const actualSales = actualOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-    const salesErrorPercent = actualSales > 0 ? Math.abs(Number(entry.predictedSales || 0) - actualSales) / actualSales * 100 : Number(entry.predictedSales || 0) > 0 ? 100 : 0;
-    const orderErrorPercent = actualOrders.length > 0 ? Math.abs(Number(entry.predictedOrders || 0) - actualOrders.length) / actualOrders.length * 100 : Number(entry.predictedOrders || 0) > 0 ? 100 : 0;
-    return {
-      targetDate: entry.targetDate,
-      predictedSales: Number(entry.predictedSales || 0),
-      actualSales: round(actualSales, 2),
-      predictedOrders: Number(entry.predictedOrders || 0),
-      actualOrders: actualOrders.length,
-      salesErrorPercent: round(salesErrorPercent, 1),
-      orderErrorPercent: round(orderErrorPercent, 1),
-      accuracyPercent: round(Math.max(0, 100 - (salesErrorPercent + orderErrorPercent) / 2), 1)
-    };
-  }).sort((a, b) => b.targetDate.localeCompare(a.targetDate));
-  return { completedCount: completed.length, latest: completed[0] || null, recent: completed.slice(0, 7) };
-}
-
-export function recordForecast(history = [], forecast, now = Date.now()) {
-  const current = Array.isArray(history) ? history.filter((entry) => entry?.targetDate) : [];
-  if (!forecast?.available) return current.slice(-60);
-  const targetDate = dayKeyFromOffset(now, 1);
-  const next = {
-    targetDate,
-    createdAt: now,
-    predictedSales: Number(forecast.tomorrow?.sales || 0),
-    predictedOrders: Number(forecast.tomorrow?.orders || 0),
-    confidence: forecast.confidence
-  };
-  return [...current.filter((entry) => entry.targetDate !== targetDate), next].sort((a, b) => a.targetDate.localeCompare(b.targetDate)).slice(-60);
-}
-

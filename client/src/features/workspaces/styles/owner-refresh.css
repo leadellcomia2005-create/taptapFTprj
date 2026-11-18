@@ -1,0 +1,229 @@
+/* Owner dashboard presentation. The operational controls and data stay in their existing components. */
+.app-shell .owner-listing-page {
+  --owner-border: #e8ddd2;
+  --owner-soft: #fbf7f1;
+  --owner-cream: #fff9f2;
+  --owner-shadow: 0 14px 34px rgba(58, 33, 21, .055);
+  width: 100%;
+  max-width: 1680px;
+  margin-inline: auto;
+  padding: clamp(16px, 2vw, 32px);
+  background: radial-gradient(circle at 4% 0, rgba(231, 136, 68, .11), transparent 28%), var(--ops-background, #faf7f2);
+}
+
+.app-shell .owner-listing-page .owner-listing-hero.workspace-overview-header {
+  display: flex;
+  align-items: center;
+  min-height: 174px;
+  padding: clamp(22px, 2.5vw, 36px);
+  color: #fffaf5;
+  background: radial-gradient(circle at 89% 14%, rgba(255, 198, 123, .22), transparent 24%), linear-gradient(115deg, #241a15 0%, #67271e 53%, #bb3929 100%);
+  border: 1px solid #6b2a20;
+  border-radius: 20px;
+  box-shadow: 0 20px 46px rgba(83, 36, 25, .18);
+}
+.app-shell .owner-listing-page .owner-listing-hero h1 { max-width: 22ch; color: #fffaf5; font-size: clamp(31px, 3vw, 44px); line-height: 1.07; }
+.app-shell .owner-listing-page .owner-listing-hero .eyebrow { color: #ffbd9e; font-size: 11px; letter-spacing: .13em; }
+.app-shell .owner-listing-page .owner-listing-hero p:not(.eyebrow) { max-width: 58ch; color: #f6ded2; font-size: 14px; line-height: 1.55; }
+.app-shell .owner-listing-page .owner-hero-actions { min-width: min(350px, 100%); }
+.app-shell .owner-listing-page .owner-hero-actions label { color: #f7dfd4; font-size: 11px; }
+.app-shell .owner-listing-page .owner-hero-actions select { min-height: 46px; color: #261b16; background: #fffaf5; border-color: rgba(255, 255, 255, .55); font-size: 13px; }
+.app-shell .owner-listing-page .owner-workspace-header .btn { min-height: 46px; color: #fffaf5; background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.5); font-size: 13px; }
+.app-shell .owner-listing-page .owner-workspace-header .btn:hover { color: #301a15; background: #fffaf5; border-color: #fffaf5; }
+
+.app-shell .owner-listing-page .owner-overview-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px 20px; margin: 14px 2px 16px; color: #5e5149; font-size: 12px; }
+.app-shell .owner-listing-page .owner-overview-meta > span:not(:last-child) { display: inline-flex; align-items: center; min-height: 30px; }
+.app-shell .owner-listing-page .owner-overview-meta > span:last-child { margin-left: auto; }
+.app-shell .owner-listing-page .owner-section-nav { display: flex; flex-wrap: nowrap; gap: 6px; top: 80px; margin-bottom: 18px; padding: 6px; background: rgba(255,255,255,.94); border: 1px solid var(--owner-border); border-radius: 13px; box-shadow: var(--owner-shadow); }
+.app-shell .owner-listing-page .owner-section-nav button { min-height: 42px; padding-inline: 16px; color: #534039; background: transparent; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 750; }
+.app-shell .owner-listing-page .owner-section-nav button:hover,
+.app-shell .owner-listing-page .owner-section-nav button:focus-visible { color: #9f2c22; background: #fff2e9; border-color: #efc8b7; }
+
+.app-shell .owner-listing-page :is(.owner-attention-board, .owner-dashboard-section, .owner-panel-grid > .dashboard-card, .owner-listing-orders .dashboard-card) {
+  min-width: 0;
+  border: 1px solid var(--owner-border);
+  border-radius: 17px;
+  background: #fffdfa;
+  box-shadow: var(--owner-shadow);
+}
+.app-shell .owner-listing-page :is(.owner-attention-board, .owner-dashboard-section) { padding: clamp(18px, 2vw, 26px); }
+.app-shell .owner-listing-page .owner-attention-board { margin-bottom: 16px; }
+.app-shell .owner-listing-page .owner-decision-dashboard { gap: 16px; margin-bottom: 18px; }
+.app-shell .owner-listing-page :is(.owner-attention-board, .owner-kpi-grid, .owner-dashboard-section, .owner-decision-card) { scroll-margin-top: 164px; }
+.app-shell .owner-listing-page .owner-dashboard-section { margin-bottom: 0; }
+.app-shell .owner-listing-page .module-heading { align-items: flex-end; gap: 10px 24px; margin-bottom: 18px; }
+.app-shell .owner-listing-page .module-heading .eyebrow { font-size: 11px; letter-spacing: .11em; }
+.app-shell .owner-listing-page .owner-dashboard-section h2,
+.app-shell .owner-listing-page .owner-attention-board h2 { margin-top: 4px; font-size: clamp(24px, 2vw, 30px); line-height: 1.13; }
+.app-shell .owner-listing-page .module-note { color: #66574f; font-size: 12px; line-height: 1.5; }
+
+.app-shell .owner-listing-page .owner-attention-grid { gap: 10px; }
+.app-shell .owner-listing-page .owner-attention-grid > button { min-height: 114px; padding: 16px; background: #fffaf5; border: 1px solid var(--owner-border); border-radius: 12px; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.app-shell .owner-listing-page .owner-attention-grid > button:hover { background: #fff3ea; border-color: #dba991; transform: translateY(-1px); }
+.app-shell .owner-listing-page .owner-attention-grid > button.warning { background: #fffbf1; border-color: #e9d39c; }
+.app-shell .owner-listing-page .owner-attention-grid > button.urgent { background: #fff5f1; border-color: #ebbaaa; }
+.app-shell .owner-listing-page .owner-attention-grid strong { font-size: 29px; }
+.app-shell .owner-listing-page .owner-attention-grid b { color: #2b211d; font-size: 13px; }
+.app-shell .owner-listing-page .owner-attention-grid small { color: #65574e; font-size: 12px; line-height: 1.45; }
+
+.app-shell .owner-listing-page .owner-kpi-grid { gap: 12px; margin-bottom: 18px; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card { min-height: 142px; padding: 19px; background: #fffdfa; border: 1px solid var(--owner-border); border-top: 3px solid #c53b2c; border-radius: 13px; box-shadow: var(--owner-shadow); }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card:nth-child(2) { border-top-color: #d79a37; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card:nth-child(3) { border-top-color: #50866a; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card:nth-child(4) { border-top-color: #b77f4c; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card small { color: #66564e; font-size: 11px; font-weight: 800; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card strong { margin: 8px 0; color: #261b16; font-size: clamp(26px, 2.3vw, 35px); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.app-shell .owner-listing-page .owner-kpi-grid .owner-metric-card span { color: #66564e; font-size: 12px; line-height: 1.45; }
+
+.app-shell .owner-listing-page .owner-decision-metrics,
+.app-shell .owner-listing-page .owner-comparison-grid { gap: 10px; }
+.app-shell .owner-listing-page .owner-decision-metrics button,
+.app-shell .owner-listing-page .owner-comparison-grid button { min-height: 122px; gap: 8px; padding: 18px; background: var(--owner-soft); border: 1px solid var(--owner-border); border-radius: 12px; transition: border-color .18s ease, background .18s ease; }
+.app-shell .owner-listing-page .owner-decision-metrics button:hover,
+.app-shell .owner-listing-page .owner-comparison-grid button:hover { background: #fff4e9; border-color: #d8a78f; }
+.app-shell .owner-listing-page .owner-decision-metrics small,
+.app-shell .owner-listing-page .owner-comparison-grid span { color: #69564c; font-size: 11px; letter-spacing: .035em; }
+.app-shell .owner-listing-page .owner-decision-metrics strong { font-size: clamp(22px, 1.9vw, 29px); line-height: 1.15; }
+.app-shell .owner-listing-page .owner-decision-metrics span,
+.app-shell .owner-listing-page .owner-comparison-grid small { color: #6d5c51; font-size: 12px; line-height: 1.45; }
+.app-shell .owner-listing-page .owner-comparison-grid strong { font-size: clamp(21px, 1.8vw, 26px); line-height: 1.18; }
+
+.app-shell .owner-listing-page .owner-intelligence-grid { gap: 12px; }
+.app-shell .owner-listing-page .owner-intelligence-grid > section { padding: 18px; background: #fffaf5; border: 1px solid var(--owner-border); border-radius: 12px; }
+.app-shell .owner-listing-page .owner-intelligence-heading h3 { font-size: 21px; }
+.app-shell .owner-listing-page .owner-intelligence-grid dl > div { grid-template-columns: minmax(125px,.8fr) minmax(0,1.2fr); gap: 14px; padding: 12px 0; border-color: var(--owner-border); }
+.app-shell .owner-listing-page .owner-intelligence-grid dt { color: #69564c; font-size: 11px; line-height: 1.35; }
+.app-shell .owner-listing-page .owner-intelligence-grid dd { color: #30231e; font-size: 13px; line-height: 1.4; }
+.app-shell .owner-listing-page .owner-priority-list { gap: 10px; }
+.app-shell .owner-listing-page .owner-priority-list > article { background: #fffaf5; border-color: var(--owner-border); border-radius: 12px; }
+.app-shell .owner-listing-page .owner-priority-list .owner-priority-open { min-height: 94px; padding: 16px; }
+.app-shell .owner-listing-page .owner-priority-list strong { font-size: 14px; }
+.app-shell .owner-listing-page .owner-priority-list small,
+.app-shell .owner-listing-page .owner-priority-list em { font-size: 12px; line-height: 1.4; }
+.app-shell .owner-listing-page .owner-priority-list > article > label { padding: 13px; font-size: 11px; }
+.app-shell .owner-listing-page .owner-priority-list .priority-level { font-size: 10px; }
+.app-shell .owner-listing-page .owner-tracking-note { margin-top: 14px; font-size: 12px; }
+
+.app-shell .owner-listing-page .owner-panel-grid { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); align-items: stretch; gap: 14px; }
+.app-shell .owner-listing-page .owner-panel-grid > * { grid-column: span 4; min-width: 0; }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card { grid-column: span 8; min-height: 0; }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: span 4; }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-decision-card { grid-column: 1 / -1; }
+.app-shell .owner-listing-page .owner-panel-grid > .dashboard-card,
+.app-shell .owner-listing-page .owner-listing-orders .dashboard-card { padding: 22px; }
+.app-shell .owner-listing-page .owner-panel-grid > .dashboard-card h3 { margin-bottom: 14px; color: #2b201c; font-size: clamp(20px, 1.7vw, 24px); }
+.app-shell .owner-listing-page .owner-panel-grid .alert-row { gap: 10px; padding-block: 12px; }
+.app-shell .owner-listing-page .owner-panel-grid .alert-row strong { font-size: 13px; }
+.app-shell .owner-listing-page .owner-panel-grid .alert-row small { color: #6b5b51; font-size: 12px; }
+.app-shell .owner-listing-page .owner-chart-card .sales-chart-canvas { height: 310px; min-height: 310px; }
+.app-shell .owner-listing-page .owner-chart-card .sales-chart-empty { min-height: 210px; }
+
+.app-shell .owner-listing-page .owner-decision-card.ai-insight { gap: 0; padding: 0; overflow: hidden; background: #fffdfa; }
+.app-shell .owner-listing-page .owner-ai-heading { padding: 24px 28px; background: linear-gradient(105deg, #291e19, #702b22 72%, #a83a2c); }
+.app-shell .owner-listing-page .owner-ai-heading .eyebrow { color: #ffc1a1; font-size: 11px; letter-spacing: .12em; }
+.app-shell .owner-listing-page .owner-ai-heading h3 { margin: 4px 0 7px; color: #fffaf5; font-size: clamp(25px, 2.4vw, 32px); }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-decision-card .owner-ai-heading h3 { color: #fffaf5; }
+.app-shell .owner-listing-page .owner-ai-heading > div > small { color: #f5ddd1; font-size: 13px; line-height: 1.5; }
+.app-shell .owner-listing-page .owner-ai-controls { display: grid; grid-template-columns: repeat(2, minmax(0,240px)); gap: 14px; margin: 0; padding: 20px 28px 12px; background: #fffaf5; border: 0; }
+.app-shell .owner-listing-page .owner-ai-controls label { color: #58463d; font-size: 11px; }
+.app-shell .owner-listing-page .owner-ai-controls select { min-height: 46px; background: white; border-color: var(--owner-border); border-radius: 9px; font-size: 14px; }
+.app-shell .owner-listing-page .owner-ai-footer { order: 2; flex-wrap: wrap; padding: 0 28px 20px; background: #fffaf5; border-bottom: 1px solid var(--owner-border); }
+.app-shell .owner-listing-page .owner-ai-footer > small { color: #68594e; font-size: 12px; }
+.app-shell .owner-listing-page .owner-ai-footer .btn { min-height: 46px; padding-inline: 20px; border-radius: 9px; font-size: 14px; font-weight: 800; }
+.app-shell .owner-listing-page :is(.owner-ai-result, .owner-ai-empty, .owner-ai-error) { order: 3; }
+.app-shell .owner-listing-page .owner-ai-empty { min-height: 170px; padding: 28px; }
+.app-shell .owner-listing-page .owner-ai-empty strong { font-size: 17px; }
+.app-shell .owner-listing-page .owner-ai-error { margin: 20px 28px 0; font-size: 13px; }
+.app-shell .owner-listing-page .owner-ai-result { gap: 18px; padding: 26px 28px 30px; }
+.app-shell .owner-listing-page .owner-ai-evidence { gap: 10px; }
+.app-shell .owner-listing-page .owner-ai-evidence > div { min-height: 104px; padding: 14px; background: #fff9f1; border-color: var(--owner-border); border-top: 3px solid #c94b35; border-radius: 10px; }
+.app-shell .owner-listing-page .owner-ai-evidence > div:nth-child(2) { border-top-color: #d79a37; }
+.app-shell .owner-listing-page .owner-ai-evidence > div:nth-child(3) { border-top-color: #50866a; }
+.app-shell .owner-listing-page .owner-ai-evidence > div:nth-child(4) { border-top-color: #a97046; }
+.app-shell .owner-listing-page .owner-ai-evidence span { color: #6e574d; font-size: 11px; }
+.app-shell .owner-listing-page .owner-ai-evidence strong { color: #2d211c; font-size: clamp(16px, 1.5vw, 21px); line-height: 1.25; }
+.app-shell .owner-listing-page .owner-ai-evidence small { color: #68594e; font-size: 12px; line-height: 1.4; }
+.app-shell .owner-listing-page .owner-ai-summary,
+.app-shell .owner-listing-page .owner-ai-action { padding: 17px 18px; background: #fff5ed; border: 1px solid #f1dfd2; border-left: 4px solid var(--red); border-radius: 9px; }
+.app-shell .owner-listing-page .owner-ai-discussion { background: #f3f8f3; border-color: #d7e8d8; border-left-color: #50866a; }
+.app-shell .owner-listing-page .owner-ai-summary > span,
+.app-shell .owner-listing-page .owner-ai-action > span,
+.app-shell .owner-listing-page .owner-ai-observations span,
+.app-shell .owner-listing-page .owner-ai-section > div > span { color: #63372b; font-size: 11px; letter-spacing: .045em; }
+.app-shell .owner-listing-page .owner-decision-card.ai-insight .owner-ai-summary p,
+.app-shell .owner-listing-page .owner-decision-card.ai-insight .owner-ai-action p { color: #372821; font-size: 14px; line-height: 1.65; }
+.app-shell .owner-listing-page .owner-decision-card.ai-insight .owner-ai-discussion p { font-size: 15px; }
+.app-shell .owner-listing-page .owner-ai-top-actions { padding: 18px; background: #fffaf2; border: 1px solid #edddc4; border-radius: 10px; }
+.app-shell .owner-listing-page .owner-ai-top-actions article { gap: 10px; }
+.app-shell .owner-listing-page .owner-ai-section article strong { font-size: 14px; }
+.app-shell .owner-listing-page .owner-ai-section article small,
+.app-shell .owner-listing-page .owner-ai-section article > span { font-size: 12px; line-height: 1.4; }
+.app-shell .owner-listing-page .owner-ai-section article > b { font-size: 13px; }
+.app-shell .owner-listing-page .owner-ai-counts { gap: 10px; border: 0; }
+.app-shell .owner-listing-page .owner-ai-counts span { padding: 14px; background: var(--owner-soft); border: 1px solid var(--owner-border); border-radius: 9px; font-size: 12px; }
+.app-shell .owner-listing-page .owner-ai-counts span + span { border-left: 1px solid var(--owner-border); }
+.app-shell .owner-listing-page .owner-ai-observations { gap: 12px; }
+.app-shell .owner-listing-page .owner-ai-observations section { padding: 16px; background: var(--owner-soft); border: 1px solid var(--owner-border); border-radius: 9px; }
+.app-shell .owner-listing-page .owner-ai-result > .owner-ai-section:not(.owner-ai-top-actions) { padding: 16px 18px; background: #fffdfa; border: 1px solid var(--owner-border); border-radius: 10px; }
+.app-shell .owner-listing-page .owner-ai-quality { border-radius: 9px; }
+.app-shell .owner-listing-page .owner-ai-quality span { font-size: 11px; }
+.app-shell .owner-listing-page .owner-ai-quality strong,
+.app-shell .owner-listing-page .owner-ai-quality p,
+.app-shell .owner-listing-page .owner-ai-quality ul { font-size: 12px; }
+
+@media (max-width: 1180px) {
+  .app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card,
+  .app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: span 6; }
+  .app-shell .owner-listing-page .owner-panel-grid > .dashboard-card:not(.owner-chart-card):not(.owner-decision-card) { grid-column: span 6; }
+  .app-shell .owner-listing-page .owner-attention-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 800px) {
+  .app-shell .owner-listing-page .owner-listing-hero.workspace-overview-header { align-items: stretch; flex-direction: column; }
+  .app-shell .owner-listing-page .owner-hero-actions { width: 100%; }
+  .app-shell .owner-listing-page .owner-overview-meta > span:last-child { margin-left: 0; }
+  .app-shell .owner-listing-page .owner-attention-board .module-heading { align-items: flex-start; text-align: left; }
+  .app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card,
+  .app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: 1 / -1; }
+  .app-shell .owner-listing-page .owner-decision-metrics,
+  .app-shell .owner-listing-page .owner-comparison-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 600px) {
+  .app-shell .owner-listing-page { padding: 12px; }
+  .app-shell .owner-listing-page .owner-listing-hero.workspace-overview-header { min-height: 0; padding: 22px; border-radius: 15px; }
+  .app-shell .owner-listing-page .owner-listing-hero h1 { font-size: 31px; }
+  .app-shell .owner-listing-page .owner-hero-actions { grid-template-columns: 1fr; }
+  .app-shell .owner-listing-page .owner-overview-meta { align-items: flex-start; flex-direction: column; text-align: left; }
+  .app-shell .owner-listing-page .owner-section-nav { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); top: 74px; overflow: visible; padding: 5px; }
+  .app-shell .owner-listing-page .owner-section-nav button { min-width: 0; width: 100%; }
+  .app-shell .owner-listing-page .owner-attention-board .module-heading { align-items: flex-start; text-align: left; }
+  .app-shell .owner-listing-page :is(.owner-attention-board, .owner-kpi-grid, .owner-dashboard-section, .owner-decision-card) { scroll-margin-top: 205px; }
+  .app-shell .owner-listing-page .owner-attention-grid,
+  .app-shell .owner-listing-page .owner-decision-metrics,
+  .app-shell .owner-listing-page .owner-comparison-grid { grid-template-columns: 1fr; }
+  .app-shell .owner-listing-page .owner-attention-grid > button { min-height: 96px; }
+  .app-shell .owner-listing-page .owner-kpi-grid { grid-template-columns: 1fr; }
+  .app-shell .owner-listing-page .owner-intelligence-grid dl > div { grid-template-columns: 1fr; gap: 4px; }
+  .app-shell .owner-listing-page .owner-intelligence-grid dd { text-align: left; }
+  .app-shell .owner-listing-page .owner-panel-grid > * { grid-column: 1 / -1 !important; }
+  .app-shell .owner-listing-page .owner-panel-grid > .dashboard-card,
+  .app-shell .owner-listing-page .owner-listing-orders .dashboard-card { padding: 18px; }
+  .app-shell .owner-listing-page .owner-ai-heading { padding: 21px; }
+  .app-shell .owner-listing-page .owner-ai-controls { grid-template-columns: 1fr; padding: 18px 20px 10px; }
+  .app-shell .owner-listing-page .owner-ai-footer { gap: 10px; padding: 0 20px 18px; }
+  .app-shell .owner-listing-page .owner-ai-result { gap: 14px; padding: 20px; }
+  .app-shell .owner-listing-page .owner-ai-evidence { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .app-shell .owner-listing-page .owner-ai-evidence > div { min-height: 108px; padding: 12px; }
+  .app-shell .owner-listing-page .owner-ai-evidence strong { font-size: 15px; }
+  .app-shell .owner-listing-page .owner-ai-counts { grid-template-columns: 1fr; }
+  .app-shell .owner-listing-page .owner-ai-counts span + span { border-top: 1px solid var(--owner-border); }
+  .app-shell .owner-listing-page .owner-ai-observations { grid-template-columns: 1fr; }
+  .app-shell .owner-listing-page .owner-ai-section > div { align-items: flex-start; flex-direction: column; }
+  .app-shell .owner-listing-page .owner-ai-heading > div > small { font-size: 12px; }
+  .app-shell .owner-listing-page .owner-priority-list .owner-priority-open { grid-template-columns: 62px minmax(0,1fr) 18px; }
+}
+@media (max-width: 380px) {
+  .app-shell .owner-listing-page .owner-ai-evidence { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .owner-listing-page :is(.owner-attention-grid > button, .owner-decision-metrics button, .owner-comparison-grid button) { transition: none; }
+}

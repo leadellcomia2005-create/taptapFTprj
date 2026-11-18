@@ -104,10 +104,11 @@
 .app-shell .owner-listing-page .owner-priority-list .priority-level { font-size: 10px; }
 .app-shell .owner-listing-page .owner-tracking-note { margin-top: 14px; font-size: 12px; }
 
-.app-shell .owner-listing-page .owner-panel-grid { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); align-items: stretch; gap: 14px; }
+.app-shell .owner-listing-page .owner-panel-grid { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); align-items: start; gap: 14px; }
 .app-shell .owner-listing-page .owner-panel-grid > * { grid-column: span 4; min-width: 0; }
-.app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card { grid-column: span 8; min-height: 0; }
-.app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: span 4; }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card,
+.app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: 1 / -1; }
+.app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card { min-height: 0; }
 .app-shell .owner-listing-page .owner-panel-grid > .owner-decision-card { grid-column: 1 / -1; }
 .app-shell .owner-listing-page .owner-panel-grid > .dashboard-card,
 .app-shell .owner-listing-page .owner-listing-orders .dashboard-card { padding: 22px; }
@@ -172,8 +173,6 @@
 .app-shell .owner-listing-page .owner-ai-quality ul { font-size: 12px; }
 
 @media (max-width: 1180px) {
-  .app-shell .owner-listing-page .owner-panel-grid > .owner-chart-card,
-  .app-shell .owner-listing-page .owner-panel-grid > .owner-listing-orders { grid-column: span 6; }
   .app-shell .owner-listing-page .owner-panel-grid > .dashboard-card:not(.owner-chart-card):not(.owner-decision-card) { grid-column: span 6; }
   .app-shell .owner-listing-page .owner-attention-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
 }

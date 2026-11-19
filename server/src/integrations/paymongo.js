@@ -216,6 +216,23 @@ export async function retrievePayMongoCheckoutSession(sessionId, options = {}) {
   return checkoutResource(payload, configuration.mode);
 }
 
+export async function expirePayMongoCheckoutSession(sessionId, options = {}) {
+  const configuration = options.configuration || assertPayMongoConfiguration(options.environment);
+  if (!/^cs_[A-Za-z0-9]+$/.test(String(sessionId || ""))) {
+    throw new PayMongoError("The stored PayMongo checkout session is invalid.", { status: 409, code: "PAYMONGO_SESSION_INVALID" });
+  }
+  const payload = await payMongoRequest(`/checkout_sessions/${encodeURIComponent(sessionId)}/expire`, {
+    secretKey: configuration.secretKey,
+    fetchImpl: options.fetchImpl,
+    method: "POST"
+  });
+  const session = checkoutResource(payload, configuration.mode);
+  if (session.id !== sessionId || session.status !== "expired") {
+    throw new PayMongoError("PayMongo did not confirm checkout expiry.", { code: "PAYMONGO_EXPIRY_UNCONFIRMED" });
+  }
+  return session;
+}
+
 export async function createPayMongoTestRefund({ paymentId, amount, orderId, note }, options = {}) {
   const configuration = options.configuration || assertPayMongoConfiguration(options.environment);
   if (configuration.mode !== "test") throw new PayMongoError("Refunds are available only in PayMongo test mode.", { status: 409, code: "REFUND_TEST_MODE_REQUIRED" });

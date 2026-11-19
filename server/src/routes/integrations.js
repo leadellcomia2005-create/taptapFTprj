@@ -1,12 +1,14 @@
 import { Router } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { listOrdersForUser } from "../application/orders.js";
-import { confirmPayMongoPayment, recordPayMongoCheckoutSession } from "../application/payments.js";
+import { claimPayMongoCheckoutCreation, confirmPayMongoPayment, recordPayMongoCheckoutSession, releasePayMongoCheckoutCreation } from "../application/payments.js";
+import { isExpiredOnlineOrder } from "../domain/paymentExpiry.js";
 import { assistantFeedbackSchema, assistantRequestSchema, insightRequestSchema, orderIdBodySchema, recordIdParams } from "../contracts/schemas.js";
 import {
   assertPayMongoConfiguration,
   checkoutPaymentFromSession,
   checkoutPaymentFromEvent,
+  expirePayMongoCheckoutSession,
   verifyPayMongoWebhook
 } from "../integrations/paymongo.js";
 import { asyncRoute } from "../middleware/errors.js";
@@ -76,6 +78,7 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
       });
     }
     if (order.status === "cancelled") throw new HttpError(409, "A cancelled order cannot start payment.");
+    if (isExpiredOnlineOrder(order)) throw new HttpError(409, "The 30-minute payment window has ended. Place a new order.");
     if (order.providerSessionId) {
       const existing = await retrievePayMongoCheckout(order.providerSessionId);
       if (existing.referenceNumber !== orderId) {
@@ -115,8 +118,27 @@ export function createIntegrationsRouter({ config, firebase, authentication, log
       }
       throw new HttpError(409, "The PayMongo checkout is no longer active. Cancel this order and place it again.");
     }
-    const result = await createPayMongoCheckout({ ...order, orderId });
-    await recordPayMongoCheckoutSession(firebase.db(), orderId, result, result.livemode ? "live" : "test");
+    const checkoutStartedAt = await claimPayMongoCheckoutCreation(firebase.db(), orderId);
+    let result;
+    try {
+      result = await createPayMongoCheckout({ ...order, orderId });
+    } catch (error) {
+      await releasePayMongoCheckoutCreation(firebase.db(), orderId, checkoutStartedAt);
+      throw error;
+    }
+    try {
+      const recorded = await recordPayMongoCheckoutSession(firebase.db(), orderId, result, result.livemode ? "live" : "test");
+      if (isExpiredOnlineOrder(recorded)) throw new HttpError(409, "The 30-minute payment window has ended. Place a new order.");
+    } catch (error) {
+      const latest = (await firebase.db().ref(`orders/${orderId}`).once("value")).val();
+      if (latest?.providerSessionId !== result.id) {
+        await expirePayMongoCheckoutSession(result.id).catch((expiryError) => {
+          logger?.warn("unattached_checkout_expiry_failed", { orderId, errorCode: expiryError?.code || "EXPIRY_ERROR" });
+        });
+      }
+      await releasePayMongoCheckoutCreation(firebase.db(), orderId, checkoutStartedAt);
+      throw error;
+    }
     return res.json({ id: result.id, checkoutUrl: result.checkoutUrl, reused: false });
   };
 

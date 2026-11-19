@@ -513,6 +513,13 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
 }
 
 export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse, onPay }) {
+  const [paymentClock, setPaymentClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setPaymentClock(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const paymentDeadline = (order) => Number(order.paymentExpiresAt || (Number(order.paymentRequiredAt || order.createdAt || 0) + 30 * 60 * 1000));
+  const paymentTimeLeft = (order) => Math.max(0, Math.ceil((paymentDeadline(order) - paymentClock) / 60_000));
   const revenueCheck = isRevenueOrder || (() => false);
   const activeOrders = orders.filter((order) => !["delivered", "completed", "cancelled"].includes(order.status));
   const pastOrders = orders.filter((order) => ["delivered", "completed", "cancelled"].includes(order.status));
@@ -558,10 +565,10 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
               <strong>{order.items?.map((item) => `${item.qty} x ${item.name}`).join(", ") || "Order items"}</strong>
             </div>
             <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
-            <div data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></div>
+            <div data-label="Status"><span className={`status status-${order.status}`}>{order.paymentExpiredAt ? "Payment expired" : statusLabel(order.status)}</span>{order.status === "pending-payment" && <small className="d-block mt-1">{paymentTimeLeft(order) ? `Pay within ${paymentTimeLeft(order)} min` : "Payment window ended"}</small>}</div>
             <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}{complaintByOrder.has(order.id) && <small className="d-block text-danger">Complaint: {complaintByOrder.get(order.id).status}</small>}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><div className="order-row-actions responsive-action-group"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}><Navigation size={14} aria-hidden="true" /> Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && <button className="btn btn-sm btn-danger order-action-wide" onClick={() => onPay(order)}><WalletCards size={14} aria-hidden="true" /> Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}><RotateCcw size={14} aria-hidden="true" /> Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}><MessageSquareWarning size={14} aria-hidden="true" /> Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}><XCircle size={14} aria-hidden="true" /> Cancel</button>}</div></div>
+            <div data-label="Action"><div className="order-row-actions responsive-action-group"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}><Navigation size={14} aria-hidden="true" /> Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && paymentTimeLeft(order) > 0 && <button className="btn btn-sm btn-danger order-action-wide" onClick={() => onPay(order)}><WalletCards size={14} aria-hidden="true" /> Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}><RotateCcw size={14} aria-hidden="true" /> Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}><MessageSquareWarning size={14} aria-hidden="true" /> Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}><XCircle size={14} aria-hidden="true" /> Cancel</button>}</div></div>
           </article>
         ))}
       </div>

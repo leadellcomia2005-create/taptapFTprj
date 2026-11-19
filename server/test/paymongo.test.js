@@ -8,6 +8,7 @@ import {
   checkoutPaymentFromEvent,
   checkoutPaymentFromSession,
   createPayMongoCheckoutSession,
+  expirePayMongoCheckoutSession,
   payMongoConfiguration,
   verifyPayMongoWebhook
 } from "../src/integrations/paymongo.js";
@@ -60,7 +61,7 @@ function signatureFor(body, timestamp, secret = testConfiguration.webhookSecret)
   return `t=${timestamp},te=${signature},li=`;
 }
 
-function paymentDatabase() {
+function paymentDatabase(createdAt = Date.UTC(2026, 6, 22)) {
   return new FakeRealtimeDatabase({
     users: {
       "customer-1": { role: "customer", name: "Customer" },
@@ -79,7 +80,7 @@ function paymentDatabase() {
         status: "pending-payment",
         deliveryType: "pickup",
         total: 148,
-        createdAt: Date.UTC(2026, 6, 22)
+        createdAt
       }
     }
   });
@@ -152,8 +153,25 @@ test("creates a test checkout on the server with a stable idempotency key", asyn
   assert.equal(first.checkoutUrl, "https://checkout.paymongo.com/cs_test123");
 });
 
+test("expires an unpaid PayMongo checkout using its session ID", async () => {
+  let request;
+  const session = await expirePayMongoCheckoutSession("cs_test123", {
+    configuration: testConfiguration,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return new Response(JSON.stringify({ data: {
+        id: "cs_test123", type: "checkout_session",
+        attributes: { status: "expired", livemode: false, reference_number: "order-test123", payments: [] }
+      } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+  });
+  assert.equal(request.url, "https://api.paymongo.com/v1/checkout_sessions/cs_test123/expire");
+  assert.equal(request.options.method, "POST");
+  assert.equal(session.status, "expired");
+});
+
 test("records checkout details when a Firebase transaction starts with an empty local cache", async () => {
-  const database = paymentDatabase();
+  const database = paymentDatabase(Date.now());
   const coldCacheDatabase = {
     ref(path) {
       const reference = database.ref(path);

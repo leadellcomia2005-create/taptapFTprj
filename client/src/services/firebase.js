@@ -1084,6 +1084,7 @@ export async function createOrder(order) {
     paymentStatus: onlinePayment ? "pending" : order.paymentMethod === "cod" ? "cod-pending" : "paid",
     paymentProvider: onlinePayment ? "paymongo" : order.paymentMethod,
     paymentRequiredAt: onlinePayment ? Date.now() : null,
+    paymentExpiresAt: onlinePayment ? Date.now() + 30 * 60 * 1000 : null,
     paymentConfirmedAt: onlinePayment ? null : Date.now(),
     handoffOtp: order.deliveryType === "delivery" ? handoffOtp() : null
   };

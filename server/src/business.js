@@ -6,6 +6,7 @@ import {
   validateOrderItems
 } from "./security.js";
 import { randomUUID } from "node:crypto";
+import { isExpiredOnlineOrder, onlinePaymentWindowMs } from "./domain/paymentExpiry.js";
 import { getAuth } from "firebase-admin/auth";
 import { notificationUpdates, userIdsForRoles } from "./notifications.js";
 import {
@@ -302,6 +303,16 @@ async function finalizeCancelledOrder(db, user, orderId, previous, order, change
       ...orderTransitionAggregateUpdates(previous, claimedOrder, now),
       ...restoration.updates
     };
+    if (claimedOrder.paymentExpiredAt && claimedOrder.cancelledBy === "payment-expiry") {
+      updates[`paymentMovements/${orderId}/expiry`] = paymentMovementRecord({
+        orderId,
+        order: claimedOrder,
+        previousStatus: "pending",
+        user,
+        createdAt: claimedOrder.paymentExpiredAt,
+        reason: "online_payment_window_expired"
+      });
+    }
     if (claimedOrder.customerId !== "walk-in") {
       Object.assign(updates, notificationUpdates(db, [claimedOrder.customerId], {
         title: "Order cancelled",
@@ -451,6 +462,7 @@ export async function createOrderRecord(db, user, input) {
     paymentStatus: onlinePayment ? "pending" : input.paymentMethod === "cod" ? "cod-pending" : "paid",
     paymentProvider: onlinePayment ? "paymongo" : input.paymentMethod,
     paymentRequiredAt: onlinePayment ? createdAt : null,
+    paymentExpiresAt: onlinePayment ? createdAt + onlinePaymentWindowMs : null,
     paymentConfirmedAt: onlinePayment ? null : createdAt,
     handoffOtp: deliveryType === "delivery" ? deliveryOtp() : null,
     source: isWalkIn ? "walk-in-pos" : "online"
@@ -589,6 +601,41 @@ export async function createOrderRecord(db, user, input) {
     throw error;
   }
   return { id: orderId, order };
+}
+
+export async function expirePendingPaymentOrder(db, orderId, now = Date.now()) {
+  const actor = { uid: "payment-expiry", name: "Payment expiry", role: "owner" };
+  const orderRef = db.ref(`orders/${orderId}`);
+  const initial = (await orderRef.once("value")).val();
+  if (initial?.status === "cancelled" && initial.cancelledBy === actor.uid && initial.cancellationRecoveryId && !initial.inventoryRestoredAt) {
+    const previous = { ...initial, status: "pending-payment", paymentStatus: "pending" };
+    const order = await finalizeCancelledOrder(db, actor, orderId, previous, initial, initial);
+    return { expired: true, order };
+  }
+  if (!isExpiredOnlineOrder(initial, now)) return { expired: false, order: initial };
+  const recoveryId = randomUUID();
+  let previous;
+  const transaction = await transactionWithInitial(orderRef, initial, (current) => {
+    if (!isExpiredOnlineOrder(current, now)) return undefined;
+    previous = { ...current };
+    return {
+      ...current,
+      status: "cancelled",
+      paymentStatus: "failed",
+      paymentExpiredAt: now,
+      cancelReason: "Online payment was not completed within 30 minutes.",
+      cancelledAt: now,
+      cancelledBy: actor.uid,
+      cancelledByRole: "system",
+      updatedAt: now,
+      statusBeforeCancellation: current.status,
+      cancellationRecoveryId: recoveryId
+    };
+  });
+  if (!transaction.committed) return { expired: false, order: (await orderRef.once("value")).val() };
+  const cancelled = transaction.snapshot.val();
+  const order = await finalizeCancelledOrder(db, actor, orderId, previous, cancelled, cancelled);
+  return { expired: true, order };
 }
 
 export async function updateOrderRecord(db, user, orderId, input) {

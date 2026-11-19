@@ -9,6 +9,7 @@ import { createOperationalMetrics } from "./observability/metrics.js";
 import { createRealtimeHub } from "./realtime/hub.js";
 import { createSocketServer } from "./sockets/index.js";
 import { cleanupExpiredCustomerRegistrations } from "./application/registrationCleanup.js";
+import { expirePendingOnlinePayments } from "./application/paymentExpiry.js";
 
 dotenv.config({ override: false });
 
@@ -24,6 +25,20 @@ const server = createServer(app);
 const io = createSocketServer(server, { config, firebase, authentication, realtime, logger, metrics });
 let registrationCleanupTimer;
 let registrationCleanupRunning = false;
+let paymentExpiryTimer;
+let paymentExpiryRunning = false;
+
+async function runPaymentExpiry() {
+  if (!firebase.enabled || paymentExpiryRunning) return;
+  paymentExpiryRunning = true;
+  try {
+    await expirePendingOnlinePayments({ db: firebase.db(), logger });
+  } catch (error) {
+    logger.warn("payment_expiry_unavailable", { errorCode: error?.code || "EXPIRY_ERROR" });
+  } finally {
+    paymentExpiryRunning = false;
+  }
+}
 
 async function runRegistrationCleanup() {
   if (!firebase.enabled || registrationCleanupRunning) return;
@@ -46,6 +61,7 @@ async function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (registrationCleanupTimer) clearInterval(registrationCleanupTimer);
+  if (paymentExpiryTimer) clearInterval(paymentExpiryTimer);
   logger.info("server_shutdown_started", { signal });
   const forceExit = setTimeout(() => {
     logger.error("server_shutdown_timed_out", { signal, timeoutMs: config.shutdownTimeoutMs });
@@ -78,6 +94,9 @@ server.listen(config.port, () => {
   void runRegistrationCleanup();
   registrationCleanupTimer = setInterval(runRegistrationCleanup, config.registration.cleanupIntervalMs);
   registrationCleanupTimer.unref();
+  void runPaymentExpiry();
+  paymentExpiryTimer = setInterval(runPaymentExpiry, 60_000);
+  paymentExpiryTimer.unref();
 });
 
 process.once("SIGTERM", () => void shutdown("SIGTERM"));

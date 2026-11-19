@@ -1,8 +1,40 @@
 import { notificationUpdates, userIdsForRoles } from "../notifications.js";
 import { orderTransitionAggregateUpdates, paymentMovementRecord } from "../domain/orderIntegrity.js";
 import { HttpError, validRecordId } from "../security.js";
+import { isExpiredOnlineOrder } from "../domain/paymentExpiry.js";
 
 const processingLeaseMs = 5 * 60 * 1000;
+const checkoutCreationLeaseMs = 2 * 60 * 1000;
+
+export async function claimPayMongoCheckoutCreation(db, orderId) {
+  const orderRef = db.ref(`orders/${orderId}`);
+  const existing = (await orderRef.once("value")).val();
+  let failure;
+  const now = Date.now();
+  const transaction = await orderRef.transaction((order) => {
+    const current = order || existing;
+    if (!current || current.status !== "pending-payment" || current.paymentStatus !== "pending" || isExpiredOnlineOrder(current, now)) {
+      failure = new HttpError(409, "The 30-minute payment window has ended. Place a new order.");
+      return undefined;
+    }
+    if (current.providerSessionId || (current.checkoutStartingAt && current.checkoutStartingAt > now - checkoutCreationLeaseMs)) {
+      failure = new HttpError(409, "Checkout is already being prepared. Please try again shortly.");
+      return undefined;
+    }
+    return { ...current, checkoutStartingAt: now };
+  });
+  if (!transaction.committed) throw failure || new HttpError(409, "Checkout could not be started.");
+  return now;
+}
+
+export async function releasePayMongoCheckoutCreation(db, orderId, startedAt) {
+  await db.ref(`orders/${orderId}`).transaction((order) => {
+    if (!order || order.checkoutStartingAt !== startedAt) return undefined;
+    const next = { ...order };
+    delete next.checkoutStartingAt;
+    return next;
+  });
+}
 
 function paymentActor() {
   return { uid: "paymongo", name: "PayMongo", role: "system" };
@@ -62,6 +94,10 @@ export async function recordPayMongoCheckoutSession(db, orderId, session, mode) 
       updateError = new HttpError(409, "A cancelled order cannot start payment.");
       return undefined;
     }
+    if (isExpiredOnlineOrder(currentOrder) && !(currentOrder.checkoutStartingAt > Date.now() - checkoutCreationLeaseMs)) {
+      updateError = new HttpError(409, "The 30-minute payment window has ended. Place a new order.");
+      return undefined;
+    }
     if (currentOrder.paymentStatus === "paid") {
       updateError = new HttpError(409, "This order is already paid.");
       return undefined;
@@ -76,6 +112,7 @@ export async function recordPayMongoCheckoutSession(db, orderId, session, mode) 
       providerSessionId: session.id,
       providerLivemode: mode === "live",
       checkoutCreatedAt: currentOrder.checkoutCreatedAt || Date.now(),
+      checkoutStartingAt: null,
       updatedAt: Date.now()
     };
   });

@@ -564,6 +564,13 @@ button { font: inherit; }
 .otp-delivery-panel small.error { color: #a72d22; }
 .phone-verification-panel { display: grid; gap: 10px; margin-top: 14px; }
 .phone-verification-panel small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.profile-phone-verification { width: 100%; min-width: 0; padding: 18px; background: #fff8f3; border: 1px solid rgba(217,54,36,.22); border-radius: 12px; }
+.profile-phone-verification strong { display: block; color: var(--ink); font-size: 15px; }
+.profile-phone-verification > div > small { display: block; margin-top: 4px; font-size: 12px; }
+.profile-phone-verification > .btn { width: min(100%, 340px); min-height: 44px; }
+.profile-phone-verification .form-label { max-width: 340px; margin: 0; }
+.profile-phone-verification .form-control { min-height: 44px; }
+.profile-verify-link { width: fit-content; max-width: 100%; min-height: 44px; }
 .totp-setup { margin: 16px 0; text-align: center; }
 .totp-setup img { width: 220px; max-width: 100%; border: 8px solid white; box-shadow: 0 8px 30px rgba(0,0,0,.1); }
 .totp-setup code { overflow-wrap: anywhere; }

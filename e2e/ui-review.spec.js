@@ -42,6 +42,10 @@ for (const [role, credentials] of Object.entries(roles)) {
         const chart = page.locator('.chart-card').first();
         await expect(chart).toBeVisible();
         const box = await chart.boundingBox();
+        const canvasBox = await chart.locator('.sales-chart-canvas').boundingBox();
+        expect(canvasBox.height, `sales chart canvas at ${width}px`).toBeLessThanOrEqual(340);
+        expect(canvasBox.height, `sales chart canvas at ${width}px`).toBeGreaterThanOrEqual(230);
+        expect(box.height, `sales chart card at ${width}px`).toBeLessThanOrEqual(620);
         for (const button of await chart.locator('.sales-chart-switch button').all()) {
           const control = await button.boundingBox();
           expect(control.x + control.width).toBeLessThanOrEqual(box.x + box.width + 1);

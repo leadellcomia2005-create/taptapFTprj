@@ -843,7 +843,7 @@ button { font: inherit; }
 .compact-date-filter { width: min(220px,100%); margin-bottom: 0; }
 .compact-date-filter .form-control { min-height: 38px; }
 .module-note { max-width: 360px; color: var(--muted); font-size: 9px; line-height: 1.55; }
-.chart-card { min-height: 400px; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+.chart-card { height: auto; min-height: 400px; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
 .chart-card > .sales-chart-content { flex: 1 1 auto; min-height: 330px; }
 .sales-chart-content { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: auto auto minmax(260px,1fr); gap: 12px; }
 .sales-chart-content > * { min-width: 0; max-width: 100%; }
@@ -859,7 +859,7 @@ button { font: inherit; }
 .sales-chart-switch button:hover { color: var(--ink); }
 .sales-chart-switch button.active { color: white; background: var(--ink); box-shadow: 0 3px 8px rgba(38,29,19,.14); }
 .sales-chart-switch button:focus-visible { outline: 3px solid rgba(201,57,42,.3); outline-offset: 2px; }
-.sales-chart-canvas { position: relative; width: 100%; min-width: 0; min-height: 260px; height: 100%; border: 1px solid rgba(215,201,184,.72); border-radius: 10px; background: linear-gradient(180deg,rgba(255,248,242,.72),rgba(255,255,255,.96)); }
+.sales-chart-canvas { position: relative; flex: 0 0 auto; width: 100%; min-width: 0; height: clamp(240px,25vw,340px); border: 1px solid rgba(215,201,184,.72); border-radius: 10px; background: linear-gradient(180deg,rgba(255,248,242,.72),rgba(255,255,255,.96)); }
 .sales-chart-canvas > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; max-width: 100%; }
 .sales-chart-freshness { color: var(--muted); font-size: 9px; line-height: 1.45; }
 .sales-chart-empty { min-height: 300px; display: grid; place-content: center; gap: 8px; padding: 24px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 8px; background: var(--paper-soft); }
@@ -1297,7 +1297,7 @@ button { font: inherit; }
   .sales-chart-controls { align-items: stretch; flex-direction: column; }
   .sales-chart-switch { width: 100%; grid-template-columns: repeat(2,minmax(0,1fr)); }
   .sales-chart-controls .sales-chart-switch:first-child { grid-template-columns: repeat(3,minmax(0,1fr)); }
-  .sales-chart-canvas { min-height: 230px; padding: 10px 4px 2px; }
+  .sales-chart-canvas { height: 240px; padding: 10px 4px 2px; }
   .sales-chart-empty { min-height: 250px; }
   .complaint-filter-bar { grid-template-columns: 1fr 1fr; }
   .resolved-complaint-card { grid-template-columns: 1fr; }

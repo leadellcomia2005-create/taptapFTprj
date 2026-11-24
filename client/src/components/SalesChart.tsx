@@ -40,6 +40,7 @@ export default function SalesChart({ values, labels = [], type = "line" }: Sales
         }]
       }}
       options={{
+        animation: false,
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },

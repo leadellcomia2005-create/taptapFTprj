@@ -26,6 +26,7 @@ test("production website registers one worker and uses the offline navigation fa
   });
   await page.reload();
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  await page.waitForLoadState("networkidle");
 
   const workerState = await page.evaluate(async () => {
     const registrations = await navigator.serviceWorker.getRegistrations();

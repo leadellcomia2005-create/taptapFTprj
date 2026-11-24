@@ -25,6 +25,13 @@
         ".validate": "auth.token.role == 'owner' || (newData.child('role').val() == (data.exists() ? data.child('role').val() : 'customer') && (!data.exists() || (newData.child('staffRole').val() == data.child('staffRole').val() && newData.child('phoneVerified').val() == data.child('phoneVerified').val() && newData.child('phoneVerifiedAt').val() == data.child('phoneVerifiedAt').val() && newData.child('securitySetupRequired').val() == data.child('securitySetupRequired').val())))"
       }
     },
+    "ownerWorkspacePreferences": {
+      "$uid": {
+        ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner' && auth.uid == $uid",
+        ".write": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && auth.token.role == 'owner' && auth.uid == $uid",
+        ".validate": "(!newData.child('planning').exists() || (newData.child('planning').hasChildren(['salesGoal', 'activePromotion', 'prepTargetMinutes', 'deliveryTargetMinutes', 'cashVarianceLimit', 'cancellationRateLimit', 'complaintLimit']) && newData.child('planning').child('salesGoal').isNumber() && newData.child('planning').child('salesGoal').val() > 0 && newData.child('planning').child('prepTargetMinutes').isNumber() && newData.child('planning').child('prepTargetMinutes').val() > 0 && newData.child('planning').child('deliveryTargetMinutes').isNumber() && newData.child('planning').child('deliveryTargetMinutes').val() > 0 && newData.child('planning').child('cashVarianceLimit').isNumber() && newData.child('planning').child('cashVarianceLimit').val() >= 0 && newData.child('planning').child('cancellationRateLimit').isNumber() && newData.child('planning').child('cancellationRateLimit').val() > 0 && newData.child('planning').child('complaintLimit').isNumber() && newData.child('planning').child('complaintLimit').val() > 0))"
+      }
+    },
     "orders": {
       ".read": "auth != null && auth.token.email_verified == true && auth.token.mfaSession == true && (auth.token.role == 'owner' || auth.token.role == 'staff' || ((auth.token.role == 'customer' || auth.token.role == null) && query.orderByChild == 'customerId' && query.equalTo == auth.uid) || (auth.token.role == 'rider' && query.orderByChild == 'riderId' && query.equalTo == auth.uid))",
       ".indexOn": ["customerId", "riderId", "status", "archivedAt", "cashierId", "source", "createdAt"],

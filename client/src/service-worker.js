@@ -56,7 +56,8 @@ function isSafeStaticRequest(request, url) {
 if (pwaEnabled) {
   self.addEventListener("install", (event) => {
     event.waitUntil(
-      caches.open(staticCacheName).then((cache) => cache.addAll(appShellResources))
+      caches.open(staticCacheName)
+        .then((cache) => cache.addAll(appShellResources))
     );
   });
 

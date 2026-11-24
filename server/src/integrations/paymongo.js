@@ -232,7 +232,6 @@ export async function expirePayMongoCheckoutSession(sessionId, options = {}) {
   }
   return session;
 }
-
 export async function createPayMongoTestRefund({ paymentId, amount, orderId, note }, options = {}) {
   const configuration = options.configuration || assertPayMongoConfiguration(options.environment);
   if (configuration.mode !== "test") throw new PayMongoError("Refunds are available only in PayMongo test mode.", { status: 409, code: "REFUND_TEST_MODE_REQUIRED" });

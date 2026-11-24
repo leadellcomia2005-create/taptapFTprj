@@ -463,6 +463,70 @@ test("records rider COD handoff separately from owner remittance", () => {
     () => authorizeOrderUpdate({ uid: "rider-1", role: "rider" }, { ...deliveredCod, codRemittedAt: Date.now() }, { codHandoffRequested: true }),
     /already confirmed/i
   );
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "owner-1", role: "owner" }, deliveredCod, { codRemitted: true }),
+    /handoff first/i
+  );
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "staff-1", role: "staff" }, { ...deliveredCod, codHandoffRequestedAt: Date.now() }, { codRemitted: true }),
+    /only an owner/i
+  );
+  const confirmed = authorizeOrderUpdate(
+    { uid: "owner-1", name: "Owner One", role: "owner" },
+    { ...deliveredCod, codHandoffRequestedAt: Date.now(), codHandoffRequestedBy: "rider-1" },
+    { codRemitted: true }
+  );
+  assert.equal(confirmed.codRemittedBy, "owner-1");
+  assert.equal(confirmed.codRemittedByName, "Owner One");
+  assert.equal(confirmed.paymentStatus, "paid");
+});
+
+test("calculates, blocks, and resolves COD remittance discrepancies on the server", () => {
+  const deliveredCod = {
+    ...order,
+    status: "delivered",
+    paymentMethod: "cod",
+    total: 475,
+    codHandoffRequestedAt: Date.now(),
+    codHandoffRequestedBy: "rider-1"
+  };
+  const reported = authorizeOrderUpdate(
+    { uid: "owner-1", name: "Owner One", role: "owner" },
+    deliveredCod,
+    { codDiscrepancyReport: { receivedAmount: 450, reason: "Cash was short during counting." } }
+  );
+  assert.equal(reported.codDiscrepancy.expectedAmount, 475);
+  assert.equal(reported.codDiscrepancy.receivedAmount, 450);
+  assert.equal(reported.codDiscrepancy.variance, -25);
+  assert.equal(reported.codDiscrepancy.riderId, "rider-1");
+  assert.equal(reported.codDiscrepancy.status, "open");
+
+  const disputedOrder = { ...deliveredCod, codDiscrepancy: reported.codDiscrepancy };
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "owner-1", role: "owner" }, disputedOrder, { codRemitted: true }),
+    /resolve the cash discrepancy/i
+  );
+  assert.throws(
+    () => authorizeOrderUpdate({ uid: "owner-1", role: "owner" }, disputedOrder, { codDiscrepancyReport: { receivedAmount: 440, reason: "Another count" } }),
+    /already has an open discrepancy/i
+  );
+  assert.throws(
+    () => authorizeOrderUpdate(
+      { uid: "owner-1", role: "owner" },
+      deliveredCod,
+      { codRemitted: true, codDiscrepancyReport: { receivedAmount: 450, reason: "Conflicting action" } }
+    ),
+    /one COD remittance action/i
+  );
+
+  const resolved = authorizeOrderUpdate(
+    { uid: "owner-1", name: "Owner One", role: "owner" },
+    disputedOrder,
+    { codDiscrepancyResolve: { resolutionNote: "Rider supplied the missing cash." } }
+  );
+  assert.equal(resolved.codDiscrepancy.status, "resolved");
+  assert.equal(resolved.codDiscrepancy.resolvedBy, "owner-1");
+  assert.equal(typeof resolved.codDiscrepancy.resolvedAt, "number");
 });
 
 test("enforces sequential order status changes", () => {

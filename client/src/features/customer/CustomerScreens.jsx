@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, Download, Mail, MapPin, MessageSquareWarning, Navigation, PackageCheck, Phone, Printer, ReceiptText, RotateCcw, Star, WalletCards, XCircle } from "lucide-react";
+import { Clock3, Download, Mail, MapPin, Navigation, PackageCheck, Phone, Printer, ReceiptText, RotateCcw, Star, WalletCards, XCircle } from "lucide-react";
 import { BrandMark } from "../../components/Branding";
 import { SectionLoader } from "../../components/Loaders";
 import { buildLasPinasAddress, isWithinLasPinasBounds, LAS_PINAS_BARANGAYS, LAS_PINAS_CITY, parseLasPinasAddress } from "../../data/lasPinas";
@@ -7,7 +7,7 @@ import { api } from "../../services/api";
 import { geocodeLasPinasBarangay } from "../../services/geocoding";
 import { runPerformanceTrace } from "../../services/performance";
 import { submitComplaint, submitReview } from "../../services/firebase/feedback";
-import { createOrder, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
+import { createOrder, requestOrderRefund, resendReceiptEmail, updateOrder } from "../../services/firebase/orders";
 import { saveUserProfile } from "../../services/firebase/users";
 import { currency, orderReference, statusLabel } from "../../utils/display";
 import { createRequestKey } from "../../utils/operations";
@@ -400,15 +400,15 @@ export function Checkout({ cart, user, profile, online = true, paymongoEnabled, 
                         </select>
                         <small className={`checkout-field-hint ${barangayInvalid ? "error" : ""}`} id="checkout-barangay-hint" role={barangayInvalid ? "alert" : undefined}>{barangayInvalid ? "Choose a barangay in Las Piñas City." : "Delivery is limited to Las Piñas City."}</small>
                       </div>
-                      <div>
-                        <label className="form-label" htmlFor="checkout-city">City</label>
-                        <input className="form-control checkout-city-field" id="checkout-city" autoComplete="address-level2" value={LAS_PINAS_CITY} readOnly />
-                        <small className="checkout-field-hint">Fixed delivery city</small>
-                      </div>
                       <div className="checkout-street-field">
                         <label className="form-label" htmlFor="checkout-address">House no. and street <span className="checkout-required">Required</span></label>
                         <input ref={addressInputRef} className={`form-control ${addressInvalid && needsStreetAddress ? "is-invalid" : ""}`} id="checkout-address" autoComplete="street-address" aria-label="Delivery address: house no. and street" aria-describedby="checkout-address-hint" aria-invalid={addressInvalid && needsStreetAddress} value={streetAddress} onBlur={finishStreetAddress} onChange={(event) => { setStreetAddress(event.target.value); setAddressLookup({ status: "idle", message: "" }); }} placeholder="Example: 17 Gemini Street" />
                         <small className={`checkout-field-hint ${addressInvalid && needsStreetAddress ? "error" : ""}`} id="checkout-address-hint" role={addressInvalid && needsStreetAddress ? "alert" : undefined}>{addressInvalid && needsStreetAddress ? "Enter the house or building number and street name." : "The pin is placed after you finish this field."}</small>
+                      </div>
+                      <div className="checkout-city-slot">
+                        <label className="form-label" htmlFor="checkout-city">City</label>
+                        <input className="form-control checkout-city-field" id="checkout-city" autoComplete="address-level2" value={LAS_PINAS_CITY} readOnly />
+                        <small className="checkout-field-hint">Fixed delivery city</small>
                       </div>
                     </div>
                     {address && <div className="checkout-address-preview"><span>Complete delivery address</span><strong>{address}</strong></div>}
@@ -503,7 +503,7 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
           <div className="modal-body">
             <label className="form-label">Issue type<select className="form-select" value={type} onChange={(event) => setType(event.target.value)}>{complaintTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="form-label">Details<textarea className="form-control" rows="4" required value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Tell us what happened with this order." /></label>
-            <label className="form-label">Requested resolution<input className="form-control" value={requestedResolution} onChange={(event) => setRequestedResolution(event.target.value)} placeholder="Replacement, refund review, missing item delivery..." /></label>
+            <label className="form-label">Requested resolution<input className="form-control" value={requestedResolution} onChange={(event) => setRequestedResolution(event.target.value)} placeholder="Replacement, cancellation review, or missing item delivery..." /></label>
           </div>
           <div className="modal-footer"><button className="btn btn-outline-dark" type="button" onClick={onClose}>Close</button><button className="btn btn-danger" disabled={busy || !details.trim()}>{busy ? "Submitting..." : "Submit complaint"}</button></div>
         </form>
@@ -512,7 +512,53 @@ function ComplaintModal({ order, user, onClose, onDone, notify }) {
   );
 }
 
-export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse, onPay }) {
+function RefundModal({ order, user, notify, onClose }) {
+  const [reason, setReason] = useState("Order cancelled or incorrect");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await requestOrderRefund(order.id, { reason, details }, user);
+      notify?.(`${orderReference(order.id)} refund request submitted for owner review.`);
+      onClose();
+    } catch (failure) {
+      setError(failure.message || "The refund request could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <div className="modal d-block" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+    <div className="modal-dialog modal-dialog-centered"><form className="modal-content reason-modal" onSubmit={submit}>
+      <div className="modal-header"><h5 className="modal-title">Request refund · {orderReference(order.id)}</h5><button className="btn-close" type="button" aria-label="Close refund request" disabled={busy} onClick={onClose} /></div>
+      <div className="modal-body refund-request-form">
+        <p><strong>{currency(order.total)}</strong> · {order.paymentMethod === "gcash" ? "PayMongo sandbox payment" : "Cash payment"}</p>
+        <p>Owner review is required. Delivered orders can still be reviewed for a valid problem.</p>
+        {order.paymentMethod === "gcash" && <p className="refund-sandbox-note">Test transaction — no real money is transferred.</p>}
+        <label className="form-label">Reason<select className="form-select" value={reason} onChange={(event) => setReason(event.target.value)}><option>Order cancelled or incorrect</option><option>Missing or damaged item</option><option>Payment issue</option><option>Other</option></select></label>
+        <label className="form-label">Details<textarea className="form-control" rows="4" minLength="10" maxLength="700" required value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Tell the owner what happened (at least 10 characters)." /></label>
+        {error && <p className="alert alert-danger" role="alert">{error}</p>}
+      </div>
+      <div className="modal-footer"><button className="btn btn-outline-dark" type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={busy || details.trim().length < 10}>{busy ? "Submitting..." : "Submit request"}</button></div>
+    </form></div>
+  </div>;
+}
+
+const refundStatusLabel = (request) => ({
+  "pending-review": "Pending owner review",
+  rejected: "Rejected",
+  "approved-manual": "Approved for manual resolution",
+  processing: "PayMongo test refund processing",
+  "test-refunded": "Test refund completed (sandbox)",
+  "manual-refunded": "Manual refund recorded",
+  failed: "Refund needs owner review"
+}[request?.status] || "Needs review");
+
+export function OrdersView({ orders, onTrack, highlightOrderId, isRevenueOrder, notify, user, complaints = [], onReorder, onBrowse, onPay }) {
   const [paymentClock, setPaymentClock] = useState(Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setPaymentClock(Date.now()), 15_000);
@@ -526,6 +572,18 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
   const totalSpent = orders.filter(revenueCheck).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const latestOrder = orders[0];
   const [complaintTarget, setComplaintTarget] = useState(null);
+  const [refundTarget, setRefundTarget] = useState(null);
+  const scrolledNotificationOrderRef = useRef(null);
+  useEffect(() => {
+    if (!highlightOrderId) return;
+    if (scrolledNotificationOrderRef.current === highlightOrderId) return;
+    const target = Array.from(document.querySelectorAll("[data-customer-order-id]"))
+      .find((element) => element.getAttribute("data-customer-order-id") === highlightOrderId);
+    if (!target) return;
+    scrolledNotificationOrderRef.current = highlightOrderId;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.focus({ preventScroll: true });
+  }, [highlightOrderId, orders]);
   const complaintByOrder = useMemo(() => new Map(complaints.map((complaint) => [complaint.orderId, complaint])), [complaints]);
   const priorityOrder = activeOrders[0];
   const prioritySteps = priorityOrder?.deliveryType === "delivery"
@@ -559,16 +617,17 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
         </div>
         {list.length === 0 && <div className="empty-state compact">{emptyText}</div>}
         {list.map((order) => (
-          <article className="order-table-row" key={order.id}>
+          <article className={`order-table-row ${highlightOrderId === order.id ? "customer-notification-target" : ""}`} data-customer-order-id={order.id} key={order.id} tabIndex={highlightOrderId === order.id ? -1 : undefined}>
             <div className="order-line-item" data-label="Order">
               <small>{orderReference(order.id)}</small>
               <strong>{order.items?.map((item) => `${item.qty} x ${item.name}`).join(", ") || "Order items"}</strong>
+              <button className="order-issue-link" type="button" onClick={() => setComplaintTarget(order)}>Report an issue</button>
             </div>
             <div data-label="Date">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-PH") : "-"}</div>
-            <div data-label="Status"><span className={`status status-${order.status}`}>{order.paymentExpiredAt ? "Payment expired" : statusLabel(order.status)}</span>{order.status === "pending-payment" && <small className="d-block mt-1">{paymentTimeLeft(order) ? `Pay within ${paymentTimeLeft(order)} min` : "Payment window ended"}</small>}</div>
+            <div data-label="Status"><span className={`status status-${order.status}`}>{order.paymentExpiredAt ? "Payment expired" : statusLabel(order.status)}</span>{order.status === "pending-payment" && <small className="d-block mt-1">{paymentTimeLeft(order) ? `Pay within ${paymentTimeLeft(order)} min` : "Payment window ended"}</small>}{order.refundRequest && <><small className="refund-order-status">Refund: {refundStatusLabel(order.refundRequest)}</small>{order.refundRequest.decisionNote && <small className="refund-order-status">{order.refundRequest.decisionNote}</small>}</>}</div>
             <div className="order-delivery-cell" data-label="Delivery">{order.address || "Counter pickup"}{complaintByOrder.has(order.id) && <small className="d-block text-danger">Complaint: {complaintByOrder.get(order.id).status}</small>}</div>
             <div className="order-total-cell" data-label="Total">{currency(order.total)}</div>
-            <div data-label="Action"><div className="order-row-actions responsive-action-group"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}><Navigation size={14} aria-hidden="true" /> Track</button>{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && paymentTimeLeft(order) > 0 && <button className="btn btn-sm btn-danger order-action-wide" onClick={() => onPay(order)}><WalletCards size={14} aria-hidden="true" /> Pay with GCash</button>}<button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}><RotateCcw size={14} aria-hidden="true" /> Order again</button>{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}><MessageSquareWarning size={14} aria-hidden="true" /> Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}><XCircle size={14} aria-hidden="true" /> Cancel</button>}</div></div>
+            <div data-label="Action"><div className="order-row-actions responsive-action-group"><button className="btn btn-sm btn-outline-danger" onClick={() => onTrack(order)}><Navigation size={14} aria-hidden="true" /> Track</button><button className="btn btn-sm btn-dark" onClick={() => onReorder?.(order)}><RotateCcw size={14} aria-hidden="true" /> Order again</button>{["paid", "cod-collected"].includes(order.paymentStatus) && !order.refundRequest && ["gcash", "cod", "cash"].includes(order.paymentMethod) && <button className="btn btn-sm btn-outline-dark" onClick={() => setRefundTarget(order)}>Request refund</button>}{order.status !== "cancelled" && <button className="btn btn-sm btn-outline-dark" onClick={() => setComplaintTarget(order)}><MessageSquareWarning size={14} aria-hidden="true" /> Report</button>}{["pending-payment", "received"].includes(order.status) && <button className="btn btn-sm btn-outline-dark" onClick={() => cancelOrder(order)}><XCircle size={14} aria-hidden="true" /> Cancel</button>}{onPay && order.paymentMethod === "gcash" && order.paymentStatus === "pending" && order.status === "pending-payment" && paymentTimeLeft(order) > 0 && <button className="btn btn-sm btn-danger order-action-wide" onClick={() => onPay(order)}><WalletCards size={14} aria-hidden="true" /> Pay with GCash</button>}</div></div>
           </article>
         ))}
       </div>
@@ -613,6 +672,7 @@ export function OrdersView({ orders, onTrack, isRevenueOrder, notify, user, comp
         </aside>
       </div>
       {complaintTarget && <ComplaintModal order={complaintTarget} user={user} notify={notify} onClose={() => setComplaintTarget(null)} onDone={() => setComplaintTarget(null)} />}
+      {refundTarget && <RefundModal order={refundTarget} user={user} notify={notify} onClose={() => setRefundTarget(null)} />}
     </main>
   );
 }
@@ -891,26 +951,47 @@ export function ReceiptsView({ orders, printReceipt, notify }) {
 }
 
 export function ReviewsView({ user, orders, reviews, notify }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedReviewOrders, setSavedReviewOrders] = useState([]);
   const reviewByOrder = new Map(reviews.map((review) => [review.orderId, review]));
-  const eligibleOrders = orders.filter((order) => ["delivered", "completed"].includes(order.status) && !reviewByOrder.has(order.id));
+  const eligibleOrders = orders.filter((order) => ["delivered", "completed"].includes(order.status) && !reviewByOrder.has(order.id) && !savedReviewOrders.includes(order.id));
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const selectedOrder = eligibleOrders.find((order) => order.id === selectedOrderId) || eligibleOrders[0];
   const submit = async (event) => {
     event.preventDefault();
-    if (!selectedOrder) return;
-    await submitReview(selectedOrder, user, rating, comment.trim());
-    setSelectedOrderId("");
-    setRating(5);
-    setComment("");
-    notify(`Thank you for rating ${orderReference(selectedOrder.id)}.`);
+    if (!selectedOrder || submitting) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await submitReview(selectedOrder, user, rating, comment.trim());
+      setSavedReviewOrders((current) => [...current, selectedOrder.id]);
+      setSelectedOrderId("");
+      setRating(5);
+      setComment("");
+      notify(`Thank you for rating ${orderReference(selectedOrder.id)}.`);
+    } catch (error) {
+      setSubmitError(error.message || "Your review could not be submitted. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <main className="container py-5 customer-page">
       <div className="section-title"><div><p className="eyebrow text-danger">Customer experience</p><h2>Reviews & Feedback</h2></div><p>Rate recent completed orders and revisit your previous reviews.</p></div>
       <div className="row g-4">
-        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit}><h3>Rate your recent orders</h3>{eligibleOrders.length === 0 ? <div className="empty-chat">Delivered orders without reviews will appear here.</div> : <><label className="form-label">Order<select className="form-select" value={selectedOrder?.id || ""} onChange={(event) => setSelectedOrderId(event.target.value)}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{orderReference(order.id)} - {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label><div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}><Star size={22} fill={star <= rating ? "currentColor" : "none"} aria-hidden="true" /></button>)}</div><label className="form-label">Feedback<textarea className="form-control" rows="4" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label><button className="btn btn-danger w-100">Submit review</button></>}</form></div>
+        <div className="col-lg-5"><form className="dashboard-card review-form" onSubmit={submit} aria-busy={submitting}>
+          <h3>Rate your recent orders</h3>
+          {submitError && <div className="alert alert-danger" role="alert">{submitError}</div>}
+          {eligibleOrders.length === 0 ? <div className="empty-chat">{savedReviewOrders.length ? "Your review was saved. Thank you for your feedback." : "Delivered orders without reviews will appear here."}</div> : <>
+            <label className="form-label">Order<select className="form-select" disabled={submitting} value={selectedOrder?.id || ""} onChange={(event) => { setSelectedOrderId(event.target.value); setSubmitError(""); }}>{eligibleOrders.map((order) => <option key={order.id} value={order.id}>{orderReference(order.id)} - {new Date(order.createdAt).toLocaleDateString("en-PH")}</option>)}</select></label>
+            <div className="rating-picker" role="radiogroup" aria-label="Rating">{[1,2,3,4,5].map((star) => <button type="button" disabled={submitting} role="radio" aria-checked={star === rating} aria-label={`${star} star${star === 1 ? "" : "s"}`} className={star <= rating ? "active" : ""} key={star} onClick={() => setRating(star)}><Star size={22} fill={star <= rating ? "currentColor" : "none"} aria-hidden="true" /></button>)}</div>
+            <label className="form-label">Feedback<textarea className="form-control" rows="4" maxLength={1000} disabled={submitting} value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us about the food and service..." /></label>
+            <button type="submit" className="btn btn-danger w-100" disabled={submitting}>{submitting ? "Submitting..." : "Submit review"}</button>
+          </>}
+        </form></div>
         <div className="col-lg-7"><div className="dashboard-card"><h3>Previous reviews</h3>{reviews.length === 0 && <div className="empty-chat">You have not submitted a review yet.</div>}{reviews.map((review) => <article className="previous-review" key={review.id}><div><strong>{orderReference(review.orderId)}</strong><span className="previous-review-stars" aria-label={`${review.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <Star key={star} size={15} fill={star <= review.rating ? "currentColor" : "none"} aria-hidden="true" />)}</span></div><p>{review.comment || "No written feedback."}</p><small>{review.items?.join(", ")} - {new Date(review.createdAt).toLocaleDateString("en-PH")}</small></article>)}</div></div>
       </div>
     </main>

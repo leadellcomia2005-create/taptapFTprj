@@ -72,6 +72,12 @@ export function validateDeliveryProof(dataUrl) {
 export function authorizeOrderUpdate(user, order, input = {}) {
   if (!user || !order) throw new HttpError(404, "Order not found.");
   const now = Date.now();
+  const remittanceActionCount = [
+    input.codRemitted === true,
+    Boolean(input.codDiscrepancyReport),
+    Boolean(input.codDiscrepancyResolve)
+  ].filter(Boolean).length;
+  if (remittanceActionCount > 1) throw new HttpError(400, "Submit only one COD remittance action at a time.");
 
   if (["owner", "staff"].includes(user.role)) {
     const changes = {};
@@ -91,13 +97,58 @@ export function authorizeOrderUpdate(user, order, input = {}) {
       };
     }
     if (input.codRemitted === true) {
+      if (user.role !== "owner") throw new HttpError(403, "Only an owner can confirm COD remittance.");
       if (order.paymentMethod !== "cod") throw new HttpError(409, "Only COD orders can be remitted.");
+      if (!isDeliveryOrder(order)) throw new HttpError(409, "Only COD delivery orders can be remitted.");
       if (order.status !== "delivered") throw new HttpError(409, "COD can be remitted only after delivery.");
       if (order.codRemittedAt) throw new HttpError(409, "COD was already remitted.");
+      if (!order.codHandoffRequestedAt) throw new HttpError(409, "The rider must record the physical cash handoff first.");
+      if (order.codDiscrepancy?.status === "open") throw new HttpError(409, "Resolve the cash discrepancy before confirming remittance.");
       changes.codRemittedAt = now;
       changes.codRemittedBy = user.uid;
+      changes.codRemittedByName = user.name || user.email || "Owner";
       changes.paymentStatus = "paid";
       changes.paymentConfirmedAt = now;
+      changes.updatedAt = now;
+    }
+    if (input.codDiscrepancyReport) {
+      if (user.role !== "owner") throw new HttpError(403, "Only an owner can report a COD discrepancy.");
+      if (order.paymentMethod !== "cod" || !isDeliveryOrder(order) || order.status !== "delivered") {
+        throw new HttpError(409, "Only delivered COD orders can have a remittance discrepancy.");
+      }
+      if (!order.codHandoffRequestedAt) throw new HttpError(409, "A rider cash handoff must be recorded first.");
+      if (order.codRemittedAt) throw new HttpError(409, "Remitted COD can no longer be disputed.");
+      if (order.codDiscrepancy?.status === "open") throw new HttpError(409, "This remittance already has an open discrepancy.");
+      const expectedAmount = Number(order.total || 0);
+      const receivedAmount = Number(input.codDiscrepancyReport.receivedAmount);
+      if (Math.abs(expectedAmount - receivedAmount) < 0.005) {
+        throw new HttpError(400, "The received amount matches the expected amount. Confirm remittance instead.");
+      }
+      changes.codDiscrepancy = {
+        expectedAmount,
+        receivedAmount,
+        variance: receivedAmount - expectedAmount,
+        reason: input.codDiscrepancyReport.reason.trim().slice(0, 300),
+        riderId: order.riderId || null,
+        riderName: order.riderName || "Rider",
+        status: "open",
+        reportedAt: now,
+        reportedBy: user.uid,
+        reportedByName: user.name || user.email || "Owner"
+      };
+      changes.updatedAt = now;
+    }
+    if (input.codDiscrepancyResolve) {
+      if (user.role !== "owner") throw new HttpError(403, "Only an owner can resolve a COD discrepancy.");
+      if (order.codDiscrepancy?.status !== "open") throw new HttpError(409, "This remittance has no open discrepancy.");
+      changes.codDiscrepancy = {
+        ...order.codDiscrepancy,
+        status: "resolved",
+        resolutionNote: input.codDiscrepancyResolve.resolutionNote.trim().slice(0, 300),
+        resolvedAt: now,
+        resolvedBy: user.uid,
+        resolvedByName: user.name || user.email || "Owner"
+      };
       changes.updatedAt = now;
     }
     if (input.status !== undefined) {

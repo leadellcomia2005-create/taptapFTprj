@@ -259,12 +259,15 @@ test("public legal documents are readable without signing in", async ({ page }) 
   await page.goto("/#terms");
   await expect(page.getByRole("heading", { level: 1, name: "Terms and Conditions" })).toBeVisible();
   await expect(page.getByText("Version 2026-10-01")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "5. Payments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "4. Payments and receipts" })).toBeVisible();
+  await expect(page.getByText("Business name:")).toBeVisible();
+  await expect(page.getByText(/#17 Gemini Street, Pamplona Park, Pamplona Dos/)).toBeVisible();
+  await expect(page.getByText("Effective October 1, 2026")).toBeVisible();
   await expectAccessible(page, ".legal-page-shell");
 
   await page.getByRole("link", { name: "Privacy Notice" }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: "Privacy Notice" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "5. Your privacy rights" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "10. Your rights and requests" })).toBeVisible();
 
   await loginAs(page, "customer");
   await page.getByRole("button", { name: "Open navigation menu" }).click();
@@ -346,6 +349,20 @@ test("customer can add a meal, confirm a pin, and complete a COD pickup", async 
   await page.locator('button[aria-label^="Add "]:not([disabled])').first().click();
   await page.getByRole("button", { name: /Continue to checkout/i }).click();
   await expect(page.getByRole("heading", { name: /Secure checkout/i })).toBeVisible();
+
+  for (const width of [1440, 628, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const fields = await Promise.all(["checkout-barangay", "checkout-address", "checkout-city", "checkout-landmark"].map((id) => page.locator(`#${id}`).boundingBox()));
+    expect(fields.every(Boolean)).toBe(true);
+    const [barangay, street, city, landmark] = fields;
+    expect(street.y).toBeGreaterThanOrEqual(barangay.y);
+    expect(city.y).toBeGreaterThan(street.y);
+    expect(landmark.y).toBeGreaterThan(city.y);
+    if (width > 560) expect(street.x).toBeGreaterThan(barangay.x);
+    else expect(Math.abs(street.x - barangay.x)).toBeLessThanOrEqual(1);
+    await expectNoHorizontalOverflow(page);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.getByRole("button", { name: /Choose pin on map/i }).click();
   await expect(page.getByLabel("Latitude")).toBeVisible();
@@ -473,7 +490,7 @@ test("customer records use readable order references and stable action buttons",
   const orderRow = page.locator(".order-table-row").filter({ hasText: "TAP-97511466" });
   await expect(orderRow).toBeVisible();
   await expect(page.getByText(internalOrderId, { exact: true })).toHaveCount(0);
-  for (const name of ["Track", "Order again", "Report"]) await expectMinimumTouchTarget(orderRow.getByRole("button", { name }));
+  for (const name of ["Track", "Order again", "Report an issue"]) await expectMinimumTouchTarget(orderRow.getByRole("button", { name }));
 
   await activateWithKeyboard(page, navigation.getByRole("button", { name: "Digital Receipts" }));
   const receipt = page.locator(".receipt-card").filter({ hasText: "TAP-97511466" });
@@ -498,6 +515,95 @@ test("customer records use readable order references and stable action buttons",
   await expectNoHorizontalOverflow(page);
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("customer order actions keep matching buttons aligned with a payment action", async ({ page }) => {
+  const orderId = "TAP-E2E-ACTION-ALIGNMENT";
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript((id) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({ orders: {
+      [id]: {
+        customerId: "demo-customer", customerName: "Demo Customer", deliveryType: "delivery",
+        address: "Las Piñas City", items: [{ id: "meal-1", name: "Bangus Meal", price: 99, qty: 1 }],
+        total: 99, paymentMethod: "gcash", paymentStatus: "pending", status: "pending-payment",
+        createdAt: Date.now(), updatedAt: Date.now()
+      }
+    } }));
+  }, orderId);
+  await page.route("**/api/status", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ services: { paymongo: true }, paymongoMode: "test" })
+  }));
+  await loginAs(page, "customer");
+  await page.getByRole("button", { name: "Open navigation menu" }).click();
+  await page.getByRole("navigation", { name: /customer navigation/i }).getByRole("button", { name: "Order History" }).click();
+  const row = page.locator(".order-table-row[data-customer-order-id='TAP-E2E-ACTION-ALIGNMENT']");
+  const positions = async () => {
+    const actions = row.locator(".order-row-actions");
+    const boxes = await Promise.all(["Track", "Order again", "Cancel", "Pay with GCash"].map((name) => actions.getByRole("button", { name }).boundingBox()));
+    expect(boxes.every(Boolean)).toBe(true);
+    const [track, reorder, cancel, pay] = boxes;
+    expect(Math.abs(track.y - reorder.y)).toBeLessThanOrEqual(2);
+    expect(cancel.y).toBeGreaterThan(track.y);
+    expect(pay.y).toBeGreaterThan(cancel.y);
+    expect(pay.width).toBeGreaterThan(track.width + reorder.width);
+    const rowBox = await row.boundingBox();
+    expect(pay.x + pay.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+  };
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("button", { name: "Pay with GCash" })).toBeVisible();
+  for (const width of [1440, 1280, 1025, 390]) {
+    await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+    await positions();
+    const statusCell = row.locator('[data-label="Status"]');
+    const statusBadge = statusCell.locator('.status');
+    await expect(statusBadge).toHaveCSS('text-align', 'center');
+    if (width > 1024) {
+      const [cellBox, badgeBox] = await Promise.all([statusCell.boundingBox(), statusBadge.boundingBox()]);
+      expect(Math.abs(cellBox.x + cellBox.width / 2 - badgeBox.x - badgeBox.width / 2)).toBeLessThanOrEqual(1);
+    }
+    await expectNoHorizontalOverflow(page);
+  }
+});
+
+test("customer requests a cash refund and owner records the manual resolution", async ({ page }) => {
+  const orderId = "TAP-E2E-REFUND";
+  await page.addInitScript((id) => {
+    if (localStorage.getItem("taptap-demo-data")) return;
+    localStorage.setItem("taptap-demo-data", JSON.stringify({ orders: {
+      [id]: { customerId: "demo-customer", customerName: "Demo Customer", deliveryType: "delivery", address: "Las Piñas City",
+        items: [{ id: "meal-1", name: "Bangus Meal", price: 297, qty: 1 }], total: 297,
+        paymentMethod: "cod", paymentStatus: "cod-collected", status: "delivered", createdAt: Date.now(), updatedAt: Date.now() }
+    } }));
+  }, orderId);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginAs(page, "customer");
+  await page.getByRole("button", { name: "Open navigation menu" }).click();
+  await page.getByRole("navigation", { name: /customer navigation/i }).getByRole("button", { name: "Order History" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const row = page.locator(".order-table-row[data-customer-order-id='TAP-E2E-REFUND']");
+  await row.getByRole("button", { name: "Request refund" }).click();
+  await page.getByRole("textbox", { name: "Details" }).fill("One item was missing from my delivered order.");
+  await page.getByRole("button", { name: "Submit request" }).click();
+  await expect(row).toContainText("Refund: Pending owner review");
+  await expect(row.getByRole("button", { name: "Request refund" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Report an issue" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await logoutFromAccountMenu(page);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginAs(page, "owner");
+  await page.getByRole("navigation", { name: /owner navigation/i }).getByRole("button", { name: "Reports" }).click();
+  const queue = page.getByRole("region", { name: "Refund requests" });
+  await expect(queue).toContainText("TAP-E2E-REFUND");
+  await queue.getByRole("textbox", { name: "Decision note" }).fill("Verified missing item");
+  await queue.getByRole("button", { name: "Approve manual review" }).click();
+  await expect(queue).toContainText("approved manual");
+  await queue.getByRole("textbox", { name: "Refund method" }).fill("Cash handoff");
+  await queue.getByRole("textbox", { name: "Handoff reference" }).fill("RECEIPT-123");
+  await queue.getByRole("button", { name: "Record completed manual refund" }).click();
+  await expect(queue).toContainText("manual refunded");
+  await expectNoHorizontalOverflow(page);
 });
 
 test("owner reports and staff POS/order queue are reachable", async ({ page }) => {
@@ -799,6 +905,82 @@ test("rider can open assigned delivery proof fallback and COD ledger", async ({ 
   expect(runtime.deferredRequests).toEqual([]);
 });
 
+test("delivered COD cash stays outstanding until the owner confirms the rider handoff", async ({ page }) => {
+  const orderId = "TAP-E2E-COD-REMIT";
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(({ seededOrderId }) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      orders: {
+        [seededOrderId]: {
+          customerId: "customer-cod-remit",
+          customerName: "COD Customer",
+          riderId: "demo-rider",
+          riderName: "Demo Rider",
+          deliveryType: "delivery",
+          address: "Las Pinas City",
+          items: [{ id: "cod-meal", name: "COD Meal", price: 300, qty: 1 }],
+          subtotal: 300,
+          deliveryFee: 49,
+          total: 349,
+          paymentMethod: "cod",
+          paymentStatus: "cod-pending",
+          status: "delivered",
+          createdAt: Date.now() - 120000,
+          deliveredAt: Date.now() - 60000
+        }
+      }
+    }));
+  }, { seededOrderId: orderId });
+
+  await loginAs(page, "rider");
+  const riderMenuToggle = page.locator("button.workspace-menu-toggle");
+  await riderMenuToggle.click();
+  await page.getByRole("navigation", { name: /rider.*navigation/i }).getByRole("button", { name: /COD Ledger/i }).click();
+  const riderRecord = page.locator(".rider-ledger-row").filter({ hasText: orderId });
+  await expect(riderRecord).toContainText("Ready to hand over");
+  await expect(riderRecord).toContainText("₱349");
+  await expectMinimumTouchTarget(riderRecord.getByRole("button", { name: "Record cash handoff" }));
+  for (const width of [320, 375, 390, 430, 768, 1024]) {
+    await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+    await expectNoHorizontalOverflow(page);
+    await expect(riderRecord).toBeVisible();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await riderRecord.getByRole("button", { name: "Record cash handoff" }).click();
+  await expect(riderRecord).toContainText("Awaiting owner confirmation");
+  await expect(riderRecord.getByRole("button", { name: "Record cash handoff" })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  await logoutFromAccountMenu(page);
+
+  await page.getByRole("button", { name: /Order now/i }).first().click();
+  const loginPanel = page.locator("[data-login-modal-panel]");
+  await loginPanel.getByLabel("Email").fill(demoCredentials.owner.email);
+  await loginPanel.getByLabel("Password", { exact: true }).fill(demoCredentials.owner.password);
+  await loginPanel.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Open account menu/i })).toBeVisible();
+  await page.getByRole("button", { name: /Open navigation menu/i }).click();
+  await page.getByRole("navigation", { name: /owner mobile navigation/i }).getByRole("button", { name: "Reports" }).click();
+  const ownerRecord = page.locator(".cod-remittance-card").filter({ hasText: orderId });
+  await expect(ownerRecord).toContainText("Awaiting owner confirmation");
+  await expect(ownerRecord).toContainText("₱349");
+  await expectMinimumTouchTarget(ownerRecord.getByRole("button", { name: "Confirm remitted" }));
+  await ownerRecord.getByRole("button", { name: "Confirm remitted" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm cash remittance" });
+  await expect(dialog).toContainText("receiving and counting the physical cash");
+  const confirmButton = dialog.getByRole("button", { name: "Confirm remitted" });
+  await expectMinimumTouchTarget(confirmButton);
+  await activateWithKeyboard(page, confirmButton);
+  await expect(ownerRecord).toContainText("Remitted");
+  await expect(ownerRecord).toContainText("Demo Owner");
+  await expectNoHorizontalOverflow(page);
+
+  for (const width of [320, 375, 390, 430, 768, 1024]) {
+    await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
+    await expect(ownerRecord).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+});
+
 test("375px landing and customer workspace have no horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const runtime = watchRuntime(page);
@@ -1053,6 +1235,34 @@ test("staff reply claims a demo conversation and can return it to the assistant"
   await confirmation.getByRole("button", { name: "Delete chat", exact: true }).click();
   await expect(page.getByText("No customer chats yet.", { exact: true })).toBeVisible();
   await expect(page.getByText("I need assistance.", { exact: true })).toHaveCount(0);
+});
+
+test("kitchen ticket moves lanes without changing tabs", async ({ page }) => {
+  const orderId = "TAP-E2E-KITCHEN-LIVE";
+  await page.addInitScript((id) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({ orders: {
+      [id]: {
+        customerId: "demo-customer",
+        customerName: "Kitchen Customer",
+        deliveryType: "delivery",
+        address: "Las Piñas City",
+        items: [{ id: "meal-1", name: "Bangus Meal", price: 99, qty: 1 }],
+        total: 99,
+        paymentMethod: "cod",
+        status: "preparing",
+        createdAt: Date.now() - 60_000,
+        updatedAt: Date.now() - 30_000
+      }
+    } }));
+  }, orderId);
+  await loginAs(page, "staff");
+  await page.getByRole("button", { name: "Kitchen", exact: true }).click();
+  const preparing = page.locator(".kitchen-lane").filter({ has: page.getByRole("heading", { name: "Preparing" }) });
+  const ready = page.locator(".kitchen-lane").filter({ has: page.getByRole("heading", { name: "Ready" }) });
+  await expect(preparing).toContainText(orderId);
+  await preparing.getByRole("button", { name: "Mark ready" }).click();
+  await expect(ready).toContainText(orderId);
+  await expect(preparing).not.toContainText(orderId);
 });
 
 test("stored cart and checkout draft recover without trusting stale product data", async ({ page }) => {
@@ -1529,6 +1739,36 @@ test("notification center stays readable and uses one scroll region at every req
   await expect(trigger).toBeFocused();
   expect(runtime.errors).toEqual([]);
   expect(runtime.deferredRequests).toEqual([]);
+});
+
+test("customer notifications open the relevant order or support without opening the map", async ({ page }) => {
+  const orderId = "TAP-E2E-NOTIFICATION-ORDER";
+  const now = Date.now();
+  await page.addInitScript(({ orderId, now }) => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({
+      orders: {
+        [orderId]: {
+          customerId: "demo-customer", customerName: "Demo Customer", deliveryType: "delivery",
+          address: "Las Piñas City", items: [{ id: "meal-1", name: "Bangus Meal", price: 99, qty: 1 }],
+          total: 99, paymentMethod: "cod", status: "delivered", createdAt: now - 60_000, updatedAt: now - 30_000
+        }
+      },
+      notifications: {
+        order: { targetUserId: "demo-customer", title: "Order status updated", message: `${orderId} is now delivered.`, type: "order", orderId, actionView: "orders", createdAt: now, readAt: null },
+        chat: { targetUserId: "demo-customer", title: "Support team replied", message: "Staff: Your meal is ready.", type: "chat", actionView: "orders", createdAt: now - 1_000, readAt: null }
+      }
+    }));
+  }, { orderId, now });
+  await loginAs(page, "customer");
+  await page.getByRole("button", { name: "Open notifications" }).click();
+  await page.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: /Order status updated.*View order/i }).click();
+  const targetOrder = page.locator(".order-table-row.customer-notification-target");
+  await expect(targetOrder).toHaveAttribute("data-customer-order-id", orderId);
+  await expect(targetOrder).toBeFocused();
+  await expect(page.locator(".modal-content[role='dialog']")).toHaveCount(0);
+  await page.getByRole("button", { name: "Open notifications" }).click();
+  await page.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: /Support team replied.*Open conversation/i }).click();
+  await expect(page.getByRole("dialog", { name: /TapTap customer support/i })).toBeVisible();
 });
 
 test("notification actions mark one, deep-link safely, and clear only read records", async ({ page }) => {

@@ -20,12 +20,15 @@ export {
   subscribeApprovalRequests,
   subscribeAuditLogs,
   subscribeShiftLogs,
+  subscribeOwnerWorkspacePreferences,
+  saveOwnerPlanningPreferences,
+  saveOwnerRecommendationStatuses,
 } from "../firebase.js";
 
 export const sendSupportMessage = (
   text: string,
   actor: Pick<AppUser, "uid" | "name"> & Partial<Pick<AppUser, "role">>,
-  conversation: { customerId: EntityId; customerName: string; conversationId: EntityId }
+  conversation: { customerId: EntityId; customerName: string; conversationId: EntityId; messageId?: string }
 ): Promise<void> => sendSupportMessageCompatibility(text, actor, conversation);
 
 export const subscribeSupportMessages = (

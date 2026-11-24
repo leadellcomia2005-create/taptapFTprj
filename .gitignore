@@ -54,6 +54,9 @@ ui-debug.log
 /output/
 /separated-menu-photos/
 /design-previews/
+/.codex-build/
+/artifacts/
+/deliverables/
 
 # Archives
 *.zip

@@ -14,20 +14,7 @@ export type AuditEntry = Partial<AuditLog> & {
 export const ownerPlanningStorageKey = "taptap-owner-planning";
 
 export function ownerPlanningDefaults(): { salesGoal: number; activePromotion: string; prepTargetMinutes: number; deliveryTargetMinutes: number; cashVarianceLimit: number; cancellationRateLimit: number; complaintLimit: number } {
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(ownerPlanningStorageKey) || "{}") as Record<string, unknown>;
-    return {
-      salesGoal: Math.max(1, Number(saved.salesGoal || 100000)),
-      activePromotion: String(saved.activePromotion || "No active promotion"),
-      prepTargetMinutes: Math.max(1, Number(saved.prepTargetMinutes || 15)),
-      deliveryTargetMinutes: Math.max(1, Number(saved.deliveryTargetMinutes || 45)),
-      cashVarianceLimit: Math.max(0, Number(saved.cashVarianceLimit || 100)),
-      cancellationRateLimit: Math.max(0.1, Number(saved.cancellationRateLimit || 5)),
-      complaintLimit: Math.max(1, Number(saved.complaintLimit || 3))
-    };
-  } catch {
-    return { salesGoal: 100000, activePromotion: "No active promotion", prepTargetMinutes: 15, deliveryTargetMinutes: 45, cashVarianceLimit: 100, cancellationRateLimit: 5, complaintLimit: 3 };
-  }
+  return { salesGoal: 100000, activePromotion: "No active promotion", prepTargetMinutes: 15, deliveryTargetMinutes: 45, cashVarianceLimit: 100, cancellationRateLimit: 5, complaintLimit: 3 };
 }
 
 export const securityAuditActions = new Set([
@@ -117,6 +104,10 @@ export function auditFriendlyMessage(entry: AuditEntry = {}): string {
     approval_requested: "Staff requested approval",
     complaint_created: "Customer submitted a complaint",
     complaint_updated: "Complaint was updated",
+    cod_handoff_recorded: "Rider recorded a physical COD cash handoff",
+    cod_remittance_confirmed: "Owner confirmed a COD cash remittance",
+    cod_discrepancy_reported: "Owner reported a COD cash discrepancy",
+    cod_discrepancy_resolved: "Owner resolved a COD cash discrepancy",
     inventory_adjusted: "Inventory stock was adjusted",
     inventory_received: "Inventory stock was received",
     menu_item_created: "Menu item was created",

@@ -10,7 +10,7 @@ const statusPriority: Record<string, number> = {
   received: 4,
   "pending-payment": 5,
   delivered: 20,
-  completed: 21,
+  completed: 20,
   cancelled: 22
 };
 
@@ -23,8 +23,14 @@ function oldestFirst(first: WorkflowOrder, second: WorkflowOrder): number {
 export function prioritizeAssignedDeliveries<T extends WorkflowOrder>(orders: readonly T[]): T[] {
   return [...orders].sort((first, second) => (
     (statusPriority[first.status] ?? 10) - (statusPriority[second.status] ?? 10)
-    || oldestFirst(first, second)
+    || (["delivered", "completed", "cancelled"].includes(first.status)
+      ? deliveryHistoryTime(second) - deliveryHistoryTime(first) || String(second.id).localeCompare(String(first.id))
+      : oldestFirst(first, second))
   ));
+}
+
+export function deliveryHistoryTime(order: WorkflowOrder): number {
+  return Number(order.deliveredAt || order.completedAt || order.createdAt || order.assignedAt || order.updatedAt || 0);
 }
 
 export function prioritizeAvailableDeliveries<T extends WorkflowOrder>(orders: readonly T[]): T[] {

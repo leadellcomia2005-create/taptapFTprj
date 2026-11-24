@@ -59,6 +59,13 @@ export const updateOrderSchema = z.object({
   deliveryIssue: optionalText(160),
   codHandoffRequested: optionalBoolean,
   codRemitted: optionalBoolean,
+  codDiscrepancyReport: z.object({
+    receivedAmount: z.coerce.number().finite().min(0).max(1_000_000),
+    reason: z.string().trim().min(3).max(300)
+  }).optional(),
+  codDiscrepancyResolve: z.object({
+    resolutionNote: z.string().trim().min(3).max(300)
+  }).optional(),
   proofOfDeliveryUrl: z.string().url().max(2000).optional(),
   proofOfDeliveryRef: optionalText(180),
   proofOfDeliveryMeta: z.object({

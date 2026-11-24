@@ -63,6 +63,7 @@ export async function fetchDeliveryRoute({ origin, destination, config, fetchImp
     if (!response.ok) return approximateRoute(origin, destination);
     payload = await response.json();
   } catch (error) {
+    if (error instanceof HttpError) throw error;
     return approximateRoute(origin, destination);
   } finally {
     clearTimeout(timeout);
@@ -70,12 +71,12 @@ export async function fetchDeliveryRoute({ origin, destination, config, fetchImp
   const route = payload?.routes?.[0];
   const coordinatesResult = route?.geometry?.coordinates;
   if (!Array.isArray(coordinatesResult) || coordinatesResult.length < 2) {
-    throw new HttpError(422, "No drivable route was found for these delivery points.");
+    return approximateRoute(origin, destination);
   }
   const points = coordinatesResult
     .map((point) => [Number(point?.[1]), Number(point?.[0])])
     .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
-  if (points.length < 2) throw new HttpError(422, "No drivable route was found for these delivery points.");
+  if (points.length < 2) return approximateRoute(origin, destination);
 
   const value = {
     points,

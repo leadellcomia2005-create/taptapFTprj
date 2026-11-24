@@ -1,0 +1,121 @@
+/* Presentation only. Keep role actions, forms and data sources in their components. */
+.app-shell { --ui-gap: 16px; }
+.records-loading-notice { padding: 12px 24px; color: var(--ink); background: var(--paper-soft); border-bottom: 1px solid var(--line); font-size: 14px; }
+.app-shell main { min-width: 0; }
+.app-shell .dashboard-heading h2,
+.app-shell .workspace-overview-header h1,
+.app-shell .workspace-overview-header h2 { font-size: clamp(28px,3vw,42px); line-height: 1.12; overflow-wrap: anywhere; }
+.app-shell .dashboard-heading { margin-bottom: 20px; }
+.app-shell .workspace-overview-header { padding: clamp(18px,2vw,24px); }
+.app-shell .workspace-overview-header p:not(.eyebrow) { font-size: 14px; line-height: 1.6; }
+.app-shell .workspace-overview-header > div { min-width: 0; }
+.app-shell .dashboard-card { padding: 20px; border-radius: 12px; }
+.app-shell .dashboard-card h3 { font-size: 22px; line-height: 1.25; margin-bottom: 16px; }
+.app-shell .metric-card { padding: 18px; }
+.app-shell .metric-card strong { font-size: clamp(24px,2.2vw,32px); line-height: 1.15; font-variant-numeric: tabular-nums; }
+.app-shell .metric-card small,
+.app-shell .sales-chart-summary small { font-size: 12px; letter-spacing: .035em; }
+.app-shell .metric-card span,
+.app-shell .module-note,
+.app-shell .sales-chart-freshness,
+.app-shell .owner-overview-meta,
+.app-shell .alert-row small { font-size: 13px; line-height: 1.5; }
+.app-shell .module-note { max-width: 58ch; }
+.app-shell .dashboard-card label.form-label { font-size: 12px; line-height: 1.4; margin-bottom: 12px; }
+.app-shell .dashboard-card .form-control,
+.app-shell .dashboard-card .form-select { min-height: 44px; font-size: 14px; }
+.app-shell .dashboard-card .table th { font-size: 12px; line-height: 1.4; }
+.app-shell .dashboard-card .table td { font-size: 14px; line-height: 1.5; }
+.app-shell .dashboard-card .table td small { font-size: 12px; line-height: 1.5; }
+.app-shell .dashboard-card .table td strong { overflow-wrap: anywhere; }
+.app-shell .dashboard-card .table-responsive { max-width: 100%; }
+.app-shell .dashboard-card .btn,
+.app-shell .order-actions .btn { min-height: 44px; }
+.app-shell .stock-badge,
+.app-shell .status { font-size: 12px; line-height: 1.35; white-space: normal; }
+.app-shell .empty-chat,
+.app-shell .sales-chart-empty { min-height: 140px; padding: 24px; font-size: 14px; line-height: 1.6; }
+.app-shell .module-heading { flex-wrap: wrap; gap: 12px; }
+.app-shell .module-heading > div { min-width: 0; }
+.app-shell .owner-attention-grid small,
+.app-shell .owner-decision-metrics span,
+.app-shell .owner-intelligence-grid dd { font-size: 13px; line-height: 1.5; }
+.app-shell .owner-attention-grid b,
+.app-shell .owner-decision-metrics small,
+.app-shell .owner-intelligence-grid dt { font-size: 12px; line-height: 1.4; }
+.app-shell .owner-decision-metrics strong { font-size: clamp(22px,2vw,28px); line-height: 1.2; overflow-wrap: anywhere; }
+.app-shell .owner-dashboard-section { padding: 20px; margin-bottom: 16px; }
+.app-shell .owner-dashboard-section h2 { font-size: 26px; line-height: 1.2; }
+.app-shell .owner-section-nav { gap: 8px; flex-wrap: wrap; }
+.app-shell .owner-hero-actions { min-width: 240px; }
+.app-shell .owner-hero-actions label { font-size: 12px; }
+.app-shell .sales-chart-switch button { min-height: 44px; font-size: 12px; padding-inline: 8px; }
+.app-shell .sales-chart-content { min-width: 0; }
+.app-shell .rider-order-card small,
+.app-shell .rider-job-card small,
+.app-shell .rider-route-card small,
+.app-shell .rider-ledger-list small { font-size: 13px; line-height: 1.5; }
+.app-shell .staff-product-grid > button { min-width: 0; }
+.app-shell .staff-product-grid strong { overflow-wrap: anywhere; }
+.app-shell .storefront-toolbar { flex-wrap: wrap; gap: 16px; }
+.app-shell .storefront-toolbar > div { min-width: 0; }
+.app-shell .storefront-toolbar h1,
+.app-shell .storefront-toolbar h2 { font-size: clamp(28px,3vw,40px); line-height: 1.15; }
+.app-shell .order-history-layout { gap: 16px; }
+.app-shell .menu-item-copy p { font-size: 14px; line-height: 1.55; }
+.app-shell .menu-item-copy small { font-size: 12px; line-height: 1.5; }
+.app-shell .menu-item-copy h3 { font-size: 20px; line-height: 1.2; }
+.app-shell .menu-item-action .stock-note { font-size: 12px; }
+.app-shell .order-card small,
+.app-shell .order-summary-panel small { font-size: 13px; line-height: 1.5; }
+.checkout-modal .checkout-field-hint,
+.checkout-modal .checkout-mode-grid small,
+.checkout-modal .checkout-legal-note { font-size: 13px; line-height: 1.5; }
+.checkout-modal .form-control,
+.checkout-modal .form-select { min-height: 46px; font-size: 16px; }
+.modal-dialog .checkout-modal { max-height: calc(100dvh - 56px); }
+.modal-dialog .checkout-modal .modal-body { min-height: 0; }
+.app-shell :is(button,a,input,select,textarea,summary):focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
+@media (max-width: 1180px) {
+  .app-shell .workspace-overview-header { align-items: stretch; flex-direction: column; }
+  .app-shell .workspace-overview-header > div { width: 100%; }
+  .app-shell .owner-kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .app-shell .owner-decision-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .app-shell .owner-hero-actions { min-width: 0; }
+}
+@media (max-width: 760px) {
+  .modal-dialog .checkout-modal { max-height: 96dvh; }
+  .app-shell .dashboard-card .table:has(.responsive-order-record) { min-width: 0; display: block; }
+  .app-shell .table:has(.responsive-order-record) thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .app-shell .table:has(.responsive-order-record) tbody { display: grid; gap: 14px; }
+  .app-shell .responsive-order-record { display: grid; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .app-shell .responsive-order-record td { display: block; min-width: 0; max-width: none; padding: 8px 0; border: 0; overflow-wrap: anywhere; background: transparent; }
+  .app-shell .responsive-order-record td::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+  .app-shell .responsive-order-record td[data-label="Actions"] { border-top: 1px solid var(--line); }
+  .app-shell .responsive-order-record .order-action-stack { display: flex; flex-wrap: wrap; gap: 8px; }
+  .app-shell .workspace-overview-header { align-items: stretch; flex-direction: column; gap: 16px; }
+  .app-shell .workspace-overview-header > div { width: 100%; }
+  .app-shell .owner-hero-actions { width: 100%; }
+  .app-shell .dashboard-card { padding: 16px; }
+  .app-shell .dashboard-heading h2,
+  .app-shell .workspace-overview-header h1,
+  .app-shell .workspace-overview-header h2 { font-size: 30px; }
+  .app-shell .owner-intelligence-grid { grid-template-columns: minmax(0,1fr); }
+  .app-shell .owner-overview-meta { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+  .app-shell .owner-dashboard-section { padding: 16px; }
+  .app-shell .rider-action-grid { gap: 10px; }
+  .app-shell .dashboard-card .table-responsive { margin-inline: 0; padding-inline: 0; }
+}
+@media (max-width: 480px) {
+  .app-shell .owner-kpi-grid,
+  .app-shell .owner-decision-metrics { grid-template-columns: minmax(0,1fr); }
+  .app-shell .metric-card { padding: 16px; }
+  .app-shell .dashboard-heading { gap: 12px; }
+  .app-shell .metric-card strong { font-size: 26px; }
+  .app-shell .sales-chart-summary > span { padding: 10px; }
+  .app-shell .sales-chart-summary strong { font-size: 20px; overflow-wrap: anywhere; }
+  .app-shell .order-table-row > div::before { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell *, .checkout-modal * { scroll-behavior: auto; animation-duration: .01ms; transition-duration: .01ms; }
+}

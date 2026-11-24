@@ -1518,6 +1518,8 @@ function TwoFactorPanel({ user, onComplete }) {
   const [backupMode, setBackupMode] = useState(false);
   const [backupCode, setBackupCode] = useState("");
   const [result, setResult] = useState(null);
+  const [sessionToken, setSessionToken] = useState("");
+  const [openingSession, setOpeningSession] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [deliveryMessage, setDeliveryMessage] = useState("");
@@ -1593,16 +1595,26 @@ function TwoFactorPanel({ user, onComplete }) {
     setError("");
     setDeliveryMessage("");
     try {
+      if (sessionToken) {
+        setOpeningSession(true);
+        onComplete(await completeTwoFactorSession(sessionToken));
+        return;
+      }
       const response = setup
         ? await api.finishTwoFactorSetup(method, code)
         : await api.verifyTwoFactor(backupMode ? { backupCode } : { code });
       if (response.backupCodes) setResult(response);
-      else onComplete(await completeTwoFactorSession(response.customToken));
+      else {
+        setSessionToken(response.customToken);
+        setOpeningSession(true);
+        onComplete(await completeTwoFactorSession(response.customToken));
+      }
     } catch (requestError) {
       setCode("");
       setError(requestError.message);
     } finally {
       setBusy(false);
+      setOpeningSession(false);
     }
   };
 
@@ -1698,8 +1710,8 @@ function TwoFactorPanel({ user, onComplete }) {
         )}
         {deliveryMessage && <div className="alert alert-success py-2 small mt-3">{deliveryMessage}</div>}
         {error && <div className="alert alert-danger py-2 small mt-3">{error}</div>}
-        <button className="btn btn-danger w-100 mt-3" disabled={busy || (!backupMode && (code.length !== 6 || (method === "sms" && expired))) || (backupMode && backupCode.length < 8)}>
-          {busy ? "Verifying..." : setup ? "Save security setup" : continueLabel}
+        <button className="btn btn-danger w-100 mt-3" disabled={busy || (!sessionToken && ((!backupMode && (code.length !== 6 || (method === "sms" && expired))) || (backupMode && backupCode.length < 8)))}>
+          {busy ? openingSession ? "Opening your account..." : "Verifying..." : sessionToken ? "Retry opening your account" : setup ? "Save security setup" : continueLabel}
         </button>
         {!setup && !customerAccount && <button type="button" className="btn btn-link text-danger w-100" onClick={() => setBackupMode((current) => !current)}>{backupMode ? "Use verification code" : "Use backup code"}</button>}
         <div className="security-recovery-panel compact">

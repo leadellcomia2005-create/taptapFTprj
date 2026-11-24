@@ -1,5 +1,8 @@
 export {
   createOrder,
+  requestOrderRefund,
+  decideOrderRefund,
+  completeOrderManualRefund,
   resendReceiptEmail,
   subscribeOrders,
   trackEvent,

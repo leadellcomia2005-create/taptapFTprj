@@ -1,12 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, ClipboardList, CreditCard, MessageSquareWarning, PackageSearch, Sparkles, WifiOff } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardList, CreditCard, MessageSquareWarning, PackageSearch, Sparkles, Wallet, WifiOff, X } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
 import { securityMethodLabels, staffRoleLabels } from "../../config/appConfig";
 import { api } from "../../services/api";
-import { updateOrder } from "../../services/firebase/orders";
+import { completeOrderManualRefund, decideOrderRefund, updateOrder } from "../../services/firebase/orders";
+import { saveOwnerPlanningPreferences, saveOwnerRecommendationStatuses, subscribeOwnerWorkspacePreferences } from "../../services/firebase/operations";
 import { bestSellers, orderPrepClock, peakOrderHours, slowMovingItems } from "../../utils/operations";
 import { calculateOwnerDecisionSupport } from "../../utils/ownerKpis";
 import { buildOwnerAnalysisScope, localAnalysisDiscussion } from "../../utils/ownerAnalysis";
+import { codRemittanceStatus, codRemittanceStatusLabel, isCodDelivery, remittanceTimestamp } from "../../utils/codRemittance";
+import { orderReference } from "../../utils/display";
 import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
 import RecoveryPanel from "./RecoveryPanel";
 import { ReasonModal } from "./WorkspaceModals";
@@ -20,6 +23,7 @@ const countLabel = (value, singular, plural = `${singular}s`) => `${value} ${Num
 const signedPercent = (value) => `${Number(value) >= 0 ? "+" : ""}${value}%`;
 const hourLabel = (hour) => new Date(2026, 0, 1, Number(hour || 0)).toLocaleTimeString("en-PH", { hour: "numeric" });
 const analysisDate = (value) => new Date(value).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+const dayMs = 24 * 60 * 60 * 1000;
 const salesChartRangeForDays = (days = 7) => {
   const to = new Date();
   const from = new Date(to);
@@ -54,6 +58,73 @@ function SalesChartControls({ chartType, onChartTypeChange, range, onRangeChange
   );
 }
 
+function RefundQueue({ orders, notify }) {
+  const requests = orders.filter((order) => order.refundRequest).sort((a, b) => Number(b.refundRequest.createdAt || 0) - Number(a.refundRequest.createdAt || 0));
+  const [drafts, setDrafts] = useState({});
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+  const setDraft = (id, field, value) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
+  const act = async (order, action) => {
+    const draft = drafts[order.id] || {};
+    setBusyId(order.id);
+    setError("");
+    try {
+      if (action === "complete-manual") await completeOrderManualRefund(order.id, { method: draft.method || "", reference: draft.reference || "" });
+      else await decideOrderRefund(order.id, { action, note: draft.note || (action === "refresh" ? "Verify provider refund status" : "") });
+      notify?.(`${orderReference(order.id)} refund record updated.`);
+    } catch (failure) {
+      setError(failure.message || "The refund record could not be updated.");
+    } finally {
+      setBusyId("");
+    }
+  };
+  return <section className="dashboard-card refund-queue" aria-label="Refund requests">
+    <div className="module-heading"><div><p className="eyebrow text-danger">Owner review</p><h3>Refund requests</h3></div><span className="status">{requests.filter((order) => order.refundRequest.status === "pending-review").length} pending</span></div>
+    <p className="module-note">PayMongo refunds are sandbox tests. No real money is transferred. Cash refunds require a separate manual record after the handoff.</p>
+    {error && <p className="alert alert-danger" role="alert">{error}</p>}
+    {requests.length === 0 && <div className="empty-state compact">No refund requests yet.</div>}
+    <div className="refund-queue-list">{requests.map((order) => {
+      const request = order.refundRequest;
+      const draft = drafts[order.id] || {};
+      return <article className="refund-queue-item" key={order.id}>
+        <div className="refund-queue-heading"><strong>{orderReference(order.id)}</strong><span className="status">{request.status.replaceAll("-", " ")}</span></div>
+        <p>{request.customerName} · {currency(request.amount)} · {request.mode === "paymongo-test" ? "PayMongo sandbox" : "Manual cash"} · {new Date(request.createdAt).toLocaleDateString("en-PH")}</p>
+        <p><b>{request.reason}</b> — {request.details}</p>
+        {request.decisionNote && <p>Owner decision: {request.decisionNote}</p>}
+        {request.providerRefundId && <p>Test provider reference: {request.providerRefundId}</p>}
+        {request.manualReference && <p>Manual record: {request.manualMethod} · {request.manualReference}</p>}
+        {request.status === "pending-review" && <><label className="form-label">Decision note<textarea className="form-control" rows="2" maxLength="300" value={draft.note || ""} onChange={(event) => setDraft(order.id, "note", event.target.value)} placeholder="Explain the approval or rejection." /></label><div className="refund-queue-actions"><button className="btn btn-outline-dark" disabled={busyId === order.id || (draft.note || "").trim().length < 3} onClick={() => act(order, "reject")}>Reject</button><button className="btn btn-danger" disabled={busyId === order.id || (draft.note || "").trim().length < 3} onClick={() => act(order, "approve")}>{busyId === order.id ? "Processing..." : request.mode === "paymongo-test" ? "Approve test refund" : "Approve manual review"}</button></div></>}
+        {request.status === "approved-manual" && <><div className="refund-manual-fields"><label className="form-label">Refund method<input className="form-control" maxLength="80" value={draft.method || ""} onChange={(event) => setDraft(order.id, "method", event.target.value)} placeholder="Cash handoff or transfer" /></label><label className="form-label">Handoff reference<input className="form-control" maxLength="120" value={draft.reference || ""} onChange={(event) => setDraft(order.id, "reference", event.target.value)} placeholder="Receipt or transaction reference" /></label></div><button className="btn btn-danger" disabled={busyId === order.id || (draft.method || "").trim().length < 3 || (draft.reference || "").trim().length < 3} onClick={() => act(order, "complete-manual")}>Record completed manual refund</button></>}
+        {request.mode === "paymongo-test" && request.providerRefundId && ["processing", "failed"].includes(request.status) && <button className="btn btn-outline-dark" disabled={busyId === order.id} onClick={() => act(order, "refresh")}>Check PayMongo test status</button>}
+        {request.status === "failed" && !request.providerRefundId && <p className="text-danger">Provider outcome could not be confirmed. Check the PayMongo dashboard before taking any further action.</p>}
+      </article>;
+    })}</div>
+  </section>;
+}
+
+function CodRemittanceDialog({ action, busy, error, form, setForm, onClose, onSubmit }) {
+  if (!action?.order) return null;
+  const { order, type } = action;
+  const title = type === "confirm" ? "Confirm cash remittance" : type === "report" ? "Report cash discrepancy" : "Resolve cash discrepancy";
+  const primaryLabel = type === "confirm" ? "Confirm remitted" : type === "report" ? "Report discrepancy" : "Resolve discrepancy";
+  return (
+    <div className="remittance-dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+      <section className="remittance-dialog" role="dialog" aria-modal="true" aria-labelledby="remittance-dialog-title">
+        <header><div><p className="eyebrow text-danger">Physical COD handoff</p><h3 id="remittance-dialog-title">{title}</h3></div><button className="remittance-dialog-close" type="button" aria-label="Close" disabled={busy} onClick={onClose}><X aria-hidden="true" /></button></header>
+        <div className="remittance-dialog-summary"><span>{orderReference(order.id)}</span><strong>{currency(order.total)}</strong><small>{order.riderName || "Assigned rider"}</small></div>
+        {type === "confirm" && <div className="remittance-confirm-copy"><CheckCircle2 aria-hidden="true" /><p><strong>Confirm only after receiving and counting the physical cash.</strong><span>This permanently removes the amount from the rider's outstanding cash.</span></p></div>}
+        {type === "report" && <>
+          <div className="remittance-amount-grid"><label className="form-label">Amount expected<input className="form-control" value={Number(order.total || 0)} readOnly /></label><label className="form-label">Amount received<input className="form-control" type="number" min="0" step="0.01" required autoFocus value={form.receivedAmount} onChange={(event) => setForm((current) => ({ ...current, receivedAmount: event.target.value }))} /></label></div>
+          <label className="form-label">Reason or owner note<textarea className="form-control" rows="3" required value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Describe the difference found while counting cash." /></label>
+        </>}
+        {type === "resolve" && <label className="form-label">Resolution note<textarea className="form-control" rows="3" required autoFocus value={form.resolutionNote} onChange={(event) => setForm((current) => ({ ...current, resolutionNote: event.target.value }))} placeholder="Explain how the cash discrepancy was resolved." /></label>}
+        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+        <footer><button className="btn btn-outline-dark" type="button" disabled={busy} onClick={onClose}>Cancel</button><button className={`btn ${type === "report" ? "btn-outline-danger" : "btn-danger"}`} type="button" disabled={busy || (type === "report" && (!form.receivedAmount || form.reason.trim().length < 3)) || (type === "resolve" && form.resolutionNote.trim().length < 3)} onClick={onSubmit}>{busy ? "Saving..." : primaryLabel}</button></footer>
+      </section>
+    </div>
+  );
+}
+
 function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, complaints = [], serviceStatus, auditLogs, shiftLogs, notify, onNavigate }) {
   const revenueOrders = orders.filter(isRevenueOrder);
   const totalSales = revenueOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
@@ -69,6 +140,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [insightCategory, setInsightCategory] = useState("all");
   const [planning, setPlanning] = useState(ownerPlanningDefaults);
   const [recommendationStatuses, setRecommendationStatuses] = useState({});
+  const ownerPreferencesMigrationAttempted = useRef(false);
   const salesGoal = planning.salesGoal;
   const [dashboardPeriod, setDashboardPeriod] = useState("today");
   const [salesChartType, setSalesChartType] = useState("line");
@@ -83,6 +155,11 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   const [suspensionError, setSuspensionError] = useState("");
   const [adminMessage, setAdminMessage] = useState({ uid: "", title: "Message from administrator", message: "" });
   const [reportDate, setReportDate] = useState(localDateInputValue());
+  const [remittanceFilters, setRemittanceFilters] = useState({ rider: "all", status: "all", from: "", to: "" });
+  const [remittanceAction, setRemittanceAction] = useState(null);
+  const [remittanceForm, setRemittanceForm] = useState({ receivedAmount: "", reason: "", resolutionNote: "" });
+  const [remittanceBusy, setRemittanceBusy] = useState(false);
+  const [remittanceError, setRemittanceError] = useState("");
   const [auditCategoryFilter, setAuditCategoryFilter] = useState("all");
   const [auditSearch, setAuditSearch] = useState("");
   const [auditDateRange, setAuditDateRange] = useState({ from: "", to: "" });
@@ -187,16 +264,56 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     targets: planning,
     isRevenueOrder
   }), [complaints, inventory, orders, planning, shiftLogs]);
-  useEffect(() => {
-    try {
-      setRecommendationStatuses(JSON.parse(window.localStorage.getItem("taptap-owner-recommendation-statuses") || "{}"));
-    } catch {
-      setRecommendationStatuses({});
+  useEffect(() => subscribeOwnerWorkspacePreferences(user.uid, (preferences) => {
+    if (preferences) {
+      if (preferences.planning) setPlanning({ ...ownerPlanningDefaults(), ...preferences.planning });
+      setRecommendationStatuses(preferences.recommendationStatuses || {});
+      return;
     }
-  }, []);
+    if (ownerPreferencesMigrationAttempted.current) return;
+    ownerPreferencesMigrationAttempted.current = true;
+    try {
+      const legacyPlanning = JSON.parse(window.localStorage.getItem(ownerPlanningStorageKey) || "null");
+      const legacyStatuses = JSON.parse(window.localStorage.getItem("taptap-owner-recommendation-statuses") || "null");
+      if (legacyPlanning) {
+        const migratedPlanning = { ...ownerPlanningDefaults(), ...legacyPlanning };
+        setPlanning(migratedPlanning);
+        void saveOwnerPlanningPreferences(user.uid, migratedPlanning);
+      }
+      if (legacyStatuses) {
+        setRecommendationStatuses(legacyStatuses);
+        void saveOwnerRecommendationStatuses(user.uid, legacyStatuses);
+      }
+    } catch {
+      // Invalid legacy browser data is ignored; Firebase defaults remain authoritative.
+    }
+  }), [user.uid]);
   const unavailableServices = Object.entries(serviceStatus || {}).filter(([, ready]) => ready === false);
   const dataUpdatedAt = Math.max(0, ...orders.map((order) => Number(order.updatedAt || order.createdAt || 0)));
   const dailyReport = useMemo(() => buildDailyReport(orders, inventory, shiftLogs, reportDate), [orders, inventory, shiftLogs, reportDate]);
+  const codRemittanceOrders = useMemo(() => orders
+    .filter((order) => isCodDelivery(order) && order.status === "delivered")
+    .sort((a, b) => Number(b.deliveredAt || b.updatedAt || 0) - Number(a.deliveredAt || a.updatedAt || 0)), [orders]);
+  const remittanceRiders = useMemo(() => [...new Map(codRemittanceOrders.map((order) => [order.riderId || order.riderName, { id: order.riderId || order.riderName, name: order.riderName || order.riderId || "Unassigned rider" }])).values()].filter((rider) => rider.id), [codRemittanceOrders]);
+  const filteredRemittanceOrders = useMemo(() => {
+    const from = remittanceFilters.from ? new Date(`${remittanceFilters.from}T00:00:00`).getTime() : 0;
+    const to = remittanceFilters.to ? new Date(`${remittanceFilters.to}T00:00:00`).getTime() + dayMs : Number.POSITIVE_INFINITY;
+    return codRemittanceOrders.filter((order) => {
+      const timestamp = Number(order.deliveredAt || order.updatedAt || 0);
+      if (remittanceFilters.rider !== "all" && ![order.riderId, order.riderName].includes(remittanceFilters.rider)) return false;
+      if (remittanceFilters.status !== "all" && codRemittanceStatus(order) !== remittanceFilters.status) return false;
+      return timestamp >= from && timestamp < to;
+    });
+  }, [codRemittanceOrders, remittanceFilters]);
+  const codAwaitingConfirmation = codRemittanceOrders.filter((order) => ["awaiting-owner", "disputed"].includes(codRemittanceStatus(order)));
+  const codOpenDiscrepancies = codRemittanceOrders.filter((order) => order.codDiscrepancy?.status === "open");
+  const outstandingByRider = useMemo(() => Object.values(codRemittanceOrders.filter((order) => !order.codRemittedAt).reduce((rows, order) => {
+    const id = order.riderId || order.riderName || "unassigned";
+    rows[id] ||= { id, name: order.riderName || order.riderId || "Unassigned rider", amount: 0, count: 0 };
+    rows[id].amount += Number(order.total || 0);
+    rows[id].count += 1;
+    return rows;
+  }, {})), [codRemittanceOrders]);
   const sortedAuditRows = useMemo(() => [...auditLogs].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)), [auditLogs]);
   const securityAuditRows = useMemo(() => sortedAuditRows.filter((entry) => securityAuditActions.has(entry.action)), [sortedAuditRows]);
   const blockedRegistrationRows = useMemo(() => securityAuditRows.filter((entry) => entry.action === "registration_failed" || String(entry.reason || "").toLowerCase().includes("too many")), [securityAuditRows]);
@@ -239,28 +356,48 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     const opened = printOwnerDailyReport(dailyReport);
     notify(opened ? `Owner daily report for ${dailyReport.dateLabel} is ready to print.` : "Allow pop-ups to print the owner report.");
   };
-  const savePlanningStrategy = () => {
+  const savePlanningStrategy = async () => {
     try {
-      window.localStorage.setItem(ownerPlanningStorageKey, JSON.stringify(planning));
-      notify("Planning settings saved on this browser. Customer pricing was not changed.");
+      await saveOwnerPlanningPreferences(user.uid, planning);
+      window.localStorage.removeItem(ownerPlanningStorageKey);
+      notify("Planning settings synced to your owner account. Customer pricing was not changed.");
     } catch {
-      notify("Planning settings could not be saved on this browser.");
+      notify("Planning settings could not be synced. Check your connection and try again.");
     }
   };
-  const updateRecommendationStatus = (id, status) => {
+  const updateRecommendationStatus = async (id, status) => {
     const next = { ...recommendationStatuses, [id]: { status, updatedAt: Date.now() } };
     setRecommendationStatuses(next);
     try {
-      window.localStorage.setItem("taptap-owner-recommendation-statuses", JSON.stringify(next));
+      await saveOwnerRecommendationStatuses(user.uid, next);
+      window.localStorage.removeItem("taptap-owner-recommendation-statuses");
       notify(`Recommendation marked ${status.toLowerCase()}.`);
     } catch {
-      notify("Recommendation status could not be saved on this browser.");
+      notify("Recommendation status could not be synced. Check your connection and try again.");
     }
   };
   const scrollToOwnerSection = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  const markCodRemitted = async (order) => {
-    await updateOrder(order.id, { codRemitted: true });
-    notify(`${order.id} COD marked as remitted.`);
+  const openRemittanceAction = (type, order) => {
+    setRemittanceError("");
+    setRemittanceForm({ receivedAmount: String(order.codDiscrepancy?.receivedAmount ?? ""), reason: "", resolutionNote: "" });
+    setRemittanceAction({ type, order });
+  };
+  const submitRemittanceAction = async () => {
+    if (!remittanceAction?.order || remittanceBusy) return;
+    const { type, order } = remittanceAction;
+    setRemittanceBusy(true);
+    setRemittanceError("");
+    try {
+      if (type === "confirm") await updateOrder(order.id, { codRemitted: true });
+      if (type === "report") await updateOrder(order.id, { codDiscrepancyReport: { receivedAmount: Number(remittanceForm.receivedAmount), reason: remittanceForm.reason.trim() } });
+      if (type === "resolve") await updateOrder(order.id, { codDiscrepancyResolve: { resolutionNote: remittanceForm.resolutionNote.trim() } });
+      notify(type === "confirm" ? `${orderReference(order.id)} COD remittance confirmed.` : type === "report" ? `${orderReference(order.id)} discrepancy reported.` : `${orderReference(order.id)} discrepancy resolved.`);
+      setRemittanceAction(null);
+    } catch (error) {
+      setRemittanceError(error.message || "The remittance update could not be saved.");
+    } finally {
+      setRemittanceBusy(false);
+    }
   };
   const generateInsight = async () => {
     setInsightError("");
@@ -410,12 +547,12 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   if (section === "owner-sales") return (
     <main className="container-fluid dashboard-page py-4">
       <div className="dashboard-heading"><div><p className="eyebrow text-danger">Sales strategy and analytics</p><h2>Sales & Orders</h2></div><button className="btn btn-outline-dark" onClick={printDailyReport}>Print daily report</button></div>
-      <div className="row g-3">
+      <div className="row g-3 owner-sales-layout">
         <div className="col-md-4"><div className="metric-card"><small>Unified gross sales</small><strong>{currency(totalSales)}</strong><span>Online and walk-in ledger</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Revenue target</small><strong>{currency(salesGoal)}</strong><span>{Math.min(100, Math.round(totalSales / salesGoal * 100))}% achieved</span></div></div>
         <div className="col-md-4"><div className="metric-card"><small>Awaiting completion</small><strong>{orders.filter((order) => !["delivered", "completed", "cancelled", "pending-payment"].includes(order.status)).length}</strong><span>Live order workload</span></div></div>
         <div className="col-lg-8"><div className="dashboard-card chart-card"><h3>Recorded sales trends</h3><SalesChartControls chartType={salesChartType} onChartTypeChange={setSalesChartType} range={salesChartRange} onRangeChange={setSalesChartRange} onPreset={setSalesChartPreset} grouping={salesChart.grouping} error={salesChart.error} />{!salesChart.error && <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesChart.values} labels={salesChart.labels} type={salesChartType} /></Suspense>}</div></div>
-        <div className="col-lg-4"><div className="dashboard-card"><h3>Local planning controls</h3><p className="module-note">Saved only on this browser for planning. These values do not change customer pricing.</p><label className="form-label">Sales goal threshold<input className="form-control" type="number" min="1" value={salesGoal} onChange={(event) => setPlanning((current) => ({ ...current, salesGoal: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Preparation target (minutes)<input className="form-control" type="number" min="1" value={planning.prepTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, prepTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Delivery target (minutes)<input className="form-control" type="number" min="1" value={planning.deliveryTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, deliveryTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Acceptable cash variance<input className="form-control" type="number" min="0" value={planning.cashVarianceLimit} onChange={(event) => setPlanning((current) => ({ ...current, cashVarianceLimit: Math.max(0, Number(event.target.value || 0)) }))} /></label><label className="form-label">Cancellation rate limit (%)<input className="form-control" type="number" min="0.1" step="0.1" value={planning.cancellationRateLimit} onChange={(event) => setPlanning((current) => ({ ...current, cancellationRateLimit: Math.max(.1, Number(event.target.value || .1)) }))} /></label><label className="form-label">Open complaint limit<input className="form-control" type="number" min="1" value={planning.complaintLimit} onChange={(event) => setPlanning((current) => ({ ...current, complaintLimit: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Promotion scenario<select className="form-select" value={planning.activePromotion} onChange={(event) => setPlanning((current) => ({ ...current, activePromotion: event.target.value }))}><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={savePlanningStrategy}>Save on this browser</button></div></div>
+        <div className="col-lg-4"><div className="dashboard-card"><h3>Owner planning controls</h3><p className="module-note">Synced securely to your owner account across devices. These values do not change customer pricing.</p><label className="form-label">Sales goal threshold<input className="form-control" type="number" min="1" value={salesGoal} onChange={(event) => setPlanning((current) => ({ ...current, salesGoal: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Preparation target (minutes)<input className="form-control" type="number" min="1" value={planning.prepTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, prepTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Delivery target (minutes)<input className="form-control" type="number" min="1" value={planning.deliveryTargetMinutes} onChange={(event) => setPlanning((current) => ({ ...current, deliveryTargetMinutes: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Acceptable cash variance<input className="form-control" type="number" min="0" value={planning.cashVarianceLimit} onChange={(event) => setPlanning((current) => ({ ...current, cashVarianceLimit: Math.max(0, Number(event.target.value || 0)) }))} /></label><label className="form-label">Cancellation rate limit (%)<input className="form-control" type="number" min="0.1" step="0.1" value={planning.cancellationRateLimit} onChange={(event) => setPlanning((current) => ({ ...current, cancellationRateLimit: Math.max(.1, Number(event.target.value || .1)) }))} /></label><label className="form-label">Open complaint limit<input className="form-control" type="number" min="1" value={planning.complaintLimit} onChange={(event) => setPlanning((current) => ({ ...current, complaintLimit: Math.max(1, Number(event.target.value || 1)) }))} /></label><label className="form-label">Promotion scenario<select className="form-select" value={planning.activePromotion} onChange={(event) => setPlanning((current) => ({ ...current, activePromotion: event.target.value }))}><option>Free delivery over PHP 499</option><option>10% off rice meals</option><option>No active promotion</option></select></label><button className="btn btn-danger w-100 mt-3" onClick={savePlanningStrategy}>Save owner settings</button></div></div>
         <div className="col-12"><OrderManagement orders={orders} canAdvance notify={notify} /></div>
         <div className="col-12"><ComplaintResolutionModule complaints={complaints} user={user} notify={notify} /></div>
       </div>
@@ -449,10 +586,57 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           {Object.entries(dailyReport.orderTypeBreakdown).map(([label, count]) => <div key={label}><small>{label}</small><strong>{count}</strong></div>)}
         </div></div></div>
         <div className="col-lg-4"><div className="dashboard-card"><h3>Top selling items</h3><div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Item</th><th>Qty sold</th><th>Sales</th></tr></thead><tbody>{dailyReport.topItems.length === 0 && <tr><td colSpan="3" className="text-center text-secondary py-4">No paid sales for this day.</td></tr>}{dailyReport.topItems.map((item) => <tr key={item.name}><td>{item.name}</td><td>{item.qty}</td><td>{currency(item.sales)}</td></tr>)}</tbody></table></div></div></div>
-        <div className="col-12"><div className="dashboard-card"><div className="module-heading"><div><h3>COD remittance</h3><span className="module-note">All delivered COD orders still awaiting owner confirmation, regardless of report date.</span></div></div><div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Rider</th><th>Total</th><th>Handoff</th><th /></tr></thead><tbody>{unremittedCodOrders.length === 0 && <tr><td colSpan="6" className="text-center text-secondary py-4">No COD collections waiting for owner handoff.</td></tr>}{unremittedCodOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td>{order.riderName || order.riderId || "-"}</td><td>{currency(order.total)}</td><td><span className={`status ${order.codHandoffRequestedAt ? "status-arrived" : "status-ready"}`}>{order.codHandoffRequestedAt ? "Rider handoff logged" : "Collected"}</span></td><td><button className="btn btn-sm btn-danger" onClick={() => markCodRemitted(order)}>Confirm remitted</button></td></tr>)}</tbody></table></div></div></div>
+        <div className="col-12"><RefundQueue orders={orders} notify={notify} /></div>
+        <div className="col-12" id="cod-remittance">
+          <section className="dashboard-card cod-remittance-workspace">
+            <div className="module-heading cod-remittance-heading"><div><p className="eyebrow text-danger">Physical cash reconciliation</p><h3>COD Remittance</h3><p>Confirm cash only after the rider has handed it over and the amount has been counted.</p></div><Wallet size={30} aria-hidden="true" /></div>
+            <div className="cod-remittance-metrics" aria-label="COD remittance totals">
+              <div><small>Awaiting confirmation</small><strong>{currency(sumByTotal(codAwaitingConfirmation))}</strong><span>{countLabel(codAwaitingConfirmation.length, "handoff")}</span></div>
+              <div><small>Pending handoffs</small><strong>{codAwaitingConfirmation.length}</strong><span>Owner action required</span></div>
+              <div><small>Open discrepancies</small><strong>{codOpenDiscrepancies.length}</strong><span>Remain visible until resolved</span></div>
+              <div><small>Remitted history</small><strong>{codRemittanceOrders.filter((order) => order.codRemittedAt).length}</strong><span>{currency(sumByTotal(codRemittanceOrders.filter((order) => order.codRemittedAt)))}</span></div>
+            </div>
+
+            <div className="cod-remittance-riders">
+              <h4>Rider outstanding cash</h4>
+              <div>{outstandingByRider.length === 0 && <p className="module-note">No rider has outstanding COD cash.</p>}{outstandingByRider.map((rider) => <article key={rider.id}><span>{rider.name}</span><strong>{currency(rider.amount)}</strong><small>{countLabel(rider.count, "order")}</small></article>)}</div>
+            </div>
+
+            <div className="cod-remittance-filters" aria-label="Remittance filters">
+              <label className="form-label">Rider<select className="form-select" value={remittanceFilters.rider} onChange={(event) => setRemittanceFilters((current) => ({ ...current, rider: event.target.value }))}><option value="all">All riders</option>{remittanceRiders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}</select></label>
+              <label className="form-label">Status<select className="form-select" value={remittanceFilters.status} onChange={(event) => setRemittanceFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">All statuses</option><option value="ready">Ready to hand over</option><option value="awaiting-owner">Awaiting owner confirmation</option><option value="disputed">Disputed</option><option value="remitted">Remitted</option></select></label>
+              <label className="form-label">From<input className="form-control" type="date" value={remittanceFilters.from} onChange={(event) => setRemittanceFilters((current) => ({ ...current, from: event.target.value }))} /></label>
+              <label className="form-label">To<input className="form-control" type="date" value={remittanceFilters.to} onChange={(event) => setRemittanceFilters((current) => ({ ...current, to: event.target.value }))} /></label>
+            </div>
+
+            <div className="cod-remittance-list" aria-live="polite">
+              {filteredRemittanceOrders.length === 0 && <div className="empty-state compact">No delivered COD remittance records match these filters.</div>}
+              {filteredRemittanceOrders.map((order) => {
+                const status = codRemittanceStatus(order);
+                return <article className={`cod-remittance-card ${status}`} key={order.id}>
+                  <header><div><span>{orderReference(order.id)}</span><h4>{order.riderName || order.riderId || "Unassigned rider"}</h4><small>Customer: {order.customerName || "Customer"}</small></div><div><strong>{currency(order.total)}</strong><span className={`remittance-status ${status}`}>{codRemittanceStatusLabel(order)}</span></div></header>
+                  <dl>
+                    <div><dt>Delivered</dt><dd>{remittanceTimestamp(order.deliveredAt)}</dd></div>
+                    <div><dt>Rider handoff</dt><dd>{remittanceTimestamp(order.codHandoffRequestedAt)}</dd></div>
+                    <div><dt>Owner confirmation</dt><dd>{remittanceTimestamp(order.codRemittedAt)}</dd></div>
+                    <div><dt>Confirmed by</dt><dd>{order.codRemittedByName || "Not confirmed"}</dd></div>
+                  </dl>
+                  {order.codDiscrepancy && <div className={`cod-discrepancy-panel ${order.codDiscrepancy.status}`}><AlertTriangle size={18} aria-hidden="true" /><div><strong>{order.codDiscrepancy.status === "open" ? "Open cash discrepancy" : "Resolved cash discrepancy"}</strong><span>Expected {currency(order.codDiscrepancy.expectedAmount)} · Received {currency(order.codDiscrepancy.receivedAmount)} · Variance {currency(order.codDiscrepancy.variance)}</span><p>{order.codDiscrepancy.reason}</p>{order.codDiscrepancy.resolvedAt && <small>Resolved {remittanceTimestamp(order.codDiscrepancy.resolvedAt)} by {order.codDiscrepancy.resolvedByName || "Owner"}. {order.codDiscrepancy.resolutionNote}</small>}</div></div>}
+                  <footer className="cod-remittance-actions">
+                    {status === "awaiting-owner" && <><button className="btn btn-outline-danger" type="button" onClick={() => openRemittanceAction("report", order)}>Report discrepancy</button><button className="btn btn-danger" type="button" onClick={() => openRemittanceAction("confirm", order)}>Confirm remitted</button></>}
+                    {status === "disputed" && <button className="btn btn-danger" type="button" onClick={() => openRemittanceAction("resolve", order)}>Resolve discrepancy</button>}
+                    {status === "ready" && <p>Waiting for the rider to record the physical cash handoff.</p>}
+                    {status === "remitted" && <p><CheckCircle2 size={16} aria-hidden="true" /> Remittance preserved for reporting and audit.</p>}
+                  </footer>
+                </article>;
+              })}
+            </div>
+          </section>
+        </div>
         <div className="col-12"><div className="dashboard-card"><h3>Daily order ledger</h3><div className="table-responsive" tabIndex="0"><table className="table align-middle"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Status</th><th>Sales counted</th><th>Total</th></tr></thead><tbody>{dailyReport.dailyOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders were created on {dailyReport.dateLabel}. Choose another report date to view older orders.</td></tr>}{dailyReport.dailyOrders.map((order) => <tr key={order.id}><td>{order.id}</td><td>{order.customerName}</td><td className="order-items-cell"><span>{orderItemText(order)}</span></td><td>{orderPaymentLabel(order)}</td><td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td><td>{isRevenueOrder(order) ? "Yes" : "No"}</td><td>{currency(order.total)}</td></tr>)}</tbody></table></div></div></div>
         <div className="col-12"><ShiftLogsModule orders={orders} logs={dailyReport.closedShifts} user={user} notify={notify} readOnly /></div>
       </div>
+      <CodRemittanceDialog action={remittanceAction} busy={remittanceBusy} error={remittanceError} form={remittanceForm} setForm={setRemittanceForm} onClose={() => setRemittanceAction(null)} onSubmit={submitRemittanceAction} />
     </main>
   );
   if (section === "owner-users") return (
@@ -652,7 +836,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
 
       <section className="owner-decision-dashboard" aria-label="Priority KPI dashboard">
         <div className="owner-dashboard-section">
-          <div className="module-heading"><div><p className="eyebrow text-danger">Current performance</p><h2>Operational KPIs</h2></div><span className="module-note">Calculated from loaded system records</span></div>
+          <div className="module-heading"><div><p className="eyebrow text-danger">Historical performance</p><h2>Operational KPIs</h2></div><span className="module-note">All loaded records. The dashboard period above applies to the Paid sales and Average paid order cards.</span></div>
           <div className="owner-decision-metrics">
             <button type="button" onClick={() => onNavigate?.("owner-reports")}><small>Payment success rate</small><strong>{decisionSupport.kpis.paymentSuccessRate}% successful</strong><span>{countLabel(decisionSupport.kpis.paymentFailureCount, "failed payment attempt")}</span></button>
             <button type="button" onClick={() => onNavigate?.("owner-sales")}><small>Cancellation rate</small><strong>{decisionSupport.kpis.cancellationRate}% cancelled</strong><span>{countLabel(decisionSupport.kpis.cancellationCount, "cancelled order")} worth {currency(decisionSupport.kpis.cancelledOrderValue)}</span></button>
@@ -705,7 +889,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="owner-dashboard-section">
           <div className="module-heading"><div><p className="eyebrow text-danger">Recommended actions</p><h2>Ranked priorities</h2></div><span className="module-note">Scores are calculated before Groq analysis</span></div>
           {decisionSupport.priorities.length === 0 ? <div className="owner-priority-empty">No KPI has crossed its configured action threshold.</div> : <div className="owner-priority-list">{decisionSupport.priorities.map((item) => <article key={item.id}><button className="owner-priority-open" type="button" onClick={() => onNavigate?.(item.destination)}><span className={`priority-level ${item.level}`}>{item.level}<small>{item.score}/100</small></span><span><strong>{item.title}</strong><small>{item.detail}</small><em>{item.action}</em></span><span><b>{item.role}</b><small>{item.deadline}</small></span><ArrowRight size={18} aria-hidden="true" /></button><label>Status<select aria-label={`${item.title} recommendation status`} value={recommendationStatuses[item.id]?.status || "Not reviewed"} onChange={(event) => updateRecommendationStatus(item.id, event.target.value)}><option>Not reviewed</option><option>Accepted</option><option>Completed</option><option>Dismissed</option></select></label></article>)}</div>}
-          <p className="owner-tracking-note">Recommendation decisions are saved on this browser and do not change orders or inventory automatically.</p>
+          <p className="owner-tracking-note">Recommendation decisions sync across your owner devices and do not change orders or inventory automatically.</p>
         </div>
       </section>
 
@@ -718,7 +902,7 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
           <SalesChartControls chartType={salesChartType} onChartTypeChange={setSalesChartType} range={salesChartRange} onRangeChange={setSalesChartRange} onPreset={setSalesChartPreset} grouping={salesChart.grouping} error={salesChart.error} />
           {!salesChart.error && <Suspense fallback={<SectionLoader label="Loading sales chart..." />}><SalesChart values={salesChart.values} labels={salesChart.labels} type={salesChartType} /></Suspense>}
         </div>
-        <div className="owner-listing-orders"><OrderManagement orders={activeWorkload.slice(0, 5)} canAdvance notify={notify} /></div>
+        <div className="owner-listing-orders"><OrderManagement orders={orders.slice(0, 5)} canAdvance notify={notify} /></div>
         <div className="dashboard-card owner-stock-panel">
           <div className="module-heading"><div><p className="eyebrow text-danger">Inventory watch</p><h3>Low-stock alerts</h3></div></div>
           {lowStockItems.slice(0, 6).map((item) => <div className="alert-row" key={item.id}><span><strong>{item.name}</strong><small>Reorder when stock reaches {countLabel(item.reorderPoint, "unit")}</small></span><b>{countLabel(item.stock, "unit")} currently in stock</b></div>)}

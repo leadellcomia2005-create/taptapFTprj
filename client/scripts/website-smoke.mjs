@@ -121,7 +121,7 @@ record("POS-specific customer continuation text is removed", !authPanels.include
 const ownerWorkspace = await readFile(new URL("../src/features/workspaces/OwnerWorkspace.jsx", import.meta.url), "utf8");
 record("owner dashboard is exception first", ownerWorkspace.includes("Today&apos;s exceptions") && ownerWorkspace.includes("Needs a decision") && ownerWorkspace.includes("owner-attention-grid"));
 record("owner profit is not hardcoded", !ownerWorkspace.includes("totalSales * 0.58") && ownerWorkspace.includes("Average paid order"));
-record("owner planning controls disclose local persistence", ownerWorkspace.includes("Saved only on this browser for planning") && ownerWorkspace.includes("Customer pricing was not changed"));
+record("owner planning controls disclose cross-device persistence", ownerWorkspace.includes("Synced securely to your owner account across devices") && ownerWorkspace.includes("These values do not change customer pricing"));
 record("owner account suspension is visible and reasoned", ownerWorkspace.includes("setUserSuspension") && ownerWorkspace.includes("Account action reason") && ownerWorkspace.includes("active sessions were revoked"));
 
 const staffWorkspace = await readFile(new URL("../src/features/workspaces/StaffWorkspace.jsx", import.meta.url), "utf8");
@@ -131,10 +131,18 @@ record("staff quick actions navigate", staffWorkspace.includes("onNavigate?.(vie
 record("POS discount and payment controls are explicit", staffWorkspace.includes("Discount reason") && staffWorkspace.includes("posPaymentMethod") && staffWorkspace.includes("completingPayment"));
 
 const riderWorkspace = await readFile(new URL("../src/features/workspaces/RiderWorkspace.jsx", import.meta.url), "utf8");
+const codRemittance = await readFile(new URL("../src/utils/codRemittance.ts", import.meta.url), "utf8");
 record("rider GPS has acquiring and error states", riderWorkspace.includes("acquiring") && riderWorkspace.includes("Retry GPS") && riderWorkspace.includes("GPS error"));
 record("rider actions prevent duplicate submissions", riderWorkspace.includes("busyAction") && riderWorkspace.includes("runAction"));
 record("rider jobs show route and payment facts", riderWorkspace.includes("rider-job-facts") && riderWorkspace.includes("pinQuality(order)") && riderWorkspace.includes("routeForOrder(order)"));
 record("rider has one status-dependent primary action", riderWorkspace.includes("const nextAction") && riderWorkspace.includes("rider-next-action"));
-record("COD rider handoff is separate from remittance", riderWorkspace.includes("codHandoffRequested") && riderWorkspace.includes("Awaiting owner confirmation"));
+record(
+  "COD rider handoff is separate from remittance",
+  riderWorkspace.includes("codHandoffRequested")
+    && riderWorkspace.includes("codRemittanceStatusLabel")
+    && codRemittance.includes('"awaiting-owner": "Awaiting owner confirmation"')
+    && codRemittance.includes("if (order.codHandoffRequestedAt) return \"awaiting-owner\"")
+    && codRemittance.includes("if (order.codRemittedAt) return \"remitted\"")
+);
 
 console.log(`website smoke passed ${checks.length} checks against ${baseUrl.href}`);

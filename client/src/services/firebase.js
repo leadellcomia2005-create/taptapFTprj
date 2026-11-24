@@ -14,10 +14,9 @@ import {
 import {
   connectDatabaseEmulator,
   equalTo,
-  get,
   getDatabase,
   limitToLast,
-  onValue,
+  onValue as subscribeRealtimeValue,
   orderByChild,
   push,
   query,
@@ -72,6 +71,62 @@ const historyLimits = Object.freeze({
   supportMessages: 200,
   complaints: 200
 });
+
+// Use the same authorized query over HTTPS when a browser's realtime transport
+// stalls. Keep the listener for instant updates and poll only while subscribed.
+function onValue(target, callback, onError = () => {}, parameters = {}) {
+  let stopped = false;
+  let inFlight = false;
+  let pendingRefresh = false;
+  let revision = 0;
+  let controller;
+  const source = new URL(target.toString()).pathname;
+  const report = (error = null) => window.dispatchEvent(new CustomEvent("taptap-data-status", { detail: { source, error: error ? "Some saved records could not be refreshed. Check your connection or sign in again." : "" } }));
+  const stopLive = subscribeRealtimeValue(target, (snapshot) => {
+    if (stopped) return;
+    revision += 1;
+    callback(snapshot);
+  }, () => { void refresh(); });
+  async function refresh() {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    const startRevision = revision;
+    controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const url = new URL(`${target.toString().replace(/\/$/, "")}.json`);
+      for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, JSON.stringify(value));
+      const token = await auth?.currentUser?.getIdToken();
+      if (token) url.searchParams.set("auth", token);
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(`Record read failed (${response.status}).`);
+      const value = await response.json();
+      if (!stopped) {
+        if (revision === startRevision) callback({ val: () => value });
+        else pendingRefresh = true;
+        report();
+      }
+    } catch (error) {
+      if (!stopped) { report(error); onError(error); }
+    } finally {
+      clearTimeout(timeout);
+      inFlight = false;
+      if (pendingRefresh && !stopped) {
+        pendingRefresh = false;
+        queueMicrotask(() => { void refresh(); });
+      }
+    }
+  }
+  const refreshOnChange = (event) => {
+    if (event.detail?.source !== source) return;
+    if (inFlight) pendingRefresh = true;
+    else void refresh();
+  };
+  window.addEventListener("taptap-refresh-records", refreshOnChange);
+  void refresh();
+  const timer = window.setInterval(() => { void refresh(); }, 15000);
+  return () => { stopped = true; clearInterval(timer); window.removeEventListener("taptap-refresh-records", refreshOnChange); controller?.abort(); stopLive(); report(); };
+}
 
 /** @type {import("firebase/app").FirebaseApp | undefined} */
 let app;
@@ -234,16 +289,22 @@ export function observeAuth(callback) {
       if (!active) return;
       unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) return callback(null);
-        if (auth.currentUser?.uid !== user.uid) return;
-        const roleValidation = pendingRoleValidation;
-        if (roleValidation) {
-          const accepted = await roleValidation.promise;
-          if (!accepted || !active || auth.currentUser?.uid !== user.uid) return;
-        }
-        const token = await user.getIdTokenResult();
-        if (!active || auth.currentUser?.uid !== user.uid) return;
-        if (token.claims.mfaSession !== true || token.claims.email_verified !== true) {
-          try {
+        try {
+          if (auth.currentUser?.uid !== user.uid) return;
+          const roleValidation = pendingRoleValidation;
+          if (roleValidation) {
+            // Login owns the bounded security check. A shorter observer timer
+            // can discard a successful login while the hosted service wakes up.
+            const accepted = await roleValidation.promise;
+            if (!accepted || !active || auth.currentUser?.uid !== user.uid) return;
+          }
+          const token = await withAuthTimeout(
+            user.getIdTokenResult(),
+            15_000,
+            "The secure sign-in session took too long to load."
+          );
+          if (!active || auth.currentUser?.uid !== user.uid) return;
+          if (token.claims.mfaSession !== true || token.claims.email_verified !== true) {
             const cachedStatus = recentLoginStatus?.uid === user.uid
               && recentLoginStatus.expiresAt > Date.now()
               ? recentLoginStatus.status
@@ -261,22 +322,20 @@ export function observeAuth(callback) {
               twoFactor: status,
               firebaseUser: user
             });
-          } catch {
-            await signOut(auth);
-            return callback(null);
           }
+          if (!active || auth.currentUser?.uid !== user.uid) return;
+          callback({
+            uid: user.uid,
+            email: user.email,
+            name: user.displayName || user.email,
+            role: token.claims.role || "customer",
+            emailVerified: true,
+            mfaVerified: true,
+            firebaseUser: user
+          });
+        } catch {
+          if (active && auth.currentUser?.uid === user.uid) callback(null);
         }
-        const profile = await get(ref(db, `users/${user.uid}`));
-        if (!active || auth.currentUser?.uid !== user.uid) return;
-        callback({
-          uid: user.uid,
-          email: user.email,
-          name: profile.val()?.name || user.displayName || user.email,
-          role: token.claims.role || profile.val()?.role || "customer",
-          emailVerified: true,
-          mfaVerified: true,
-          firebaseUser: user
-        });
       });
     }).catch(() => callback(null));
     return () => {
@@ -510,7 +569,9 @@ export function subscribeNotifications(user, callback) {
     api.cleanupNotifications().catch(() => {});
     return onValue(
       query(ref(db, "notifications"), orderByChild("targetUserId"), equalTo(user.uid), limitToLast(historyLimits.notifications)),
-      (snapshot) => callback(normalize(snapshot.val() || {}))
+      (snapshot) => callback(normalize(snapshot.val() || {})),
+      undefined,
+      { orderBy: "targetUserId", equalTo: user.uid, limitToLast: historyLimits.notifications }
     );
   }
   const emit = () => callback(normalize(readDemoData().notifications));
@@ -592,7 +653,9 @@ export function subscribeReviews(user, callback) {
     const reviewsRef = user.role === "customer"
       ? query(ref(db, "reviews"), orderByChild("customerId"), equalTo(user.uid), limitToLast(historyLimits.reviews))
       : query(ref(db, "reviews"), orderByChild("createdAt"), limitToLast(historyLimits.reviews));
-    return onValue(reviewsRef, (snapshot) => normalize(snapshot.val()));
+    return onValue(reviewsRef, (snapshot) => normalize(snapshot.val()), undefined, user.role === "customer"
+      ? { orderBy: "customerId", equalTo: user.uid, limitToLast: historyLimits.reviews }
+      : { orderBy: "createdAt", limitToLast: historyLimits.reviews });
   }
   const emit = () => normalize(readDemoData().reviews);
   emit();
@@ -629,7 +692,8 @@ export function subscribePublicReviews(callback, onError = () => {}) {
     return onValue(
       query(ref(db, "public/reviews"), orderByChild("createdAt"), limitToLast(25)),
       (snapshot) => normalizePublicReviews(snapshot.val() || {}),
-      onError
+      onError,
+      { orderBy: "createdAt", limitToLast: 25 }
     );
   }
   const emit = () => normalizePrivateReviews(readDemoData().reviews);
@@ -649,19 +713,35 @@ export async function submitReview(order, user, rating, comment) {
     moderationStatus: "pending",
     createdAt: Date.now()
   };
-  if (firebaseEnabled) await set(ref(db, `reviews/${order.id}`), review);
+  if (firebaseEnabled) {
+    if (!auth?.currentUser || auth.currentUser.uid !== user.uid) throw new Error("Sign in again before submitting your review.");
+    const token = await auth.currentUser.getIdToken();
+    const url = new URL(`${config.databaseURL.replace(/\/$/, "")}/reviews/${encodeURIComponent(order.id)}.json`);
+    url.searchParams.set("auth", token);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(url, { method: "PUT", cache: "no-store", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(review) });
+      if (!response.ok) throw new Error(response.status === 412 ? "This order already has a review. Refresh to see it." : response.status === 401 || response.status === 403 ? "Your review could not be saved. Check that this is your delivered order, or sign in again." : "The review could not be saved. Please try again.");
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error("The review request timed out. Refresh to check whether it was saved before trying again.");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   else {
     const data = readDemoData();
     data.reviews[order.id] = review;
     writeDemoData(data);
   }
-  await createNotification({
+  void createNotification({
     targetUserId: firebaseEnabled ? undefined : "demo-staff",
     targetRole: firebaseEnabled ? "staff" : undefined,
     title: "New customer review",
     message: `${user.name} rated order ${order.id} ${rating}/5.`,
     type: "review"
-  });
+  }).catch(() => { /* The saved review remains successful if its staff alert fails. */ });
 }
 
 export async function moderateReview(review, values, actor) {
@@ -988,20 +1068,44 @@ export async function createMenuItem(values, actor) {
   return { item };
 }
 
-export function subscribeOrders(user, callback) {
+const knownDeliveryTypes = new Set(["delivery", "pickup", "walk-in"]);
+
+function inferLegacyDeliveryType(order = {}) {
+  if (knownDeliveryTypes.has(order.deliveryType)) return order.deliveryType;
+  if (order.source === "walk-in-pos" || order.cashierId || order.diningOption) return "walk-in";
+  if (order.source === "online" || order.riderId || order.paymentMethod === "cod" || order.deliveryLocation || order.address) return "delivery";
+  return "pickup";
+}
+
+function normalizeOrderRecords(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value).flatMap(([id, entry]) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const candidate = {
+      id,
+      ...entry,
+      deliveryType: inferLegacyDeliveryType(entry)
+    };
+    return isOrder(candidate) && !candidate.archivedAt ? [candidate] : [];
+  });
+}
+
+export function subscribeOrders(user, callback, onError = () => {}) {
   if (!user) {
     callback([]);
     return () => {};
   }
   if (firebaseEnabled) {
-    const normalize = (snapshot) => firebaseRecordList(snapshot.val(), isOrder).filter((order) => !order.archivedAt);
+    const normalize = (snapshot) => normalizeOrderRecords(snapshot.val());
     if (["owner", "staff"].includes(user.role)) {
-      const activeOrders = query(ref(db, "orders"), orderByChild("archivedAt"), equalTo(null));
-      return onValue(activeOrders, (snapshot) => callback(normalize(snapshot)));
+      // Owner and staff dashboards need the complete active and historical
+      // ledger. Reading the collection directly also keeps older records that
+      // predate the archivedAt index available to reports.
+      return onValue(ref(db, "orders"), (snapshot) => callback(normalize(snapshot)), onError);
     }
     if (user.role === "customer") {
       const customerOrders = query(ref(db, "orders"), orderByChild("customerId"), equalTo(user.uid), limitToLast(historyLimits.orders));
-      return onValue(customerOrders, (snapshot) => callback(normalize(snapshot)));
+      return onValue(customerOrders, (snapshot) => callback(normalize(snapshot)), onError, { orderBy: "customerId", equalTo: user.uid, limitToLast: historyLimits.orders });
     }
     if (user.role === "rider") {
       let assigned = [];
@@ -1012,11 +1116,11 @@ export function subscribeOrders(user, callback) {
       const stopAssigned = onValue(assignedOrders, (snapshot) => {
         assigned = normalize(snapshot);
         emit();
-      });
+      }, onError, { orderBy: "riderId", equalTo: user.uid, limitToLast: historyLimits.orders });
       const stopAvailable = onValue(readyOrders, (snapshot) => {
         available = normalize(snapshot).filter((order) => !order.riderId);
         emit();
-      });
+      }, onError, { orderBy: "$key", limitToLast: historyLimits.orders });
       return () => {
         stopAssigned();
         stopAvailable();
@@ -1027,7 +1131,7 @@ export function subscribeOrders(user, callback) {
   }
   const emit = () => {
     const data = readDemoData();
-    const orders = firebaseRecordList(data.orders, isOrder).filter((order) => !order.archivedAt);
+    const orders = normalizeOrderRecords(data.orders);
     callback(user.role === "customer" ? orders.filter((order) => order.customerId === user.uid) : orders);
   };
   emit();
@@ -1155,7 +1259,10 @@ export async function updateOrder(orderId, values) {
     createdAt: Date.now()
   };
   if (firebaseEnabled) {
-    return api.updateOrder(orderId, values);
+    const result = await api.updateOrder(orderId, values);
+    if (result?.order) window.dispatchEvent(new CustomEvent("taptap-order-updated", { detail: { id: orderId, order: result.order } }));
+    window.dispatchEvent(new CustomEvent("taptap-refresh-records", { detail: { source: "/orders" } }));
+    return result;
   }
   const data = readDemoData();
   const currentOrder = data.orders[orderId];
@@ -1174,14 +1281,51 @@ export async function updateOrder(orderId, values) {
   if (values.status === "preparing" && !currentOrder?.prepStartedAt) nextValues.prepStartedAt = Date.now();
   if (values.status === "ready") nextValues.readyAt = Date.now();
   if (values.codRemitted && currentOrder?.paymentMethod === "cod") {
+    if (!currentOrder.codHandoffRequestedAt || currentOrder.codDiscrepancy?.status === "open") throw new Error("Record the handoff and resolve discrepancies before confirming remittance.");
     nextValues.paymentStatus = "paid";
     nextValues.paymentConfirmedAt = Date.now();
     nextValues.codRemittedAt = Date.now();
+    nextValues.codRemittedBy = "demo-owner";
+    nextValues.codRemittedByName = "Demo Owner";
+    auditEntry.action = "cod_remittance_confirmed";
   }
   if (values.codHandoffRequested && currentOrder?.paymentMethod === "cod" && currentOrder?.status === "delivered") {
     nextValues.codHandoffRequestedAt = Date.now();
     nextValues.codHandoffRequestedBy = currentOrder.riderId || null;
+    auditEntry.action = "cod_handoff_recorded";
   }
+  if (values.codDiscrepancyReport && currentOrder?.paymentMethod === "cod" && currentOrder?.status === "delivered") {
+    const expectedAmount = Number(currentOrder.total || 0);
+    const receivedAmount = Number(values.codDiscrepancyReport.receivedAmount || 0);
+    nextValues.codDiscrepancy = {
+      expectedAmount,
+      receivedAmount,
+      variance: receivedAmount - expectedAmount,
+      reason: String(values.codDiscrepancyReport.reason || "").slice(0, 300),
+      riderId: currentOrder.riderId || null,
+      riderName: currentOrder.riderName || "Demo Rider",
+      status: "open",
+      reportedAt: Date.now(),
+      reportedBy: "demo-owner",
+      reportedByName: "Demo Owner"
+    };
+    auditEntry.action = "cod_discrepancy_reported";
+  }
+  if (values.codDiscrepancyResolve && currentOrder?.codDiscrepancy?.status === "open") {
+    nextValues.codDiscrepancy = {
+      ...currentOrder.codDiscrepancy,
+      status: "resolved",
+      resolutionNote: String(values.codDiscrepancyResolve.resolutionNote || "").slice(0, 300),
+      resolvedAt: Date.now(),
+      resolvedBy: "demo-owner",
+      resolvedByName: "Demo Owner"
+    };
+    auditEntry.action = "cod_discrepancy_resolved";
+  }
+  delete nextValues.codRemitted;
+  delete nextValues.codHandoffRequested;
+  delete nextValues.codDiscrepancyReport;
+  delete nextValues.codDiscrepancyResolve;
   if ((values.cancel || values.status === "cancelled") && currentOrder && currentOrder.status !== "cancelled") {
     nextValues.status = "cancelled";
     nextValues.cancelReason = values.cancelReason || "Cancelled";
@@ -1232,6 +1376,63 @@ export async function updateOrder(orderId, values) {
   if (values.riderId && values.riderId !== currentOrder?.riderId) {
     await createNotification({ targetUserId: values.riderId, title: "Delivery assigned", message: `${orderId} has been assigned to you.`, type: "delivery", orderId });
   }
+  if (values.codRemitted && currentOrder?.riderId) {
+    await createNotification({ targetUserId: currentOrder.riderId, title: "COD remittance confirmed", message: `${orderId} cash handoff was confirmed by the owner.`, type: "sale", orderId });
+  }
+  if ((values.codDiscrepancyReport || values.codDiscrepancyResolve) && currentOrder?.riderId) {
+    await createNotification({ targetUserId: currentOrder.riderId, title: values.codDiscrepancyReport ? "COD cash discrepancy reported" : "COD discrepancy resolved", message: `${orderId} remittance was updated by the owner.`, type: "sale", orderId });
+  }
+}
+
+export async function requestOrderRefund(orderId, values, user) {
+  if (firebaseEnabled) {
+    const result = await api.requestRefund(orderId, values);
+    window.dispatchEvent(new CustomEvent("taptap-refresh-records", { detail: { source: "/orders" } }));
+    return result;
+  }
+  const data = readDemoData();
+  const order = data.orders[orderId];
+  if (!order || order.customerId !== user.uid) throw new Error("This order is not yours.");
+  if (!["paid", "cod-collected"].includes(order.paymentStatus)) throw new Error("Only paid orders can be reviewed for a refund.");
+  if (order.refundRequest) throw new Error("A refund request already exists for this order.");
+  const now = Date.now();
+  const mode = order.paymentMethod === "gcash" ? "paymongo-test" : "manual-cash";
+  order.refundRequest = { id: `REF-${orderId}`, orderId, customerId: user.uid, customerName: order.customerName, amount: Number(order.total), paymentMethod: order.paymentMethod, mode, reason: values.reason.trim(), details: values.details.trim(), status: "pending-review", createdAt: now, updatedAt: now };
+  order.refundStatus = "pending-review";
+  writeDemoData(data);
+  return { refundRequest: order.refundRequest };
+}
+
+export async function decideOrderRefund(orderId, values) {
+  if (firebaseEnabled) {
+    const result = await api.decideRefund(orderId, values);
+    window.dispatchEvent(new CustomEvent("taptap-refresh-records", { detail: { source: "/orders" } }));
+    return result;
+  }
+  const data = readDemoData();
+  const order = data.orders[orderId];
+  if (!order?.refundRequest || order.refundRequest.status !== "pending-review") throw new Error("This request has already been reviewed.");
+  const status = values.action === "reject" ? "rejected" : order.refundRequest.mode === "manual-cash" ? "approved-manual" : "failed";
+  order.refundRequest = { ...order.refundRequest, status, decisionNote: values.note.trim(), updatedAt: Date.now() };
+  order.refundStatus = status;
+  writeDemoData(data);
+  return { refundRequest: order.refundRequest };
+}
+
+export async function completeOrderManualRefund(orderId, values) {
+  if (firebaseEnabled) {
+    const result = await api.completeManualRefund(orderId, values);
+    window.dispatchEvent(new CustomEvent("taptap-refresh-records", { detail: { source: "/orders" } }));
+    return result;
+  }
+  const data = readDemoData();
+  const order = data.orders[orderId];
+  if (order?.refundRequest?.status !== "approved-manual") throw new Error("No approved manual refund is waiting for completion.");
+  order.refundRequest = { ...order.refundRequest, status: "manual-refunded", manualMethod: values.method.trim(), manualReference: values.reference.trim(), completedAt: Date.now(), updatedAt: Date.now() };
+  order.refundStatus = "manual-refunded";
+  order.paymentStatus = "refunded";
+  writeDemoData(data);
+  return { refundRequest: order.refundRequest };
 }
 
 export function subscribeAuditLogs(callback) {
@@ -1241,7 +1442,9 @@ export function subscribeAuditLogs(callback) {
   );
   if (firebaseEnabled) return onValue(
     query(ref(db, "auditLogs"), orderByChild("createdAt"), limitToLast(historyLimits.auditLogs)),
-    (snapshot) => normalize(snapshot.val())
+    (snapshot) => normalize(snapshot.val()),
+    undefined,
+    { orderBy: "createdAt", limitToLast: historyLimits.auditLogs }
   );
   const emit = () => normalize(readDemoData().auditLogs);
   emit();
@@ -1261,7 +1464,9 @@ export function subscribeSupportMessages(callback, customerId = null) {
     const messagesRef = customerId
       ? query(ref(db, "messages/support"), orderByChild("customerId"), equalTo(customerId), limitToLast(historyLimits.supportMessages))
       : query(ref(db, "messages/support"), orderByChild("createdAt"), limitToLast(historyLimits.supportMessages));
-    return onValue(messagesRef, (snapshot) => normalize(snapshot.val()));
+    return onValue(messagesRef, (snapshot) => normalize(snapshot.val() || {}), undefined, customerId
+      ? { orderBy: "customerId", equalTo: customerId, limitToLast: historyLimits.supportMessages }
+      : { orderBy: "createdAt", limitToLast: historyLimits.supportMessages });
   }
   const emit = () => normalize(readDemoData().messages.support);
   emit();
@@ -1445,16 +1650,57 @@ export async function sendSupportMessage(text, actor, conversation = {}) {
     channel: "support",
     createdAt: Date.now()
   };
-  if (firebaseEnabled) await push(ref(db, "messages/support"), message);
-  else {
+  if (firebaseEnabled) {
+    if (!auth?.currentUser || auth.currentUser.uid !== actor.uid) throw new Error("Sign in again before sending your message.");
+    const token = await withAuthTimeout(auth.currentUser.getIdToken(), 10000, "Your sign-in session took too long. Please try again.");
+    const messageId = conversation.messageId || push(ref(db, "messages/support")).key;
+    const url = new URL(`${config.databaseURL.replace(/\/$/, "")}/messages/support/${encodeURIComponent(messageId)}.json`);
+    url.searchParams.set("auth", token);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let saved = false;
+    try {
+      const response = await fetch(url, {
+        method: "PUT",
+        cache: "no-store",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(message)
+      });
+      saved = response.ok;
+      if (!saved && response.status !== 401) throw new Error("Your message could not be sent. Please try again.");
+    } catch (error) {
+      if (error?.name !== "AbortError") throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!saved) {
+      // A timed-out write may already have arrived. Reusing the same message ID
+      // lets a retry confirm it instead of creating another support message.
+      const check = new AbortController();
+      const checkTimer = setTimeout(() => check.abort(), 5000);
+      try {
+        const response = await fetch(url, { cache: "no-store", signal: check.signal });
+        const existing = response.ok ? await response.json() : null;
+        saved = existing?.senderId === actor.uid && existing?.text === text;
+      } catch {
+        // Keep the original request as unconfirmed; the user can retry it.
+      } finally {
+        clearTimeout(checkTimer);
+      }
+    }
+    if (!saved) throw new Error("Your message was not confirmed. Please retry; it will use the same message ID.");
+  } else {
     const data = readDemoData();
     data.messages.support ||= {};
     data.messages.support[`MSG-${Date.now()}`] = message;
     writeDemoData(data);
   }
-  await createNotification(actor.role === "customer"
+  void createNotification(actor.role === "customer"
     ? { targetUserId: firebaseEnabled ? undefined : "demo-staff", targetRole: firebaseEnabled ? "staff" : undefined, title: "New support message", message: `${actor.name}: ${text}`, type: "chat" }
-    : { targetUserId: customerId, title: "Staff replied", message: `${actor.name}: ${text}`, type: "chat" });
+    : { targetUserId: customerId, title: "Staff replied", message: `${actor.name}: ${text}`, type: "chat" }).catch(() => {
+    // The saved message remains delivered even if the alert service is unavailable.
+  });
 }
 
 export function subscribeShiftLogs(callback) {
@@ -1464,7 +1710,9 @@ export function subscribeShiftLogs(callback) {
   );
   if (firebaseEnabled) return onValue(
     query(ref(db, "shiftLogs"), orderByChild("createdAt"), limitToLast(historyLimits.shiftLogs)),
-    (snapshot) => normalize(snapshot.val())
+    (snapshot) => normalize(snapshot.val()),
+    undefined,
+    { orderBy: "createdAt", limitToLast: historyLimits.shiftLogs }
   );
   const emit = () => normalize(readDemoData().shiftLogs);
   emit();
@@ -1686,6 +1934,36 @@ export async function resendReceiptEmail(orderId) {
   return { sent: false, preview: true };
 }
 
+export function subscribeOwnerWorkspacePreferences(userId, callback) {
+  if (!userId) {
+    callback(null);
+    return () => {};
+  }
+  if (firebaseEnabled) {
+    return onValue(ref(db, `ownerWorkspacePreferences/${userId}`), (snapshot) => callback(snapshot.val()));
+  }
+  callback(null);
+  return () => {};
+}
+
+export async function saveOwnerPlanningPreferences(userId, planning) {
+  if (!userId) throw new Error("An owner account is required to save planning settings.");
+  if (!firebaseEnabled) return;
+  await update(ref(db, `ownerWorkspacePreferences/${userId}`), {
+    planning,
+    updatedAt: Date.now()
+  });
+}
+
+export async function saveOwnerRecommendationStatuses(userId, recommendationStatuses) {
+  if (!userId) throw new Error("An owner account is required to save recommendation decisions.");
+  if (!firebaseEnabled) return;
+  await update(ref(db, `ownerWorkspacePreferences/${userId}`), {
+    recommendationStatuses,
+    updatedAt: Date.now()
+  });
+}
+
 export async function saveRiderLocation(orderId, location) {
   if (firebaseEnabled) {
     return api.updateRiderLocation(orderId, location);
@@ -1741,8 +2019,24 @@ export async function getDeliveryProof(order = {}) {
   }
   if (!order.proofOfDeliveryRef) throw new Error("No delivery proof has been attached to this order yet.");
   if (firebaseEnabled) {
-    const snapshot = await get(ref(db, order.proofOfDeliveryRef));
-    const proof = snapshot.val();
+    if (order.proofOfDeliveryRef !== `deliveryProofs/${order.id}`) throw new Error("Invalid delivery proof reference.");
+    if (!auth?.currentUser || !config.databaseURL) throw new Error("Sign in again to view this delivery proof.");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let proof;
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const url = new URL(`${config.databaseURL.replace(/\/$/, "")}/${order.proofOfDeliveryRef}.json`);
+      url.searchParams.set("auth", token);
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Your account cannot access this delivery proof. Sign in again." : "Delivery proof could not be loaded. Close this window and try again.");
+      proof = await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error("Delivery proof loading timed out. Close this window and try again.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     const imageUrl = proof?.downloadUrl || proof?.dataUrl;
     if (!imageUrl) throw new Error("The delivery proof photo could not be found.");
     return {

@@ -170,6 +170,28 @@ test("owner and staff operational access remains scoped", async () => {
   await assertFails(get(ref(staff, "paymentMovements")));
 });
 
+test("owner workspace preferences sync only to the matching owner account", async () => {
+  const owner = databaseFor("owner-1", "owner");
+  const preferences = {
+    planning: {
+      salesGoal: 100000,
+      activePromotion: "No active promotion",
+      prepTargetMinutes: 15,
+      deliveryTargetMinutes: 45,
+      cashVarianceLimit: 100,
+      cancellationRateLimit: 5,
+      complaintLimit: 3
+    },
+    recommendationStatuses: { stock: { status: "Accepted", updatedAt: 1 } },
+    updatedAt: 1
+  };
+  await assertSucceeds(set(ref(owner, "ownerWorkspacePreferences/owner-1"), preferences));
+  await assertSucceeds(get(ref(owner, "ownerWorkspacePreferences/owner-1")));
+  await assertFails(get(ref(databaseFor("owner-2", "owner"), "ownerWorkspacePreferences/owner-1")));
+  await assertFails(set(ref(databaseFor("staff-1", "staff"), "ownerWorkspacePreferences/staff-1"), preferences));
+  await assertFails(set(ref(owner, "ownerWorkspacePreferences/owner-1/planning/salesGoal"), -1));
+});
+
 test("riders read assigned orders and sanitized availability only", async () => {
   const database = databaseFor("rider-1", "rider");
   const assigned = await assertSucceeds(get(query(ref(database, "orders"), orderByChild("riderId"), equalTo("rider-1"))));
@@ -192,6 +214,40 @@ test("only the delivered-order customer can create its pending review", async ()
   };
   await assertSucceeds(set(ref(databaseFor("customer-1", "customer"), "reviews/order-own"), review));
   await assertFails(set(ref(databaseFor("customer-2", "customer"), "reviews/order-own"), { ...review, customerId: "customer-2" }));
+});
+
+test("HTTPS review creation needs no prior read and rejects duplicate submissions", async () => {
+  const encoded = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const token = `${encoded({ alg: 'none', typ: 'JWT' })}.${encoded({ sub: 'customer-1', user_id: 'customer-1', aud: projectId, iss: `https://securetoken.google.com/${projectId}`, iat: now, exp: now + 3600, ...claims('customer') })}.`;
+  const url = new URL('http://127.0.0.1:9000/reviews/order-own.json');
+  url.searchParams.set('ns', projectId);
+  url.searchParams.set('auth', token);
+  const body = JSON.stringify({ orderId: 'order-own', customerId: 'customer-1', customerName: 'Customer One', rating: 5, comment: 'Great meal', moderationStatus: 'pending', createdAt: Date.now() });
+  const missingReview = await fetch(url);
+  assert.equal(missingReview.status, 401);
+  const conditional = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'if-match': 'null_etag' }, body });
+  assert.equal(conditional.status, 401);
+  const saved = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+  assert.equal(saved.status, 200, await saved.text());
+  const duplicate = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+  assert.equal(duplicate.status, 401);
+});
+
+test("HTTPS customer support message reaches the staff inbox once", async () => {
+  const encoded = value => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const token = `${encoded({ alg: "none", typ: "JWT" })}.${encoded({ sub: "customer-1", user_id: "customer-1", aud: projectId, iss: `https://securetoken.google.com/${projectId}`, iat: now, exp: now + 3600, ...claims("customer") })}.`;
+  const url = new URL("http://127.0.0.1:9000/messages/support/browser-message-1.json");
+  url.searchParams.set("ns", projectId);
+  url.searchParams.set("auth", token);
+  const body = JSON.stringify({ text: "Please help with my order", senderId: "customer-1", senderName: "Customer One", senderRole: "customer", customerId: "customer-1", customerName: "Customer One", conversationId: "customer-1", channel: "support", createdAt: Date.now() });
+  const saved = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+  assert.equal(saved.status, 200, await saved.text());
+  const inbox = await assertSucceeds(get(query(ref(databaseFor("staff-1", "staff"), "messages/support"), orderByChild("createdAt"), limitToLast(200))));
+  assert.equal(inbox.child("browser-message-1/text").val(), "Please help with my order");
+  const duplicate = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+  assert.equal(duplicate.status, 401);
 });
 
 test("notifications require a bounded user-scoped query", async () => {

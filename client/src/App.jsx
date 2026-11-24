@@ -828,6 +828,9 @@ export default function App() {
   const [menu, setMenu] = useState(fallbackMenu);
   const [inventory, setInventory] = useState(fallbackMenu.map((item) => ({ ...item, reorderPoint: 10 })));
   const [orders, setOrders] = useState([]);
+  const [ordersLoadError, setOrdersLoadError] = useState("");
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [recordLoadErrors, setRecordLoadErrors] = useState({});
   const [auditLogs, setAuditLogs] = useState([]);
   const [shiftLogs, setShiftLogs] = useState([]);
   const [supportMessages, setSupportMessages] = useState([]);
@@ -841,6 +844,25 @@ export default function App() {
   const cartUserId = activeUser?.role === "customer" ? activeUser.uid : null;
   const { cart, setCart, checkoutOpen, setCheckoutOpen, reorder, completeCheckout } = useCartState({ menu, navigate, notify: setNotice, userId: cartUserId });
   const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const report = (event) => {
+      const { source, error } = event.detail || {};
+      if (source) setRecordLoadErrors((current) => ({ ...current, [source]: error }));
+    };
+    window.addEventListener("taptap-data-status", report);
+    return () => window.removeEventListener("taptap-data-status", report);
+  }, []);
+  useEffect(() => {
+    const applyConfirmedOrder = (event) => {
+      const { id, order } = event.detail || {};
+      if (!id || !order || typeof order !== "object") return;
+      setOrders((current) => current.map((entry) => entry.id === id
+        ? { ...entry, ...order, id, deliveryType: order.deliveryType || entry.deliveryType }
+        : entry));
+    };
+    window.addEventListener("taptap-order-updated", applyConfirmedOrder);
+    return () => window.removeEventListener("taptap-order-updated", applyConfirmedOrder);
+  }, []);
   const [serviceStatus, setServiceStatus] = useState({ api: true, firebase: firebaseEnabled, socket: false, groq: false, openai: false, dialogflow: false, paymongo: false, paymongoMode: "test", sms: false, textbee: false });
   const previousOrderCount = useRef(0);
   const paymentReturnHandledRef = useRef(false);
@@ -910,25 +932,31 @@ export default function App() {
     if (!shouldLoadOrders) {
       previousOrderCount.current = 0;
       setOrders([]);
+      setOrdersLoadError("");
+      setOrdersLoading(false);
       return undefined;
     }
+    setOrdersLoadError("");
+    setOrdersLoading(true);
     return subscribeOrders(activeUser, (nextOrders) => {
-    if (activeUser?.role === "rider" && nextOrders.length > previousOrderCount.current) navigator.vibrate?.([150, 80, 150]);
-    previousOrderCount.current = nextOrders.length;
-    setOrders(nextOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
-    });
+      setOrdersLoading(false);
+      if (activeUser?.role === "rider" && nextOrders.length > previousOrderCount.current) navigator.vibrate?.([150, 80, 150]);
+      previousOrderCount.current = nextOrders.length;
+      setOrdersLoadError("");
+      setOrders((current) => {
+        const currentById = new Map(current.map((entry) => [entry.id, entry]));
+        return nextOrders.map((entry) => {
+          const previous = currentById.get(entry.id);
+          return previous && Number(previous.updatedAt || 0) > Number(entry.updatedAt || 0) ? previous : entry;
+        }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      });
+    }, () => { setOrdersLoading(false); setOrdersLoadError("Order records could not be loaded. Refresh the page or sign in again."); });
   }, [activeUser, checkoutOpen, pendingNotificationOrderId, trackingOrder, view]);
   useEffect(() => {
     if (!pendingNotificationOrderId) return undefined;
-    const order = orders.find((entry) => entry.id === pendingNotificationOrderId);
-    if (order) {
-      setTrackingOrder(order);
-      setPendingNotificationOrderId(null);
-      return undefined;
-    }
     const timeout = setTimeout(() => setPendingNotificationOrderId(null), 10_000);
     return () => clearTimeout(timeout);
-  }, [orders, pendingNotificationOrderId]);
+  }, [pendingNotificationOrderId]);
   useEffect(() => {
     const shouldLoadComplaints = Boolean(activeUser) && (
       activeUser.role === "owner" ||
@@ -1076,24 +1104,44 @@ export default function App() {
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }, [activeUser?.role, navigate]);
   useEffect(() => {
-    if (!trackingOrder) {
+    if (!activeUser?.uid || !firebaseEnabled) {
       disconnectSocket();
       setServiceStatus((current) => ({ ...current, socket: false }));
       return undefined;
     }
+    let disposed = false;
     let activeSocket;
+    const refreshOrders = () => window.dispatchEvent(new CustomEvent("taptap-refresh-records", { detail: { source: "/orders" } }));
+    const handleConnect = () => {
+      setServiceStatus((current) => ({ ...current, socket: true }));
+      refreshOrders();
+    };
+    const handleDisconnect = () => setServiceStatus((current) => ({ ...current, socket: false }));
+    const handleOrderEvent = (payload) => {
+      if (payload?.id && payload?.order) window.dispatchEvent(new CustomEvent("taptap-order-updated", { detail: { id: payload.id, order: payload.order } }));
+      refreshOrders();
+    };
     getSocket().then((socket) => {
+      if (disposed) return;
       activeSocket = socket;
       setServiceStatus((current) => ({ ...current, socket: socket.connected }));
-      socket.on("connect", () => setServiceStatus((current) => ({ ...current, socket: true })));
-      socket.on("disconnect", () => setServiceStatus((current) => ({ ...current, socket: false })));
-    }).catch(() => {});
+      socket.on("connect", handleConnect);
+      socket.on("disconnect", handleDisconnect);
+      socket.on("order:created", handleOrderEvent);
+      socket.on("order:status-updated", handleOrderEvent);
+      socket.on("order:assigned", handleOrderEvent);
+      if (socket.connected) refreshOrders();
+    }).catch(handleDisconnect);
     return () => {
-      activeSocket?.off("connect");
-      activeSocket?.off("disconnect");
+      disposed = true;
+      activeSocket?.off("connect", handleConnect);
+      activeSocket?.off("disconnect", handleDisconnect);
+      activeSocket?.off("order:created", handleOrderEvent);
+      activeSocket?.off("order:status-updated", handleOrderEvent);
+      activeSocket?.off("order:assigned", handleOrderEvent);
       disconnectSocket();
     };
-  }, [activeUser?.uid, trackingOrder]);
+  }, [activeUser?.uid]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 4500);
@@ -1170,10 +1218,13 @@ export default function App() {
       <AppHeader user={currentUser} activeView={view} unreadCount={unreadCount} notificationsOpen={notificationsOpen} onNavigate={navigate} onNotifications={() => setNotificationsOpen(true)} onHelp={() => setAssistantOpen((current) => !current)} helpOpen={assistantOpen} onLogout={() => { setAssistantOpen(false); logout(); }} />
       {!online && <div className="offline-banner" role="status">Connection lost. Ordering, POS, and live tracking will resume after reconnecting.</div>}
       {serviceStatus.api === false && <div className="offline-banner" role="status">Live services are reconnecting. Check your connection if this message remains.</div>}
+      {ordersLoadError && <div className="offline-banner" role="alert">{ordersLoadError}</div>}
+      {Object.values(recordLoadErrors).some(Boolean) && <div className="offline-banner" role="alert">Some saved records could not be refreshed. Check your connection or sign in again. Your saved data has not been removed.</div>}
+      {ordersLoading && <div className="records-loading-notice" role="status">Loading order records. Totals will update when loading finishes.</div>}
       {user.role === "customer" && view === "store" && <Storefront menu={menu} cart={cart} setCart={setCart} onCheckout={openCheckout} notify={setNotice} />}
       {user.role === "customer" && view === "orders" && (
         <Suspense fallback={<SectionLoader label="Loading customer section..." />}>
-          <OrdersView orders={orders} onTrack={setTrackingOrder} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} onPay={serviceStatus.paymongo ? retryOnlinePayment : null} />
+          <OrdersView orders={orders} onTrack={setTrackingOrder} highlightOrderId={pendingNotificationOrderId} isRevenueOrder={isRevenueOrder} notify={setNotice} user={currentUser} complaints={complaints} onReorder={reorder} onBrowse={() => navigate("store")} onPay={serviceStatus.paymongo ? retryOnlinePayment : null} />
         </Suspense>
       )}
       {user.role === "customer" && view === "receipts" && (
@@ -1206,7 +1257,7 @@ export default function App() {
       {activeTrackingOrder && <TrackingView order={activeTrackingOrder} onClose={() => setTrackingOrder(null)} />}
       {user.role === "customer" && <Suspense fallback={null}><CustomerAssistant user={currentUser} menu={menu.filter((item) => !item.walkInOnly)} open={assistantOpen} onOpenChange={setAssistantOpen} /></Suspense>}
       {user.role === "customer" && <CustomerBottomNav activeView={view} onNavigate={navigate} />}
-      {notificationsOpen && <NotificationCenter notifications={notifications} loading={notificationsLoading} user={currentUser} onClose={() => setNotificationsOpen(false)} onNavigate={navigate} onOpenOrder={setPendingNotificationOrderId} />}
+      {notificationsOpen && <NotificationCenter notifications={notifications} loading={notificationsLoading} user={currentUser} onClose={() => setNotificationsOpen(false)} onNavigate={navigate} onOpenOrder={setPendingNotificationOrderId} onOpenSupport={() => setAssistantOpen(true)} />}
       {notice && <div className="app-toast" role="status" aria-live="polite" aria-atomic="true">{notice}</div>}
     </div>
   );

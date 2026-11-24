@@ -59,6 +59,7 @@ type NotificationCenterProps = {
   onClose: () => void;
   onNavigate: (view: RoleView) => void;
   onOpenOrder?: (orderId: string) => void;
+  onOpenSupport?: () => void;
 };
 
 const filters: Array<{ id: NotificationFilter; label: string }> = [
@@ -163,6 +164,7 @@ function notificationDestination(user: AppUser, notification: Notification): Rol
   const allowedViews = new Set(navigationForUser(user).map(([view]) => view as RoleView));
   const allowed = (...views: Array<RoleView | null>): RoleView | null => views.find((view): view is RoleView => Boolean(view && allowedViews.has(view))) || null;
   const requested = notification.actionView as RoleView | undefined;
+  if (user.role === "customer" && normalizedNotificationType(notification) === "chat") return allowed("orders");
   if (requested && allowedViews.has(requested)) return requested;
 
   const type = normalizedNotificationType(notification);
@@ -203,6 +205,7 @@ function destinationLabel(notification: Notification): string {
   if (type === "shift") return "View shift";
   if (type === "chat") return "Open conversation";
   if (type === "review") return "View review";
+  if (/receipt/i.test(`${notification.title} ${notification.message}`)) return "View receipt";
   return "View order";
 }
 
@@ -277,7 +280,7 @@ function NotificationRow({ notification, destination, busy, onOpen, onMarkRead, 
   );
 }
 
-export default function NotificationCenter({ notifications, loading = false, user, onClose, onNavigate, onOpenOrder }: NotificationCenterProps) {
+export default function NotificationCenter({ notifications, loading = false, user, onClose, onNavigate, onOpenOrder, onOpenSupport }: NotificationCenterProps) {
   const [activeFilter, setActiveFilter] = useState<NotificationFilter>("all");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [moreOpen, setMoreOpen] = useState(false);
@@ -413,10 +416,12 @@ export default function NotificationCenter({ notifications, loading = false, use
   };
 
   const handleOpen = async (notification: Notification, destination: RoleView) => {
-    const completed = await runForNotification(notification, async () => {
-      if (!notification.readAt) await markNotificationRead(notification.id, user.uid);
-    });
-    if (!completed) return;
+    if (!notification.readAt) void markNotificationRead(notification.id, user.uid).catch(() => {});
+    if (user.role === "customer" && normalizedNotificationType(notification) === "chat") {
+      onOpenSupport?.();
+      onClose();
+      return;
+    }
     onNavigate(destination);
     if (destination === "orders" && notification.orderId) onOpenOrder?.(notification.orderId);
     onClose();

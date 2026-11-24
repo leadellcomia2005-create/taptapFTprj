@@ -95,6 +95,8 @@ export type OrderUpdateRequest = Partial<Order> & {
   cancelReason?: string;
   codRemitted?: boolean;
   codHandoffRequested?: boolean;
+  codDiscrepancyReport?: { receivedAmount: number; reason: string };
+  codDiscrepancyResolve?: { resolutionNote: string };
 };
 
 export type MenuItemUpdateRequest = Partial<MenuItem>;
@@ -441,6 +443,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(values),
     }),
+  requestRefund: (orderId: EntityId, values: { reason: string; details: string }) =>
+    request(`/orders/${encodeURIComponent(orderId)}/refund`, { method: "POST", body: JSON.stringify(values) }),
+  decideRefund: (orderId: EntityId, values: { action: "approve" | "reject" | "refresh"; note: string }) =>
+    request(`/orders/${encodeURIComponent(orderId)}/refund`, { method: "PATCH", body: JSON.stringify(values) }),
+  completeManualRefund: (orderId: EntityId, values: { method: string; reference: string }) =>
+    request(`/orders/${encodeURIComponent(orderId)}/refund/manual`, { method: "POST", body: JSON.stringify(values) }),
   resendReceiptEmail: (orderId: EntityId) =>
     request(`/orders/${encodeURIComponent(orderId)}/receipt-email`, {
       method: "POST",

@@ -16,7 +16,7 @@ type AssistantMessage = {
   createdAt: number;
 };
 
-type RequestStatus = "idle" | "sending" | "error";
+type RequestStatus = "idle" | "sending" | "answering" | "error";
 
 type CustomerAssistantProps = {
   user: Pick<AppUser, "uid" | "name">;
@@ -44,6 +44,8 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
   }]);
   const [requestStatus, setRequestStatus] = useState<RequestStatus>("idle");
   const [failedMessage, setFailedMessage] = useState("");
+  const [failedStage, setFailedStage] = useState<"save" | "answer" | "handoff">("save");
+  const [failedSendId, setFailedSendId] = useState("");
   const [conversation, setConversation] = useState<SupportConversation>({
     customerId: user.uid,
     mode: "assistant",
@@ -98,24 +100,27 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
     if (open) messagesEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [messages, open, requestStatus]);
 
-  const requestAnswer = async (message: string, { saveSupportMessage = true } = {}) => {
+  const requestAnswer = async (message: string, { saveSupportMessage = true, appendMessage = true, messageId: supportMessageId = crypto.randomUUID() }: { saveSupportMessage?: boolean; appendMessage?: boolean; messageId?: string } = {}) => {
     setRequestStatus("sending");
     setFailedMessage("");
     if (saveSupportMessage) {
-      setMessages((current) => [...current, {
+      if (appendMessage) setMessages((current) => [...current, {
         id: messageId("user"),
         from: "user",
         text: message,
         createdAt: Date.now()
       }]);
+      setFailedSendId(supportMessageId);
       try {
         await sendSupportMessage(message, user, {
           customerId: user.uid,
           customerName: user.name,
-          conversationId: user.uid
+          conversationId: user.uid,
+          messageId: supportMessageId
         });
       } catch {
         setFailedMessage(message);
+        setFailedStage("save");
         setRequestStatus("error");
         return;
       }
@@ -126,6 +131,7 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       return;
     }
 
+    setRequestStatus("answering");
     try {
       const history = messages
         .filter((entry) => entry.id !== "welcome" && !String(entry.source || "").startsWith("Staff support"))
@@ -162,12 +168,13 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       setRequestStatus("idle");
     } catch {
       setFailedMessage(message);
+      setFailedStage("answer");
       setRequestStatus("error");
     }
   };
 
   const askForStaff = async () => {
-    if (conversationRef.current.mode !== "assistant" || requestStatus === "sending") return;
+    if (conversationRef.current.mode !== "assistant" || requestStatus === "sending" || requestStatus === "answering") return;
     setRequestStatus("sending");
     try {
       const result = await requestSupportStaff(user.uid, { ...user, role: "customer" }, "Customer requested human support");
@@ -176,6 +183,7 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
       setRequestStatus("idle");
     } catch {
       setFailedMessage("");
+      setFailedStage("handoff");
       setRequestStatus("error");
     }
   };
@@ -196,7 +204,7 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const message = input.trim();
-    if (!message || requestStatus === "sending") return;
+    if (!message || requestStatus === "sending" || requestStatus === "answering") return;
     setInput("");
     void requestAnswer(message);
   };
@@ -234,25 +242,26 @@ export default function CustomerAssistant({ user, menu, open, onOpenChange }: Cu
             </div>
           );
         })}
-        {requestStatus === "sending" && <div className="bot assistant-typing" role="status"><span>Checking the latest information...</span></div>}
+        {(requestStatus === "sending" || requestStatus === "answering") && <div className="bot assistant-typing" role="status"><span>{requestStatus === "sending" ? "Saving your message..." : "Checking the latest information..."}</span></div>}
         {requestStatus === "error" && (
           <div className="bot assistant-error" role="alert">
-            <span>I could not retrieve an answer. Please retry or try again later.</span>
-            {failedMessage && <button type="button" onClick={() => void requestAnswer(failedMessage, { saveSupportMessage: false })}>Retry</button>}
+            <span>{failedStage === "save" ? "Your message could not be confirmed. Please retry." : failedStage === "handoff" ? "The staff request could not be sent. Please retry." : "Your message was saved, but I could not retrieve an answer. Please retry."}</span>
+            {failedMessage && <button type="button" onClick={() => void requestAnswer(failedMessage, { saveSupportMessage: failedStage === "save", appendMessage: false, messageId: failedSendId })}>Retry</button>}
+            {failedStage === "handoff" && <button type="button" onClick={() => void askForStaff()}>Retry staff request</button>}
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
-      {conversation.mode === "assistant" && <div className="assistant-human-action"><button type="button" onClick={() => void askForStaff()} disabled={requestStatus === "sending"}><Headphones size={16} aria-hidden="true" />Talk to staff</button></div>}
+      {conversation.mode === "assistant" && <div className="assistant-human-action"><button type="button" onClick={() => void askForStaff()} disabled={requestStatus === "sending" || requestStatus === "answering"}><Headphones size={16} aria-hidden="true" />Talk to staff</button></div>}
       {conversation.mode === "assistant" && <div className="assistant-suggestions" aria-label="Suggested questions">
         {suggestions.map((suggestion) => (
-          <button type="button" key={suggestion} disabled={requestStatus === "sending"} onClick={() => void requestAnswer(suggestion)}>{suggestion}</button>
+          <button type="button" key={suggestion} disabled={requestStatus === "sending" || requestStatus === "answering"} onClick={() => void requestAnswer(suggestion)}>{suggestion}</button>
         ))}
       </div>}
       <form onSubmit={send}>
         <label className="visually-hidden" htmlFor="assistant-message">Message customer support</label>
-        <input id="assistant-message" maxLength={500} disabled={requestStatus === "sending"} value={input} onChange={(event) => setInput(event.target.value)} placeholder={conversation.mode === "assistant" ? "Ask a question..." : "Message the support team..."} />
-        <button type="submit" disabled={!input.trim() || requestStatus === "sending"}>{requestStatus === "sending" ? "Sending" : "Send"}</button>
+        <input id="assistant-message" maxLength={500} disabled={requestStatus === "sending" || requestStatus === "answering"} value={input} onChange={(event) => setInput(event.target.value)} placeholder={conversation.mode === "assistant" ? "Ask a question..." : "Message the support team..."} />
+        <button type="submit" disabled={!input.trim() || requestStatus === "sending" || requestStatus === "answering"}>{requestStatus === "sending" ? "Sending" : requestStatus === "answering" ? "Waiting" : "Send"}</button>
       </form>
     </aside>
   );

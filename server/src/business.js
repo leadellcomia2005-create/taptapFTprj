@@ -8,7 +8,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { isExpiredOnlineOrder, onlinePaymentWindowMs } from "./domain/paymentExpiry.js";
 import { getAuth } from "firebase-admin/auth";
-import { notificationUpdates, userIdsForRoles } from "./notifications.js";
+import { notificationDisplayReference, notificationUpdates, userIdsForRoles } from "./notifications.js";
 import {
   availableDeliveryProjection,
   normalizeIdempotencyKey,
@@ -733,12 +733,21 @@ export async function updateOrderRecord(db, user, orderId, input) {
       }
     }
   }
+  const remittanceAuditAction = changes.codRemittedAt
+    ? "cod_remittance_confirmed"
+    : changes.codDiscrepancy?.status === "open"
+      ? "cod_discrepancy_reported"
+      : changes.codDiscrepancy?.status === "resolved"
+        ? "cod_discrepancy_resolved"
+        : changes.codHandoffRequestedAt
+          ? "cod_handoff_recorded"
+          : "order_updated";
   const updates = {
     [`auditLogs/AUD-${now}-${orderId}`]: {
-      action: "order_updated",
+      action: remittanceAuditAction,
       orderId,
       status: changes.status || null,
-      details: auditDetails(previous, order, ["status", "riderId", "riderName", "paymentStatus", "cancelReason", "refundStatus", "codHandoffRequestedAt", "codRemittedAt"]),
+      details: auditDetails(previous, order, ["status", "riderId", "riderName", "paymentStatus", "cancelReason", "refundStatus", "codHandoffRequestedAt", "codHandoffRequestedBy", "codRemittedAt", "codRemittedBy", "codRemittedByName", "codDiscrepancy"]),
       actorId: user.uid,
       actorName: user.name || user.email,
       actorRole: user.role,
@@ -807,17 +816,53 @@ export async function updateOrderRecord(db, user, orderId, input) {
       entityId: orderId
     }));
   }
-  if (changes.codRemittedAt) {
+  const displayReference = notificationDisplayReference(orderId);
+  if (changes.codHandoffRequestedAt) {
     const ownerIds = await userIdsForRoles(db, ["owner"]);
     Object.assign(updates, notificationUpdates(db, ownerIds, {
-      title: "COD remitted",
-      message: `${orderId} COD cash was marked as remitted.`,
+      title: "COD handoff awaiting confirmation",
+      message: `${displayReference} cash handoff requires owner verification.`,
       type: "sale",
       orderId,
       entityType: "payment",
       entityId: orderId,
       amount: Number(order.total || 0),
-      actionView: "owner-sales"
+      actionView: "owner-reports"
+    }));
+  }
+  if (changes.codRemittedAt) {
+    Object.assign(updates, notificationUpdates(db, [order.riderId], {
+      title: "COD remittance confirmed",
+      message: `${displayReference} cash handoff was confirmed by the owner.`,
+      type: "sale",
+      orderId,
+      entityType: "payment",
+      entityId: orderId,
+      amount: Number(order.total || 0),
+      actionView: "rider-cod"
+    }));
+  }
+  if (changes.codDiscrepancy?.status === "open") {
+    Object.assign(updates, notificationUpdates(db, [order.riderId], {
+      title: "COD cash discrepancy reported",
+      message: `${displayReference} has a cash variance requiring review.`,
+      type: "sale",
+      orderId,
+      entityType: "payment",
+      entityId: orderId,
+      amount: Number(order.total || 0),
+      actionView: "rider-cod"
+    }));
+  }
+  if (changes.codDiscrepancy?.status === "resolved") {
+    Object.assign(updates, notificationUpdates(db, [order.riderId], {
+      title: "COD discrepancy resolved",
+      message: `${displayReference} cash discrepancy was resolved by the owner.`,
+      type: "sale",
+      orderId,
+      entityType: "payment",
+      entityId: orderId,
+      actionView: "rider-cod"
     }));
   }
   await db.ref().update(updates);

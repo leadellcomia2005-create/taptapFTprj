@@ -1,4 +1,6 @@
 /* Loaded only with the rider workspace. */
+.rider-delivery-date { display: flex; align-items: center; gap: 12px; margin: 20px 0 12px; color: var(--muted); font: 800 13px/1.5 var(--body, sans-serif); }
+.rider-delivery-date::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
 .rider-map .delivery-map-wrap { height: 360px; overflow: hidden; border-radius: 12px; }
 .rider-page { min-height: calc(100vh - 76px); padding: 24px clamp(14px,3vw,42px) 46px; background: linear-gradient(180deg,#fff8ee 0%,var(--paper) 42%,#fffaf3 100%); }
@@ -166,6 +168,24 @@
   .rider-retry-bar button { grid-column: 1 / -1; min-height: 44px; }
   .rider-ledger-handoff { min-height: 44px; }
   .rider-cod-handoff-state { max-width: none; text-align: left; }
+}
+
+.rider-ledger-copy { min-width: 0; }
+.rider-remittance-dates { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; margin: 10px 0 0; }
+.rider-remittance-dates > div { min-width: 0; display: grid; gap: 2px; padding: 7px; background: rgba(255,255,255,.7); border: 1px solid var(--ops-border); border-radius: 6px; }
+.rider-remittance-dates dt { color: var(--muted); font-size: 8px; font-weight: 900; text-transform: uppercase; }
+.rider-remittance-dates dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 9px; font-weight: 700; }
+.rider-remittance-warning { display: flex; gap: 7px; margin-top: 8px; padding: 8px; color: #71430a; background: #fff1d3; border: 1px solid #e7b96b; border-radius: 6px; }
+.rider-remittance-warning > span { min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.rider-remittance-status { max-width: 210px; }
+.rider-ledger-handoff { min-height: 44px; }
+@media (max-width: 760px) {
+  .rider-ledger-row { grid-template-columns: 42px minmax(0,1fr); }
+  .rider-ledger-total { grid-column: 1 / -1; align-items: stretch; justify-items: stretch; padding-top: 10px; border-top: 1px solid var(--ops-border); }
+  .rider-ledger-total > strong { font-size: 25px; }
+  .rider-remittance-status { width: 100%; max-width: none; justify-content: center; }
+  .rider-ledger-handoff { width: 100%; }
+  .rider-remittance-dates { grid-template-columns: 1fr; }
 }
 .rider-proof-note {
   display: grid;

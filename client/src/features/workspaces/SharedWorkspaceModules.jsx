@@ -69,8 +69,16 @@ const complaintTypeLabels = {
   "wrong-item": "Wrong item",
   "missing-item": "Missing item",
   "late-order": "Late order",
-  "bad-food": "Bad food"
+  "bad-food": "Food quality"
 };
+
+const complaintHistoryPageSize = 8;
+
+const complaintTimestamp = (complaint) => Number(complaint.resolvedAt || complaint.updatedAt || complaint.createdAt || 0);
+
+const complaintDateLabel = (value) => value
+  ? new Date(value).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })
+  : "Date not recorded";
 
 const scheduleDays = [
   ["mon", "Mon"],
@@ -112,10 +120,36 @@ const downloadCsv = (filename, rows) => {
 
 export function ComplaintResolutionModule({ complaints = [], user, notify }) {
   const [drafts, setDrafts] = useState({});
-  const grouped = {
+  const [filters, setFilters] = useState({ status: "all", category: "all", from: "", search: "" });
+  const [historyPage, setHistoryPage] = useState(1);
+  const grouped = useMemo(() => ({
     pending: complaints.filter((complaint) => (complaint.status || "pending") === "pending"),
     reviewed: complaints.filter((complaint) => complaint.status === "reviewed"),
     resolved: complaints.filter((complaint) => complaint.status === "resolved")
+  }), [complaints]);
+  const filteredComplaints = useMemo(() => {
+    const search = filters.search.trim().toLowerCase();
+    const from = filters.from ? new Date(`${filters.from}T00:00:00`).getTime() : 0;
+    return complaints.filter((complaint) => {
+      const status = complaint.status || "pending";
+      const searchable = `${complaint.orderId || ""} ${complaint.customerName || ""}`.toLowerCase();
+      return (filters.status === "all" || status === filters.status)
+        && (filters.category === "all" || complaint.type === filters.category)
+        && (!from || complaintTimestamp(complaint) >= from)
+        && (!search || searchable.includes(search));
+    });
+  }, [complaints, filters]);
+  const activeComplaints = filteredComplaints.filter((complaint) => (complaint.status || "pending") !== "resolved");
+  const resolvedComplaints = filteredComplaints
+    .filter((complaint) => complaint.status === "resolved")
+    .sort((left, right) => complaintTimestamp(right) - complaintTimestamp(left));
+  const historyPageCount = Math.max(1, Math.ceil(resolvedComplaints.length / complaintHistoryPageSize));
+  const visibleResolvedComplaints = resolvedComplaints.slice((historyPage - 1) * complaintHistoryPageSize, historyPage * complaintHistoryPageSize);
+  useEffect(() => setHistoryPage(1), [filters]);
+  useEffect(() => setHistoryPage((page) => Math.min(page, historyPageCount)), [historyPageCount]);
+  const requestedResolutionLabel = (value) => {
+    const text = String(value || "").trim();
+    return /^refund(?:\s+review)?$/i.test(text) ? "Cancellation review" : text;
   };
   const updateDraft = (complaint, field, value) => setDrafts((current) => ({
     ...current,
@@ -123,21 +157,32 @@ export function ComplaintResolutionModule({ complaints = [], user, notify }) {
   }));
   const save = async (complaint, status = null) => {
     const draft = { status: complaint.status || "pending", resolution: complaint.resolution || "", ...(drafts[complaint.id] || {}) };
+    const nextStatus = status || draft.status;
+    if (nextStatus === "resolved" && !String(draft.resolution || "").trim()) {
+      notify("Add a resolution note before resolving this complaint.");
+      return;
+    }
     await updateComplaintStatus(complaint.id, {
-      status: status || draft.status,
-      resolution: draft.resolution
+      status: nextStatus,
+      resolution: String(draft.resolution || "").trim()
     }, user);
-    notify(`${complaint.orderId} complaint marked ${status || draft.status}.`);
+    notify(`${complaint.orderId} complaint marked ${nextStatus}.`);
   };
   return (
     <div className="dashboard-card complaint-module">
       <div className="module-heading">
-        <div><p className="eyebrow text-danger">Customer care</p><h3>Order returns and complaints</h3></div>
+        <div><p className="eyebrow text-danger">Customer care</p><h3>Complaints and resolutions</h3></div>
         <span className="module-note">{grouped.pending.length} pending, {grouped.reviewed.length} reviewed, {grouped.resolved.length} resolved</span>
       </div>
+      <div className="complaint-filter-bar" aria-label="Complaint filters">
+        <label>Status<select className="form-select" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">All statuses</option><option value="pending">Pending</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option></select></label>
+        <label>Category<select className="form-select" value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}><option value="all">All categories</option>{Object.entries(complaintTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label>From<input className="form-control" type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></label>
+        <label>Customer or order<input className="form-control" type="search" value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} placeholder="Name or TAP reference" /></label>
+      </div>
       <div className="complaint-list">
-        {complaints.length === 0 && <div className="empty-chat">No order complaints yet.</div>}
-        {complaints.map((complaint) => {
+        {filters.status !== "resolved" && activeComplaints.length === 0 && <div className="empty-chat">No active complaints match these filters.</div>}
+        {activeComplaints.map((complaint) => {
           const draft = { status: complaint.status || "pending", resolution: complaint.resolution || "", ...(drafts[complaint.id] || {}) };
           return (
             <article className="complaint-card" key={complaint.id}>
@@ -145,7 +190,7 @@ export function ComplaintResolutionModule({ complaints = [], user, notify }) {
                 <strong>{complaint.orderId} - {complaintTypeLabels[complaint.type] || complaint.type}</strong>
                 <small>{complaint.customerName} - {(complaint.items || []).join(", ")}</small>
                 <p>{complaint.details}</p>
-                {complaint.requestedResolution && <em>Requested: {complaint.requestedResolution}</em>}
+                {complaint.requestedResolution && <em>Customer request: {requestedResolutionLabel(complaint.requestedResolution)}</em>}
               </div>
               <label className="form-label">Status<select className="form-select form-select-sm" value={draft.status} onChange={(event) => updateDraft(complaint, "status", event.target.value)}><option value="pending">Pending</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option></select></label>
               <label className="form-label">Resolution<textarea className="form-control" rows="2" value={draft.resolution} onChange={(event) => updateDraft(complaint, "resolution", event.target.value)} placeholder="Replacement, cancellation review, or staff note..." /></label>
@@ -158,6 +203,30 @@ export function ComplaintResolutionModule({ complaints = [], user, notify }) {
           );
         })}
       </div>
+      {(filters.status === "all" || filters.status === "resolved") && resolvedComplaints.length > 0 && (
+        <details className="resolved-complaint-history" open={filters.status === "resolved" || undefined}>
+          <summary>Resolved history ({resolvedComplaints.length})</summary>
+          <div className="resolved-complaint-list">
+            {visibleResolvedComplaints.map((complaint) => (
+              <article className="resolved-complaint-card" key={complaint.id}>
+                <div>
+                  <strong>{complaint.orderId} - {complaintTypeLabels[complaint.type] || complaint.type}</strong>
+                  <small>{complaint.customerName} - {(complaint.items || []).join(", ")}</small>
+                  <p>{complaint.details}</p>
+                  {complaint.requestedResolution && <em>Customer request: {requestedResolutionLabel(complaint.requestedResolution)}</em>}
+                </div>
+                <div className="resolved-complaint-note">
+                  <span className="status status-delivered">Resolved</span>
+                  <p>{complaint.resolution || "Resolved before resolution notes were required."}</p>
+                  <small>{complaintDateLabel(complaint.resolvedAt || complaint.updatedAt)} · {complaint.resolverName || "Staff member not recorded"}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+          {historyPageCount > 1 && <nav className="complaint-history-pagination" aria-label="Resolved complaint pages"><button className="btn btn-outline-dark" type="button" disabled={historyPage === 1} onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}>Previous</button><span>Page {historyPage} of {historyPageCount}</span><button className="btn btn-outline-dark" type="button" disabled={historyPage === historyPageCount} onClick={() => setHistoryPage((page) => Math.min(historyPageCount, page + 1))}>Next</button></nav>}
+        </details>
+      )}
+      {(filters.status === "resolved" || filters.status === "all") && resolvedComplaints.length === 0 && grouped.resolved.length > 0 && <div className="empty-chat">No resolved complaints match these filters.</div>}
     </div>
   );
 }
@@ -795,21 +864,21 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
       {orderDateFilter && <button className="btn btn-sm btn-outline-dark mb-3" type="button" onClick={() => setOrderDateFilter("")}>Clear date filter</button>}
       <div className="table-responsive" tabIndex="0">
         <table className="table align-middle">
-          <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {filteredOrders.length === 0 && <tr><td colSpan="7" className="text-center text-secondary py-4">No orders in the queue.</td></tr>}
             {visibleOrders.map((order) => {
               const next = nextStaffStatus(order);
               const waitingForRider = isDeliveryOrder(order) && order.status === "ready";
               return (
-                <tr key={order.id}>
-                <td>{order.id}</td>
-                <td>
+                <tr className="responsive-order-record" key={order.id}>
+                <td data-label="Order">{order.id}</td>
+                <td data-label="Customer">
                   {order.customerName}
                   <small className="d-block text-secondary">{order.phone || "No phone"}</small>
                   {order.smsNotifications ? <small className="d-block text-success">SMS ready</small> : <small className="d-block text-secondary">SMS not verified</small>}
                 </td>
-                <td className="order-items-cell">
+                <td data-label="Items" className="order-items-cell">
                   <span>{order.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "-"}</span>
                   {order.deliveryType && <small className="d-block text-secondary">{orderTypeLabel(order)} - {pinStatus(order)}</small>}
                   {waitingForRider && <small className="d-block text-danger">Ready for rider assignment</small>}
@@ -818,10 +887,10 @@ export function OrderManagement({ orders, canAdvance, notify, user = null }) {
                   {order.landmark && <small className="d-block text-secondary">Landmark: {order.landmark}</small>}
                   {order.notes && <small className="d-block text-secondary">Note: {order.notes}</small>}
                 </td>
-                <td>{orderPaymentLabel(order)}</td>
-                <td>{currency(order.total)}</td>
-                <td><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td>
-                <td>
+                <td data-label="Payment">{orderPaymentLabel(order)}</td>
+                <td data-label="Total">{currency(order.total)}</td>
+                <td data-label="Status"><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></td>
+                <td data-label="Actions">
                   {(canAdvance || hasProof(order)) && (
                     <div className="order-action-stack">
                       {canAdvance && next && <button className="btn btn-sm btn-outline-danger" onClick={() => advance(order)}>Advance to {statusLabel(next)}</button>}

@@ -1,13 +1,15 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bike, Camera, CheckCircle2, Clock, LoaderCircle, MapPin, Navigation, Package as PackageIcon, Phone, Route, Wallet } from "lucide-react";
 import { SectionLoader } from "../../components/Loaders";
 import { saveRiderLocation, uploadProof } from "../../services/firebase/delivery";
 import { updateOrder } from "../../services/firebase/orders";
 import { getSocket, sendRiderLocation } from "../../services/socket";
 import { estimateDeliveryRoute } from "../../utils/operations";
+import { codRemittanceStatus, codRemittanceStatusLabel, remittanceTimestamp } from "../../utils/codRemittance";
+import { orderReference } from "../../utils/display";
 import { ReasonModal } from "./WorkspaceModals";
-import { currency, isUnremittedCod, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
-import { prioritizeAssignedDeliveries, prioritizeAvailableDeliveries } from "./riderWorkflow";
+import { currency, setWorkspaceHelpers, statusLabel } from "./workspaceHelpers";
+import { deliveryHistoryTime, prioritizeAssignedDeliveries, prioritizeAvailableDeliveries } from "./riderWorkflow";
 import "./styles/rider.css";
 
 const CameraProof = lazy(() => import("../../components/CameraProof"));
@@ -21,6 +23,15 @@ function locationToPoint(location) {
   const lat = Number(location?.lat);
   const lng = Number(location?.lng);
   return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+}
+
+function deliveryDateGroup(order) {
+  if (!order) return "";
+  if (!["delivered", "completed", "cancelled"].includes(order.status)) return "Active deliveries";
+  const time = deliveryHistoryTime(order);
+  const date = time ? new Date(time).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "long", day: "numeric", year: "numeric" }) : "Date not recorded";
+  const dateNote = !order.deliveredAt && !order.completedAt && time ? " (order date)" : "";
+  return `${order.status === "cancelled" ? "Cancelled" : "Delivered"} · ${date}${dateNote}`;
 }
 
 function RiderWorkspaceContent({ section, user, orders, notify }) {
@@ -39,6 +50,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const watchRef = useRef(null);
   const activeOrderIdRef = useRef("");
+  const activePanelRef = useRef(null);
   const online = gpsStatus === "online";
 
   const runAction = async (label, task) => {
@@ -64,6 +76,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
 
   useEffect(() => {
     activeOrderIdRef.current = active?.id || "";
+    if (activePanelRef.current) activePanelRef.current.scrollTop = 0;
   }, [active?.id]);
 
   useEffect(() => {
@@ -134,7 +147,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
       await updateOrder(order.id, { riderId: user.uid, assignedAt: Date.now() });
       setSelectedId(order.id);
       navigator.vibrate?.([150, 80, 150]);
-      notify(`${order.id} is now assigned to you.`);
+      notify(`${orderReference(order.id)} is now assigned to you.`);
     });
   };
 
@@ -164,7 +177,9 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const collectedCod = codOrders.filter((order) => order.status === "delivered").reduce((sum, order) => sum + Number(order.total || 0), 0);
   const remittedCod = codOrders.filter((order) => order.codRemittedAt).reduce((sum, order) => sum + Number(order.total || 0), 0);
   const cashToCollect = codOrders.filter((order) => order.status !== "delivered" && order.status !== "cancelled").reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const cashToRemit = codOrders.filter(isUnremittedCod).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashAwaitingHandoff = codOrders.filter((order) => codRemittanceStatus(order) === "ready").reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashAwaitingOwner = codOrders.filter((order) => ["awaiting-owner", "disputed"].includes(codRemittanceStatus(order))).reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const cashToRemit = cashAwaitingHandoff + cashAwaitingOwner;
   const orderItems = (order) => order?.items?.map((item) => `${item.qty}x ${item.name}`).join(", ") || "Foodtrip order";
   const orderCount = (order) => order?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 0;
   const addressLabel = (value) => value || "Counter pickup";
@@ -182,16 +197,9 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
   const recordCodHandoff = async (order) => {
     await runAction(`Recording ${order.id} cash handoff`, async () => {
       await updateOrder(order.id, { codHandoffRequested: true });
-      notify(`${order.id} cash handoff is waiting for owner confirmation.`);
+      notify(`${orderReference(order.id)} cash handoff is waiting for owner confirmation.`);
     });
   };
-  const codHandoffLabel = (order) => order.codRemittedAt
-    ? "Owner confirmed"
-    : order.codHandoffRequestedAt
-      ? "Awaiting owner confirmation"
-      : order.status === "delivered"
-        ? "Ready to hand over"
-        : "Collection pending";
 
   const googleMapsUrl = active
     ? `https://www.google.com/maps/dir/?api=1&destination=${deliveryPin ? `${deliveryPin[0]},${deliveryPin[1]}` : encodeURIComponent(active.address)}&travelmode=driving`
@@ -232,8 +240,8 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
             <span>{currency(collectedCod)} collected from completed COD orders</span>
           </div>
           <div className="rider-hero-metrics">
-            <div><small>COD orders</small><strong>{codOrders.length}</strong></div>
-            <div><small>Collected</small><strong>{currency(collectedCod)}</strong></div>
+            <div><small>Awaiting handoff</small><strong>{currency(cashAwaitingHandoff)}</strong></div>
+            <div><small>Awaiting owner</small><strong>{currency(cashAwaitingOwner)}</strong></div>
             <div><small>Remitted</small><strong>{currency(remittedCod)}</strong></div>
           </div>
         </section>
@@ -241,21 +249,27 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
         <section className="rider-ledger-list" aria-label="COD order ledger">
           <div className="rider-section-heading">
             <div><p className="eyebrow text-danger">Cash delivery list</p><h2>Payment handoff</h2></div>
-            <span>{codOrders.filter(isUnremittedCod).length} to remit</span>
+            <span>{codOrders.filter((order) => order.status === "delivered" && !order.codRemittedAt).length} outstanding</span>
           </div>
           {codOrders.length === 0 && <div className="empty-state compact">No COD orders assigned.</div>}
           {codOrders.map((order) => (
-            <article className="rider-ledger-row" key={order.id}>
+            <article className={`rider-ledger-row rider-remittance-${codRemittanceStatus(order)}`} key={order.id}>
               <div className="rider-order-avatar"><Wallet size={18} aria-hidden="true" /></div>
-              <div>
-                <strong>{order.id}</strong>
+              <div className="rider-ledger-copy">
+                <strong>{orderReference(order.id)}</strong>
                 <small>{order.customerName}</small>
                 <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
+                <dl className="rider-remittance-dates">
+                  <div><dt>Delivered</dt><dd>{remittanceTimestamp(order.deliveredAt)}</dd></div>
+                  <div><dt>Cash handoff</dt><dd>{remittanceTimestamp(order.codHandoffRequestedAt)}</dd></div>
+                  <div><dt>Owner confirmation</dt><dd>{remittanceTimestamp(order.codRemittedAt)}</dd></div>
+                </dl>
+                {order.codDiscrepancy?.status === "open" && <div className="rider-remittance-warning" role="status"><AlertTriangle size={15} aria-hidden="true" /><span><strong>Cash discrepancy</strong>{order.codDiscrepancy.reason}</span></div>}
+                {order.codRemittedAt && <small>Confirmed by {order.codRemittedByName || "Owner"}</small>}
               </div>
               <div className="rider-ledger-total">
                 <strong>{currency(order.total)}</strong>
-                <span className={`status status-${order.status}`}>{statusLabel(order.status)}</span>
-                <small className="rider-cod-handoff-state">{codHandoffLabel(order)}</small>
+                <span className={`rider-remittance-status ${codRemittanceStatus(order)}`}>{codRemittanceStatusLabel(order)}</span>
                 {order.status === "delivered" && !order.codRemittedAt && !order.codHandoffRequestedAt && <button className="rider-ledger-handoff" disabled={Boolean(busyAction)} onClick={() => recordCodHandoff(order)}>{busyAction.includes(order.id) ? "Recording..." : "Record cash handoff"}</button>}
               </div>
             </article>
@@ -300,16 +314,19 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
             <span>{activeDeliveries.length} active</span>
           </div>
           {assignedOrders.length === 0 && <div className="empty-state compact">No orders assigned yet.</div>}
-          {assignedOrders.map((order) => (
+          {assignedOrders.map((order, index) => (
+            <Fragment key={order.id}>
+            {deliveryDateGroup(order) !== deliveryDateGroup(assignedOrders[index - 1]) && <h3 className="rider-delivery-date">{deliveryDateGroup(order)}</h3>}
             <button className={`rider-order-card ${active?.id === order.id ? "active" : ""}`} key={order.id} onClick={() => setSelectedId(order.id)}>
               <span className="rider-order-avatar"><PackageIcon size={18} aria-hidden="true" /></span>
               <span className="rider-order-copy">
-                <span><strong>{order.id}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></span>
+                <span><strong>{orderReference(order.id)}</strong><span className={`status status-${order.status}`}>{statusLabel(order.status)}</span></span>
                 <small>{order.customerName}</small>
                 <em><MapPin size={13} aria-hidden="true" /> {hasDeliveryPin(order) ? "Pin confirmed" : addressLabel(order.address)}</em>
               </span>
               <span className="rider-order-total">{currency(order.total)}</span>
             </button>
+            </Fragment>
           ))}
 
           {availableOrders.length > 0 && (
@@ -324,7 +341,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                   <article className="rider-job-card" key={order.id}>
                     <div className="rider-order-avatar"><Clock size={18} aria-hidden="true" /></div>
                     <div>
-                      <strong>{order.id}</strong>
+                      <strong>{orderReference(order.id)}</strong>
                       <small>{orderItems(order)}</small>
                       <span><MapPin size={13} aria-hidden="true" /> {addressLabel(order.address)}</span>
                       <div className="rider-job-facts"><em>{estimate ? `${estimate.distanceLabel} - ${estimate.label}` : "Route pending"}</em><em>{pinQuality(order)}</em><em>{order.paymentMethod === "cod" ? `COD ${currency(order.total)}` : String(order.paymentMethod || "paid").toUpperCase()}</em></div>
@@ -337,9 +354,9 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
           )}
         </section>
 
-        <section className="rider-active-panel" aria-label="Active delivery">
+        <section ref={activePanelRef} className="rider-active-panel" aria-label="Active delivery">
           <div className="rider-active-header">
-            <div><p className="eyebrow text-danger">Current route</p><h2>{active ? active.id : "No active order"}</h2></div>
+            <div><p className="eyebrow text-danger">Current route</p><h2>{active ? orderReference(active.id) : "No active order"}</h2></div>
             {active && <span className={`status status-${active.status}`}>{statusLabel(active.status)}</span>}
           </div>
           {active ? (
@@ -360,7 +377,7 @@ function RiderWorkspaceContent({ section, user, orders, notify }) {
                 <div><small>Customer</small><strong>{active.customerName}</strong></div>
                 <div><small>Items</small><strong>{orderCount(active)} total</strong><span>{orderItems(active)}</span></div>
                 <div><small>Payment</small><strong>{active.paymentMethod?.toUpperCase()} - {currency(active.total)}</strong></div>
-                <div><small>COD collection</small><strong>{active.paymentMethod === "cod" ? currency(active.total) : "Not COD"}</strong><span>{active.paymentMethod === "cod" ? codHandoffLabel(active) : "No cash collection"}</span></div>
+                <div><small>COD collection</small><strong>{active.paymentMethod === "cod" ? currency(active.total) : "Not COD"}</strong><span>{active.paymentMethod === "cod" ? codRemittanceStatusLabel(active) : "No cash collection"}</span></div>
                 <div><small>Delivery pin</small><strong>{deliveryPin ? "Confirmed" : "Missing"}</strong><span>{deliveryPin ? `${deliveryPin[0].toFixed(5)}, ${deliveryPin[1].toFixed(5)}` : "Use typed address"}</span></div>
                 <div><small>Route ETA</small><strong>{routeEstimate ? routeEstimate.label : "Address only"}</strong><span>{routeEstimate ? routeEstimate.distanceLabel : "Open navigation for route"}</span></div>
               </div>

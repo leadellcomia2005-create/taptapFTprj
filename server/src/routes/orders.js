@@ -102,7 +102,8 @@ export function createOrdersRouter({ config, firebase, authentication, realtime,
       `order:${req.params.orderId}`,
       "role:owner",
       "role:staff",
-      `user:${result.order.customerId}`
+      `user:${result.order.customerId}`,
+      ...(result.order.riderId ? [`user:${result.order.riderId}`] : [])
     ], "order:status-updated", { id: req.params.orderId, ...result });
     if (result.changes.riderId) {
       realtime.emit(`user:${result.changes.riderId}`, "order:assigned", { id: req.params.orderId, order: result.order });

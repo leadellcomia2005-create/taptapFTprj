@@ -634,6 +634,14 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
 });
 
 test("owner inventory advisor shows a short summary, Groq action, and local fallback", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("taptap-demo-data", JSON.stringify({ inventory: {
+      "bangus-meal": { stock: 0, reorderPoint: 10 },
+      "chibu-meal": { stock: 1, reorderPoint: 10 },
+      "tapa-meal": { stock: 2, reorderPoint: 10 },
+      "porkchop-meal": { stock: 3, reorderPoint: 10 }
+    } }));
+  });
   await page.route("**/api/status", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ services: { firebase: false, socket: false, groq: true, openai: false, dialogflow: false, paymongo: false, twilio: false } })
@@ -671,6 +679,10 @@ test("owner inventory advisor shows a short summary, Groq action, and local fall
   await expect(observation).toBeHidden();
   await advisor.getByText("Supporting details", { exact: true }).click();
   await expect(observation).toBeVisible();
+  const shortlist = advisor.getByRole("region", { name: "Restock first" });
+  await expect(shortlist.getByRole("listitem")).toHaveCount(3);
+  await expect(shortlist.getByRole("listitem").first()).toContainText("Bangus Meal");
+  await expect(shortlist.getByRole("listitem").first()).toContainText("0 on hand · Reorder at 10 · 0 sold");
   await expectNoHorizontalOverflow(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await expectNoHorizontalOverflow(page);
@@ -684,6 +696,8 @@ test("owner inventory advisor shows a short summary, Groq action, and local fall
   await expect(advisor.getByRole("region", { name: "Inventory summary" })).toBeVisible();
   await expect(advisor.getByRole("region", { name: "Recommended next step" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+  await advisor.getByRole("button", { name: "Open Inventory" }).click();
+  await expect(page.getByRole("heading", { name: "Inventory", exact: true })).toBeVisible();
 });
 
 test("staff can focus, filter, and add a unique POS product from the keyboard", async ({ page }) => {

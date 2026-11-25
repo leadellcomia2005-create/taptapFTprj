@@ -139,9 +139,11 @@
 .owner-ai-details { border-top: 1px solid var(--owner-border); }
 .owner-ai-details summary { min-height: 44px; padding-block: 12px; width: fit-content; color: var(--red-dark); font-weight: 700; cursor: pointer; }
 .owner-ai-stock-details { display: grid; gap: 8px; overflow-wrap: anywhere; }
+.owner-ai-stock-details h4 { margin: 4px 0 8px; font-size: 14px; font-weight: 700; }
 .owner-ai-stock-details ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .owner-ai-stock-details li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; border-top: 1px solid var(--owner-border); padding-block: 8px; }
 .owner-ai-stock-details li span { color: var(--muted); }
+.owner-ai-inventory-link { justify-self: start; min-height: 44px; }
 .app-shell .owner-listing-page .owner-ai-evidence { gap: 10px; }
 .app-shell .owner-listing-page .owner-ai-evidence > div { min-height: 104px; padding: 14px; background: #fff9f1; border-color: var(--owner-border); border-top: 3px solid #c94b35; border-radius: 10px; }
 .app-shell .owner-listing-page .owner-ai-evidence > div:nth-child(2) { border-top-color: #d79a37; }

@@ -927,14 +927,18 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
               <div className="owner-ai-stock-details">
                 <p>{countLabel(insight.evidence.inventoryCount, "product")} checked · {countLabel(insight.evidence.orderCount, "paid order")} in the selected sales period</p>
                 {insight.observation && <p>{insight.observation}</p>}
-                {insight.evidence.stockRisks.length > 0 && <ul>
-                  {insight.evidence.stockRisks.map((item) => <li key={item.id || item.name}>
-                    <strong>{item.name}</strong>
-                    <span>{item.stock} on hand · Reorder at {item.reorderPoint} · {item.unitsSold} sold{item.unavailable && item.stock > 0 ? " · Marked unavailable" : ""}</span>
-                  </li>)}
-                </ul>}
+                {insight.evidence.stockRisks.length > 0 && <section aria-labelledby="owner-restock-heading">
+                  <h4 id="owner-restock-heading">Restock first</h4>
+                  <ul>
+                    {insight.evidence.stockRisks.slice(0, 3).map((item) => <li key={item.id || item.name}>
+                      <strong>{item.name}</strong>
+                      <span>{item.stock} on hand · Reorder at {item.reorderPoint} · {item.unitsSold} sold{item.unavailable && item.stock > 0 ? " · Marked unavailable" : ""}</span>
+                    </li>)}
+                  </ul>
+                </section>}
               </div>
             </details>
+            <button type="button" className="btn btn-outline-dark owner-ai-inventory-link" onClick={() => onNavigate?.("owner-inventory")}>Open Inventory</button>
           </div>}
           <div className="owner-ai-footer">
             <small>{insight?.generatedAt ? `${insight.cached ? "Reused recent analysis from" : "Last generated"} ${new Date(insight.generatedAt).toLocaleString("en-PH")}${insight.provider === "groq" ? " with Groq" : " using local analysis"}.` : "No analysis generated yet."}</small>

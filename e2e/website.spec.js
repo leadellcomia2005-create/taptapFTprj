@@ -633,7 +633,7 @@ test("owner reports and staff POS/order queue are reachable", async ({ page }) =
   expect(staffRuntime.deferredRequests).toEqual([]);
 });
 
-test("owner Groq KPI advisor renders structured review-only recommendations", async ({ page }) => {
+test("owner inventory advisor shows a short summary, Groq action, and local fallback", async ({ page }) => {
   await page.route("**/api/status", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ services: { firebase: false, socket: false, groq: true, openai: false, dialogflow: false, paymongo: false, twilio: false } })
@@ -658,19 +658,31 @@ test("owner Groq KPI advisor renders structured review-only recommendations", as
   }));
 
   await loginAs(page, "owner");
-  const advisor = page.locator(".owner-decision-card");
-  await expect(advisor.getByRole("heading", { name: "AI KPI Advisor" })).toBeVisible();
-  await expect(advisor.getByText("Groq ready")).toHaveCount(0);
-  await advisor.getByLabel("Analysis period").selectOption("7d");
+  const advisor = page.locator("#owner-ai-advisor");
+  await expect(advisor.getByRole("heading", { name: "AI Inventory Advisor" })).toBeVisible();
+  await advisor.getByLabel("Sales period").selectOption("7d");
+  const request = page.waitForRequest("**/api/insights");
   await advisor.getByRole("button", { name: "Generate analysis" }).click();
-  await expect(advisor.getByText("Bangus Meal needs owner attention.")).toBeVisible();
-  await expect(advisor.getByText("Discussion", { exact: true })).toBeVisible();
-  await expect(advisor).toContainText("Review the recorded stock count before replenishing.");
-  await expect(advisor.getByRole("region", { name: "Analysis evidence" })).toBeVisible();
-  await expect(advisor.getByText("Stock risks", { exact: true })).toBeVisible();
-  await expect(advisor.getByText("Reorder priorities", { exact: true })).toBeVisible();
-  await expect(advisor.getByText("+16")).toBeVisible();
+  expect((await request).postDataJSON()).toMatchObject({ period: "7d" });
+  expect((await request).postDataJSON()).not.toHaveProperty("decisionSupport");
+  await expect(advisor.getByRole("region", { name: "Inventory summary" })).toContainText(/reorder point/);
+  await expect(advisor.getByRole("region", { name: "Recommended next step" })).toContainText("Review the Bangus Meal reorder recommendation");
+  const observation = advisor.getByText("Bangus Meal needs owner attention.", { exact: true });
+  await expect(observation).toBeHidden();
+  await advisor.getByText("Supporting details", { exact: true }).click();
+  await expect(observation).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expectNoHorizontalOverflow(page);
   await expect(advisor).toContainText("Recommendations require owner review");
+
+  await page.route("**/api/insights", (route) => route.fulfill({ status: 503, json: { error: "Test outage" } }));
+  await advisor.getByLabel("Sales period").selectOption("today");
+  await expect(advisor.getByRole("region", { name: "Inventory summary" })).toHaveCount(0);
+  await advisor.getByRole("button", { name: "Generate analysis" }).click();
+  await expect(advisor.getByRole("alert")).toContainText("The local analysis is shown below.");
+  await expect(advisor.getByRole("region", { name: "Inventory summary" })).toBeVisible();
+  await expect(advisor.getByRole("region", { name: "Recommended next step" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 

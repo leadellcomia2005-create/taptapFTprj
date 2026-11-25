@@ -136,6 +136,12 @@
 .app-shell .owner-listing-page .owner-ai-empty strong { font-size: 17px; }
 .app-shell .owner-listing-page .owner-ai-error { margin: 20px 28px 0; font-size: 13px; }
 .app-shell .owner-listing-page .owner-ai-result { gap: 18px; padding: 26px 28px 30px; }
+.owner-ai-details { border-top: 1px solid var(--owner-border); }
+.owner-ai-details summary { min-height: 44px; padding-block: 12px; width: fit-content; color: var(--red-dark); font-weight: 700; cursor: pointer; }
+.owner-ai-stock-details { display: grid; gap: 8px; overflow-wrap: anywhere; }
+.owner-ai-stock-details ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.owner-ai-stock-details li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; border-top: 1px solid var(--owner-border); padding-block: 8px; }
+.owner-ai-stock-details li span { color: var(--muted); }
 .app-shell .owner-listing-page .owner-ai-evidence { gap: 10px; }
 .app-shell .owner-listing-page .owner-ai-evidence > div { min-height: 104px; padding: 14px; background: #fff9f1; border-color: var(--owner-border); border-top: 3px solid #c94b35; border-radius: 10px; }
 .app-shell .owner-listing-page .owner-ai-evidence > div:nth-child(2) { border-top-color: #d79a37; }

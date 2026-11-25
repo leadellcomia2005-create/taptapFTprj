@@ -7,7 +7,7 @@ import { completeOrderManualRefund, decideOrderRefund, updateOrder } from "../..
 import { saveOwnerPlanningPreferences, saveOwnerRecommendationStatuses, subscribeOwnerWorkspacePreferences } from "../../services/firebase/operations";
 import { bestSellers, orderPrepClock, peakOrderHours, slowMovingItems } from "../../utils/operations";
 import { calculateOwnerDecisionSupport } from "../../utils/ownerKpis";
-import { buildOwnerAnalysisScope, localAnalysisDiscussion } from "../../utils/ownerAnalysis";
+import { buildOwnerAnalysisScope, summarizeInventory } from "../../utils/ownerAnalysis";
 import { codRemittanceStatus, codRemittanceStatusLabel, isCodDelivery, remittanceTimestamp } from "../../utils/codRemittance";
 import { orderReference } from "../../utils/display";
 import { AdminCleanupModule, ApprovalQueueModule, ComplaintResolutionModule, InventoryModule, MenuManagementModule, OrderManagement, ReviewModerationModule, SettingsModule, ShiftLogsModule } from "./SharedWorkspaceModules";
@@ -22,7 +22,6 @@ const SalesChart = lazy(() => import("../../components/SalesChart"));
 const countLabel = (value, singular, plural = `${singular}s`) => `${value} ${Number(value) === 1 ? singular : plural}`;
 const signedPercent = (value) => `${Number(value) >= 0 ? "+" : ""}${value}%`;
 const hourLabel = (hour) => new Date(2026, 0, 1, Number(hour || 0)).toLocaleTimeString("en-PH", { hour: "numeric" });
-const analysisDate = (value) => new Date(value).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
 const dayMs = 24 * 60 * 60 * 1000;
 const salesChartRangeForDays = (days = 7) => {
   const to = new Date();
@@ -251,11 +250,8 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
     .sort((left, right) => Number(right.codHandoffRequestedAt || right.deliveredAt || right.updatedAt || 0)
       - Number(left.codHandoffRequestedAt || left.deliveredAt || left.updatedAt || 0));
   const unresolvedComplaints = complaints.filter((complaint) => !["resolved", "closed"].includes(String(complaint.status || "open").toLowerCase()));
-  const aiReady = Boolean(serviceStatus?.groq || serviceStatus?.openai);
+  const aiReady = Boolean(serviceStatus?.groq);
   const insightCategories = [...new Set(inventory.map((item) => item.category).filter(Boolean))].sort();
-  const analysisScope = buildOwnerAnalysisScope({ orders, inventory, period: insightPeriod, category: insightCategory, now, isRevenueOrder });
-  const insightOrders = analysisScope.orders;
-  const insightInventory = analysisScope.inventory;
   const decisionSupport = useMemo(() => calculateOwnerDecisionSupport({
     orders,
     inventory,
@@ -401,44 +397,40 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
   };
   const generateInsight = async () => {
     setInsightError("");
-    const scopedDecisionSupport = calculateOwnerDecisionSupport({
-      orders: insightOrders,
-      inventory: insightInventory,
-      complaints: insightCategory === "all" ? complaints.filter((item) => Number(item.createdAt || 0) >= analysisScope.evidence.startAt) : [],
-      shiftLogs: insightCategory === "all" ? shiftLogs.filter((item) => Number(item.closedAt || item.endAt || item.createdAt || 0) >= analysisScope.evidence.startAt) : [],
-      targets: planning,
+    setInsight(null);
+    const scope = buildOwnerAnalysisScope({
+      orders, inventory, period: insightPeriod, category: insightCategory,
       isRevenueOrder
     });
-    const evidence = analysisScope.evidence;
-    scopedDecisionSupport.comparisons = insightPeriod === "all" ? [] : [{
-      label: insightPeriod === "today" ? "Today vs yesterday" : insightPeriod === "7d" ? "Last 7 days vs previous 7" : "Last 30 days vs previous 30",
-      currentSales: evidence.sales,
-      previousSales: evidence.previousSales,
-      salesChange: Number((evidence.sales - evidence.previousSales).toFixed(2)),
-      salesChangePercent: evidence.previousSales > 0 ? Number(((evidence.sales - evidence.previousSales) / evidence.previousSales * 100).toFixed(1)) : null,
-      currentOrders: evidence.orderCount,
-      previousOrders: evidence.previousOrderCount,
-      destination: "owner-sales"
-    }];
-    const analysis = { evidence: analysisScope.evidence, priorities: scopedDecisionSupport.priorities };
+    const { evidence } = scope;
+    const { summary, action } = summarizeInventory(evidence);
     const localResult = () => ({
-      text: `${analysis.evidence.orderCount} paid orders and ${currency(analysis.evidence.sales)} in recorded ${insightCategory === "all" ? "sales" : "item sales"} for the selected period.`,
-      discussion: localAnalysisDiscussion(analysis.evidence), analysis, generatedAt: Date.now(), provider: "local"
+      summary, action, evidence, generatedAt: Date.now(), provider: "local"
     });
-    if (!aiReady) {
+    if (!aiReady || !evidence.inventoryCount) {
       setInsight(localResult());
       setInsightStatus("local");
-      notify("Recorded-data analysis generated locally.");
       return;
     }
     setInsightStatus("loading");
     try {
-      const result = await api.insights(analysisScope.salesOrders, insightInventory, insightPeriod, insightCategory, scopedDecisionSupport);
-      setInsight({ ...result, analysis });
+      const sales = scope.salesOrders.map(({ createdAt, total, status, items }) => ({
+        createdAt, total, status,
+        items: (Array.isArray(items) ? items : []).map(({ name, qty, quantity }) => ({ name, qty, quantity }))
+      }));
+      const stock = scope.inventory.map(({ name, category, stock, reorderPoint, unavailable, price }) => ({
+        name, category, stock, reorderPoint, unavailable, price
+      }));
+      const result = await api.insights(sales, stock, insightPeriod, insightCategory);
+      if (result.provider !== "groq" || !result.insight?.ownerAction) throw new Error("Groq did not return an inventory recommendation.");
+      setInsight({
+        ...localResult(), provider: "groq", generatedAt: result.generatedAt, cached: result.cached,
+        action: result.insight.ownerAction, observation: result.insight.summary
+      });
       setInsightStatus("success");
     } catch (error) {
       setInsight(localResult());
-      setInsightError(error.message || "Groq could not generate an analysis. The local recommendation is shown instead.");
+      setInsightError(error.message || "Groq could not generate an analysis.");
       setInsightStatus("error");
     }
   };
@@ -915,40 +907,34 @@ function OwnerWorkspaceContent({ section, user, orders, inventory, reviews, comp
         <div className="dashboard-card"><h3>Staff shift performance</h3>{shiftPerformance.length === 0 && <div className="empty-chat">Closed shifts will appear here.</div>}{shiftPerformance.map((shift) => <div className="alert-row" key={shift.id}><span><strong>{shift.staffName}</strong><small>{countLabel(shift.orderCount, "order")} handled; cash variance {currency(shift.variance)}</small></span><b>{currency(shift.cashSales || shift.expectedCash)} in cash sales</b></div>)}</div>
         <div className="dashboard-card ai-insight owner-decision-card" id="owner-ai-advisor" aria-live="polite">
           <div className="owner-ai-heading">
-            <div><p className="eyebrow">Decision intelligence</p><h3>AI KPI Advisor</h3><small>Groq explains recorded KPIs and trends. Recommendations require owner review.</small></div>
+            <div><h3>AI Inventory Advisor</h3><small>Review current stock and recent sales activity. Recommendations require owner review.</small></div>
           </div>
           <div className="owner-ai-controls">
-            <label>Analysis period<select value={insightPeriod} onChange={(event) => { setInsightPeriod(event.target.value); setInsight(null); setInsightStatus("idle"); setInsightError(""); }} disabled={insightStatus === "loading"}><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All records</option></select></label>
+            <label>Sales period<select value={insightPeriod} onChange={(event) => { setInsightPeriod(event.target.value); setInsight(null); setInsightStatus("idle"); setInsightError(""); }} disabled={insightStatus === "loading"}><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All records</option></select></label>
             <label>Product category<select value={insightCategory} onChange={(event) => { setInsightCategory(event.target.value); setInsight(null); setInsightStatus("idle"); setInsightError(""); }} disabled={insightStatus === "loading"}><option value="all">All categories</option>{insightCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
           </div>
-          {insightStatus === "idle" && <div className="owner-ai-empty"><Sparkles aria-hidden="true" /><div><strong>Generate a KPI analysis</strong><p>Review recorded performance, supporting figures, a short discussion, and owner actions for the selected records.</p></div></div>}
-          {insightStatus === "loading" && <div className="owner-ai-empty loading" role="status"><span className="spinner-border spinner-border-sm" aria-hidden="true" /><div><strong>Analyzing calculated KPIs...</strong><p>This normally takes only a few seconds.</p></div></div>}
+          {insightStatus === "loading" && <div className="owner-ai-empty loading" role="status"><span className="spinner-border spinner-border-sm" aria-hidden="true" /><strong>Analyzing inventory…</strong></div>}
           {insightError && <div className="owner-ai-error" role="alert"><strong>Groq analysis unavailable</strong><span>{insightError} The local analysis is shown below.</span></div>}
           {insight && <div className="owner-ai-result">
-            {insight.analysis && <section className="owner-ai-evidence" aria-label="Analysis evidence">
-              <div><span>Records used</span><strong>{analysisDate(insight.analysis.evidence.startAt)}–{analysisDate(insight.analysis.evidence.endAt)}</strong><small>{insight.analysis.evidence.category === "all" ? "All products" : insight.analysis.evidence.category}</small></div>
-              <div><span>Paid orders</span><strong>{insight.analysis.evidence.orderCount}</strong><small>{insight.analysis.evidence.unitsSold} units sold</small></div>
-              <div><span>{insight.analysis.evidence.category === "all" ? "Paid sales" : "Item sales"}</span><strong>{currency(insight.analysis.evidence.sales)}</strong><small>{insight.analysis.evidence.topProduct ? `Top product: ${insight.analysis.evidence.topProduct.name} (${insight.analysis.evidence.topProduct.units} units)` : "No product sales recorded"}</small></div>
-              <div><span>Previous period</span><strong>{insight.analysis.evidence.previousOrderCount ? currency(insight.analysis.evidence.previousSales) : "No comparison"}</strong><small>{insight.analysis.evidence.previousOrderCount ? `${insight.analysis.evidence.previousOrderCount} paid orders` : "No paid orders in the preceding period"}</small></div>
-            </section>}
-            {insight.analysis?.evidence.orderCount < 5 && <p className="owner-ai-limited" role="note">Limited sales data: {insight.analysis.evidence.orderCount} paid orders in this selection. Treat patterns as preliminary.</p>}
-            {insight.insight?.dataQuality && <section className={`owner-ai-quality ${insight.insight.dataQuality.confidence}`}>
-              <div><span>Data quality</span><strong>{insight.insight.dataQuality.label}</strong></div>
-              {insight.insight.dataQuality.warnings.length > 0
-                ? <ul>{insight.insight.dataQuality.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                : <p>The selected records are sufficient for cautious trend analysis.</p>}
-            </section>}
-            <section className="owner-ai-summary"><span>Summary</span><p>{insight.insight?.summary || insight.text}</p></section>
-            {insight.analysis && <section className="owner-ai-section owner-ai-top-actions"><div><span>Review these actions</span><small>Calculated from the selected records; Owner review required</small></div>{!insight.analysis.priorities.length ? <p>No configured KPI threshold currently requires action.</p> : insight.analysis.priorities.slice(0, 3).map((item) => <article key={item.id}><div><strong>{item.action}</strong><small>{item.detail}</small></div><span className={`owner-ai-severity ${item.level}`}>{item.level}</span><b>{item.role}; {item.deadline}</b></article>)}</section>}
-            <section className="owner-ai-summary owner-ai-discussion"><span>Discussion</span><p>{insight.insight?.discussion || insight.discussion || (insight.analysis ? localAnalysisDiscussion(insight.analysis.evidence) : "Discussion is unavailable for these records.")}</p></section>
-            {insight.insight && <>
-              <div className="owner-ai-counts"><span><strong>{insight.insight.stockRisks.length}</strong> stock risks</span><span><strong>{insight.insight.reorderRecommendations.length}</strong> reorder priorities</span><span><strong>{insight.insight.wasteRisks.length}</strong> waste risks</span></div>
-              <div className="owner-ai-observations"><section><span>Sales trend</span><p>{insight.insight.salesTrend}</p></section><section><span>Peak period</span><p>{insight.insight.peakPeriod}</p></section></div>
-              <section className="owner-ai-section"><div><span>Stock risks</span><small>Based on current stock and reorder points</small></div>{insight.insight.stockRisks.length === 0 ? <p>No immediate stock risk in the selected records.</p> : insight.insight.stockRisks.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.reason}</small></div><span className={`owner-ai-severity ${item.severity}`}>{item.severity}</span><b>{item.currentStock} / {item.reorderPoint}</b></article>)}</section>
-              <section className="owner-ai-section"><div><span>Reorder priorities</span><small>Suggested additions only</small></div>{insight.insight.reorderRecommendations.length === 0 ? <p>No reorder recommendation from the selected records.</p> : insight.insight.reorderRecommendations.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.reason}</small></div><span>{item.currentStock} now</span><b>+{item.suggestedQuantity}</b></article>)}</section>
-              <section className="owner-ai-section"><div><span>Waste watch</span><small>Products needing owner attention</small></div>{insight.insight.wasteRisks.length === 0 ? <p>No clear waste risk in the selected records.</p> : insight.insight.wasteRisks.map((item) => <article key={item.product}><div><strong>{item.product}</strong><small>{item.risk}</small></div><span>{item.action}</span></article>)}</section>
-              <section className="owner-ai-action"><span>Recommended owner action</span><p>{insight.insight.ownerAction}</p></section>
-            </>}
+            <section className="owner-ai-summary" aria-label="Inventory summary">
+              <span>Inventory summary</span><p>{insight.summary}</p>
+            </section>
+            <section className="owner-ai-action" aria-label="Recommended next step">
+              <span>Recommended next step</span><p>{insight.action}</p>
+            </section>
+            <details className="owner-ai-details">
+              <summary>Supporting details</summary>
+              <div className="owner-ai-stock-details">
+                <p>{countLabel(insight.evidence.inventoryCount, "product")} checked · {countLabel(insight.evidence.orderCount, "paid order")} in the selected sales period</p>
+                {insight.observation && <p>{insight.observation}</p>}
+                {insight.evidence.stockRisks.length > 0 && <ul>
+                  {insight.evidence.stockRisks.map((item) => <li key={item.id || item.name}>
+                    <strong>{item.name}</strong>
+                    <span>{item.stock} on hand · Reorder at {item.reorderPoint} · {item.unitsSold} sold{item.unavailable && item.stock > 0 ? " · Marked unavailable" : ""}</span>
+                  </li>)}
+                </ul>}
+              </div>
+            </details>
           </div>}
           <div className="owner-ai-footer">
             <small>{insight?.generatedAt ? `${insight.cached ? "Reused recent analysis from" : "Last generated"} ${new Date(insight.generatedAt).toLocaleString("en-PH")}${insight.provider === "groq" ? " with Groq" : " using local analysis"}.` : "No analysis generated yet."}</small>
